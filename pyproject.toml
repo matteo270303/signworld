@@ -1,0 +1,97 @@
+[project]
+name = "signworld"
+version = "0.1.0"
+description = "WorldSign: an energy-based world model for multilingual sign-language retrieval."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "bgutil-ytdlp-pot-provider==1.3.1",
+    "decord>=0.6",
+    "huggingface-hub>=0.30",
+    "numpy>=2.0",
+    "onnxruntime-gpu>=1.20,<1.23",
+    "opencv-python-headless>=4.10,<5",
+    "pillow>=11",
+    "pyarrow>=19",
+    "pydantic>=2.10",
+    "pyyaml>=6.0",
+    "requests>=2.32",
+    "rtmlib>=0.0.13",
+    "sentence-transformers>=5.1",
+    "torch>=2.6",
+    "transformers>=4.56",
+    "typer>=0.15",
+    "yt-dlp[curl-cffi,default]>=2026.8.19",
+]
+
+[project.scripts]
+signworld = "signworld.cli:app"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15",
+    "pytest>=8.3",
+    "ruff>=0.11",
+    "types-pyyaml>=6.0",
+    "types-requests>=2.32",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+# A uv-managed interpreter lives on shared storage; system ones (e.g. conda on the login
+# node) are missing on compute nodes and would break the virtual environment there.
+python-preference = "only-managed"
+# rtmlib asks for opencv-python or opencv-contrib-python, which need libGL, absent on the
+# ReCaS nodes; the headless build provides the same cv2 module.
+override-dependencies = [
+    "opencv-python; sys_platform == 'never'",
+    "opencv-contrib-python; sys_platform == 'never'",
+    # rtmlib also asks for the CPU onnxruntime, which shares the module directory of
+    # onnxruntime-gpu and would overwrite its files.
+    "onnxruntime; sys_platform == 'never'",
+]
+
+# CUDA 12.4 builds of torch for the ReCaS H100 nodes; everything else comes from PyPI.
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/signworld"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["B", "C4", "E", "F", "I", "N", "PL", "PTH", "RET", "RUF", "SIM", "UP", "W"]
+
+[tool.ruff.lint.pylint]
+max-args = 6
+
+[tool.ruff.lint.per-file-ignores]
+# Deferred imports keep torch and sentence-transformers out of the download jobs' start-up.
+"src/signworld/analysis_cli.py" = ["PLC0415"]
+"src/signworld/text/embedding.py" = ["PLC0415"]
+"tests/**" = ["PLR0913", "PLR2004"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["decord", "onnxruntime", "pyarrow", "pyarrow.*", "rtmlib", "yt_dlp", "yt_dlp.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]

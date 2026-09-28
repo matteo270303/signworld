@@ -1,0 +1,22 @@
+# Test clips of one dataset, split into shards that run on separate GPU nodes.
+# A shard resumes where it stopped: clips already in its index are skipped.
+#
+# Submit:  condor_submit -name ettore -a 'dataset=youtube_sl25' -a 'shards=4' \
+#              scripts/condor/testdata_build.sub
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/scripts/condor/testdata_build.sh
+arguments  = $(dataset) $(Process) $(shards:4)
+
+output = $(initialdir)/logs/condor/testdata_$(Cluster).$(Process).out
+error  = $(initialdir)/logs/condor/testdata_$(Cluster).$(Process).err
+log    = $(initialdir)/logs/condor/testdata_$(Cluster).log
+
+getenv         = True
+request_cpus   = $(cpus:8)
+request_memory = $(memory:24 GB)
+request_disk   = $(disk:10 GB)
+request_gpus   = 1
+
+queue $(shards:4)

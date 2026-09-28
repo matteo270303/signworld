@@ -1,0 +1,29 @@
+# Fetch one dataset's media in parallel shards on ReCaS.
+#
+# Submit:  condor_submit -name ettore source=youtube_sl25 shards=4 scripts/condor/fetch_media.sub
+# Rescale: condor_rm the cluster and submit again with another shard count; settled items
+#          are skipped whatever the partition.
+#
+# Each job resumes itself (see fetch_media.sh): up to $(max_rounds:72) rounds,
+# $(round_cooldown_s:3600) s apart, the wait doubling after each refused run up to
+# $(max_cooldown_s:86400) s. A job that crashes is restarted up to 5 times; a setup error
+# (exit code 2) is not.
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/scripts/condor/fetch_media.sh
+arguments  = $(source) $(Process) $(shards) $(max_rounds:72) $(round_cooldown_s:3600) $(max_cooldown_s:86400)
+
+output = $(initialdir)/logs/condor/$(source)_$(Cluster).$(Process).out
+error  = $(initialdir)/logs/condor/$(source)_$(Cluster).$(Process).err
+log    = $(initialdir)/logs/condor/$(source)_$(Cluster).log
+
+getenv         = True
+request_cpus   = 1
+request_memory = 3 GB
+request_disk   = 2 GB
+
+max_retries = 5
+retry_until = (ExitCode == 0) || (ExitCode == 2) || (ExitCode == 3)
+
+queue $(shards)

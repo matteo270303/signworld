@@ -1,0 +1,22 @@
+# Run one signworld analysis command on a ReCaS node.
+#
+# Submit:  condor_submit -name ettore -a 'arguments = text embed openasl -c configs/analysis.yaml' \
+#              scripts/condor/analysis.sub
+# Name the job with job=<name>; pass gpus=1 for commands that need a GPU.
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/scripts/condor/analysis.sh
+
+output = $(initialdir)/logs/condor/$(job:analysis)_$(Cluster).out
+error  = $(initialdir)/logs/condor/$(job:analysis)_$(Cluster).err
+log    = $(initialdir)/logs/condor/$(job:analysis)_$(Cluster).log
+
+getenv         = True
+request_cpus   = $(cpus:16)
+request_memory = $(memory:32 GB)
+request_disk   = $(disk:10 GB)
+# GPU commands (pose re-estimation, video features): pass gpus=1.
+request_gpus   = $(gpus:0)
+
+queue

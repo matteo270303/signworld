@@ -1,0 +1,99 @@
+# Manifests, data checks (§4.13.1) and caption embeddings (§4.4.4, PC1).
+# Dataset locations come from the acquisition settings; datasets stay separate.
+
+acquisition_config: configs/acquisition.yaml
+models_root: /lustrehome/mvigone/models
+
+# CPU threads for torch; all cores of a shared node make small computations slower.
+threads: 16
+
+embedding:
+  model_id: google/embeddinggemma-300m
+  # The commit this resolves to is recorded in the embedding fingerprint.
+  revision: main
+  # No task prefix, to match VL-JEPA, which uses EmbeddingGemma as its Y-Encoder without
+  # reporting one; sentence-transformers also prepends nothing by default. [Our reading of
+  # the paper, which never states a prompt.] The fingerprint pins whatever is used here.
+  prompt: ''
+  batch_size: 256
+
+text_geometry:
+  dimensions: [768, 512, 256, 128]
+  # d_MRL keeps, on average, this share of each caption's 10 nearest captions at 768 (PC1).
+  retained_neighbours: 0.9
+  neighbours: 10
+  neighbour_queries: 2000
+  sigreg_samples: 16384
+  sigreg_directions: 256
+  cosine_pairs: 100000
+  spectrum_head: 10
+  seed: 0
+
+# Pre-trained checkpoints inspected by PC5 (pose encoder) and PC6 (video encoder, predictor).
+checkpoints:
+  vjepa2_1_vitl_384:
+    # Exported from torch.hub facebookresearch/vjepa2 (ema_encoder + predictor).
+    path: /lustrehome/mvigone/models/vjepa21/vjepa2_1_vitl_384.pt
+  vjepa2_1_vitb_384:
+    # Released checkpoint of the ViT-B distilled from ViT-G, as torch.hub fetches it.
+    url: https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitb_dist_vitG_384.pt
+    size_bytes: 1664223428
+  unisign_csl_stage1:
+    # Stage 1 of Uni-Sign: pose-only pre-training on CSL-News.
+    repo_id: ZechengLi19/Uni-Sign
+    revision: eab251b7fe7e8521afc0e67be98add670ea40a0d
+    filename: csl_stage1_weight.pth
+
+# Clips cut, cropped and posed for the collaudo, written apart from the datasets.
+test_data:
+  root: /lustrehome/mvigone/data/datiTest
+  clips: 20000          # enough training videos for the pose teachers (§4.4.3)
+  min_duration_s: 1
+  max_duration_s: 20    # p99 of YouTube-SL-25 captions is about 16 s
+  crop_margin: 0.15     # §3.6: signer box enlarged by 15 %
+  size: 256
+  detection_frames: 8
+  seed: 0
+
+# Collaudo of video-pose alignment (A3) and of boxes and pose normalisation (A4).
+pose_checks:
+  # A4, provisional: share of visible boxes allowed beyond the frame; null only reports.
+  # The body leaves the frame in half-body framing by design; to settle on YouTube-SL-25.
+  outside_limits:
+    body: null
+    left: 0.05
+    right: 0.05
+    face_all: 0.01
+  selection_clips: 200    # recompute the frame selection and compare with stored indices
+  alignment_clips: 50     # re-estimate poses on the decoded frames (§4.13.1: 50 clips)
+  contact_sheets: 50      # clips drawn with their articulator boxes (§4.13.1: 50 clips)
+  workers: 16
+  seed: 0
+
+# Which pose latent the physical level predicts (§4.4.3): kinematic, Uni-Sign, MAMP, S-JEPA.
+pose_teachers:
+  min_score: 1.0          # RTMW score below which a keypoint counts as missing
+  width: 256              # S-JEPA / MAMP backbone: 8 layers, d 256, 8 heads
+  depth: 8
+  heads: 8
+  predictor_depth: 5      # S-JEPA predictor
+  decoder_depth: 3        # MAMP decoder
+  mask_ratio: 0.9         # motion-aware masking, as in MAMP and S-JEPA
+  epochs: 100
+  batch_size: 64
+  learning_rate: 1.0e-3
+  min_learning_rate: 1.0e-5
+  warmup_fraction: 0.05
+  weight_decay: 0.05
+  ema_start: 0.999        # EMA momentum 0.999 -> 1.0 on a cosine
+  centre_rate: 0.9
+  probe_clips: 8000       # clips of the linear read-outs, split by video
+  seed: 0
+
+contamination:
+  benchmark: openasl
+  # §3.9: margin around each evaluation clip of the same video.
+  margin_s: 2.0
+  near_duplicate_ratio: 0.9
+  # Same caption within this duration counts as the same clip across splits.
+  duration_tolerance_s: 0.1

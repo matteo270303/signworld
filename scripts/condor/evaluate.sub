@@ -1,0 +1,29 @@
+# The test of a trained WorldSign run (§4.12) on one GPU: every validation measure on the test
+# clips, plus the test's own (ω and plausibility on every clip, language probes).
+# Run it after the training run has finished.
+#
+# Submit (the OpenASL trial run):
+#   condor_submit -name ettore -a 'run=openasl-trial' \
+#       -a 'configs=configs/model/worldsign.yaml configs/model/ablations/arm_A.yaml configs/model/openasl_trial.yaml' \
+#       scripts/condor/evaluate.sub
+# Defaults: checkpoint final (the model at the end of the cooldown; -a 'checkpoint=best' for the
+# best of the constant phase), split test, the OpenASL index. Report: runs/<run>/test_final.json.
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/scripts/condor/evaluate.sh
+arguments  = $(initialdir)/runs/$(run) \
+  $(index:/lustrehome/mvigone/data/training/openasl/index.parquet) \
+  $(split:test) $(checkpoint:final) $(configs)
+
+output = $(initialdir)/logs/condor/evaluate_$(run)_$(Cluster).out
+error  = $(initialdir)/logs/condor/evaluate_$(run)_$(Cluster).err
+log    = $(initialdir)/logs/condor/evaluate_$(run)_$(Cluster).log
+
+getenv         = True
+request_gpus   = 1
+request_cpus   = $(cpus:16)
+request_memory = $(memory:96 GB)
+request_disk   = $(disk:2 GB)
+
+queue

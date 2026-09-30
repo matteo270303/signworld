@@ -1,0 +1,23 @@
+# Stage 0 on the whole corpus, split into shards on separate GPU nodes (pose estimation on GPU).
+# A finished or interrupted shard resumes from its index, so the submission can be repeated.
+#
+# Submit:  condor_submit -name ettore -a 'source=youtube_sl25' \
+#              -a 'output=/lustrehome/mvigone/data/training/youtube_sl25' -a 'shards=32' \
+#              scripts/condor/materialize.sub
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/scripts/condor/materialize.sh
+arguments  = $(source) $(output) $(Process) $(shards:32)
+
+output = $(initialdir)/logs/condor/materialize_$(source)_$(Cluster).$(Process).out
+error  = $(initialdir)/logs/condor/materialize_$(source)_$(Cluster).$(Process).err
+log    = $(initialdir)/logs/condor/materialize_$(source)_$(Cluster).log
+
+getenv         = True
+request_cpus   = $(cpus:8)
+request_memory = $(memory:32 GB)
+request_disk   = $(disk:10 GB)
+request_gpus   = 1
+
+queue $(shards:32)

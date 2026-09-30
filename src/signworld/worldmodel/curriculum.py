@@ -169,3 +169,9 @@ class Curriculum:
 def _set(parameters: Iterable[nn.Parameter], flag: bool) -> None:
     for parameter in parameters:
         parameter.requires_grad_(flag)
+
+
+def trainable_names(model: WorldSign) -> set[str]:
+    """Names of every parameter the curriculum can train: what a checkpoint keeps."""
+    names = {id(p): n for n, p in model.named_parameters()}
+    return {names[id(p)] for group in families(model).values() for p in group}

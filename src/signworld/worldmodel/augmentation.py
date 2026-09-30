@@ -31,6 +31,17 @@ class View:
     def identity(cls) -> "View":
         return cls(1.0, (0.0, 0.0), 1.0, 1.0, 1.0)
 
+    def as_tensor(self) -> Tensor:
+        """(6,) scale, shift x, shift y, brightness, contrast, saturation."""
+        return torch.tensor(
+            [self.scale, *self.shift, self.brightness, self.contrast, self.saturation]
+        )
+
+    @classmethod
+    def from_tensor(cls, values: Tensor) -> "View":
+        scale, x, y, brightness, contrast, saturation = values.tolist()
+        return cls(scale, (x, y), brightness, contrast, saturation)
+
 
 class ClipAugmenter:
     def __init__(self, settings: AugmentationSettings) -> None:
@@ -66,6 +77,21 @@ class ClipAugmenter:
         video = functional.grid_sample(video, grid, align_corners=False, padding_mode="zeros")
         video = _colour(video, view)
         return (video.clamp(0, 1) * 255.0).round().to(torch.uint8).permute(0, 2, 3, 1)
+
+
+def apply_views(frames: Tensor, views: Tensor) -> Tensor:
+    """(batch, T, H, W, 3) uint8 frames, each clip resampled by its view (batch, 6).
+
+    The same function as ``ClipAugmenter.frames``, run where the frames are (the GPU in
+    training): the data loader draws the views and moves keypoints and boxes, which is cheap,
+    and leaves the frames, whose resampling costs ~0.4 s per clip on a CPU.
+    """
+    return torch.stack(
+        [
+            ClipAugmenter.frames(clip, View.from_tensor(view))
+            for clip, view in zip(frames, views, strict=True)
+        ]
+    )
 
 
 def _colour(video: Tensor, view: View) -> Tensor:

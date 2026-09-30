@@ -153,6 +153,8 @@ class SamplingSettings(FrozenModel):
 class AugmentationSettings(FrozenModel):
     """Views, not samples (§3.8): box jitter on video and keypoints alike, colour on video."""
 
+    enabled: bool = True
+    """False: every clip is seen as it was cropped, at every epoch."""
     box_jitter: float = 0.10
     brightness: float = 0.2
     """[Aperto] §3.8 names colour and brightness without values."""
@@ -231,6 +233,62 @@ class TrainingSettings(FrozenModel):
     """P13: steps of the single-batch overfit, with SIGReg off, before a run starts."""
 
 
+class DiagnosticsSettings(FrozenModel):
+    """The fail-fast system during training (§4.13.3-§4.13.5).
+
+    Cadences are in steps of 128 clips: the document's 100 / 500 / 2,000 steps of 1,024 clips
+    become 800 / 4,000 / 16,000. Thresholds are starting points to calibrate in PC7.
+    """
+
+    frequent_every: PositiveInt = 800
+    """Collapse, predictors, read-out, dynamics, keypoints, LoRA, queries, gradients."""
+    rare_every: PositiveInt = 16_000
+    """Temporal order, encoder drift and the plausibility tests (every 2,000 of the document's
+    steps, §4.12.4)."""
+    diagnostic_clips: PositiveInt = 32
+    """Clips per GPU in the extra diagnostic pass of the frequent readings."""
+    probe_clips: PositiveInt = 256
+    """The fixed probe batch: pose target content and isotropy, CKA, encoder drift."""
+    small_clips: PositiveInt = 8
+    """Clips per GPU for the leak test and the attention of the queries."""
+    order_clips: PositiveInt = 64
+    """Validation clips per GPU for the temporal order (omega)."""
+    plausibility_clips: PositiveInt = 32
+    """Validation clips per GPU for the plausibility tests at the rare cadence."""
+    plausibility_masks: PositiveInt = 8
+    """Masks of each kind per clip for Ē_fis in the plausibility tests (as in the test)."""
+    spike_sigma: PositiveFloat = 6.0
+    collapse_ratio: float = 0.5
+    gamma_min: float = 0.3
+    leak_r2: float = 0.98
+    leak_tolerance: float = 1e-4
+    localization_min: float = 0.10
+    order_max: float = 0.95
+    drift_min: float = 0.5
+    spearman_min: float = 0.8
+    conflict_cosine: float = -0.3
+    conflict_readings: PositiveInt = 5
+    """Consecutive frequent readings (5 x 800 = 4,000 steps, the document's 500)."""
+    lora_ratio_max: float = 0.1
+    modality_gap_max: float = 0.95
+    noise_drop_min: float = 0.5
+    share_max: float = 0.9
+    hubness_growth_max: float = 1.5
+    sigreg_growth_max: float = 1.5
+    pose_r2_drop_max: float = 0.02
+    isoscore_min: float = 0.8
+    visible_r2_min: float = 0.9
+    excluded_hands_max: float = 0.5
+    query_cosine_max: float = 0.95
+    duplicate_cosine: float = 0.95
+    """Captions this close (EmbeddingGemma cosine) count as the same in the tolerant R@1."""
+    chance_multiple: float = 5.0
+    ridge_baseline_r1: float | None = None
+    """R@1 of the ridge baseline of PC2 on the same split, for stop F3 [Aperto]."""
+    gate_stops: bool = False
+    """True only for the gate run: a failed stop F1-F3 ends the run (§4.13.5)."""
+
+
 class DataSettings(FrozenModel):
     """Where the clips come from and how they are split and loaded (§3.4, §4.10)."""
 
@@ -242,6 +300,11 @@ class DataSettings(FrozenModel):
     """Share of the channels of each sign language held out for validation [Aperto]."""
     held_out_languages: tuple[str, ...] = ()
     """Sign languages kept out of training entirely: the held-out language split [Aperto]."""
+    split_source: Literal["channel", "manifest"] = "channel"
+    """``channel``: our splits by language, channel and video (§3.4). ``manifest``: the corpus's
+    own splits (a benchmark's train / valid / test), for runs on a benchmark alone."""
+    validation_split: str = "val_channel"
+    """The split validated during training, whose R@1 decides early stopping."""
     seen_video_fraction: float = 0.02
     """Share of the videos of training channels held out, to measure the gap between seen
     channels and held-out channels (§4.13.4) [Aperto]."""
@@ -273,6 +336,7 @@ class WorldSignConfig(FrozenModel):
     text: TextSettings = Field(default_factory=TextSettings)
     training: TrainingSettings = Field(default_factory=TrainingSettings)
     data: DataSettings = Field(default_factory=DataSettings)
+    diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
 
     @model_validator(mode="after")
     def _widths(self) -> Self:

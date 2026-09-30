@@ -276,7 +276,10 @@ def tiny_training(
     teacher: Path | None = None,
     collective: Distributed = SINGLE,
 ) -> tuple[Any, ...]:
-    """A tiny model with its statistics fitted, a short run's settings and the two datasets."""
+    """A tiny model with its statistics fitted, a short run's settings and its datasets.
+
+    Every diagnostic runs at a short cadence, so the whole fail-fast system is exercised.
+    """
     model, config = tiny_worldsign(directory, teacher=teacher, collective=collective)
     training = config.training.model_copy(
         update={
@@ -290,7 +293,21 @@ def tiny_training(
         }
     )
     data = config.data.model_copy(update={"workers": 0, "validation_fraction": 0.5})
-    config = config.model_copy(update={"training": training, "data": data})
+    diagnostics = config.diagnostics.model_copy(
+        update={
+            "frequent_every": 2,
+            "rare_every": 3,
+            "probe_clips": 4,
+            "diagnostic_clips": 4,
+            "small_clips": 2,
+            "order_clips": 2,
+            "plausibility_clips": 2,
+            "plausibility_masks": 2,
+        }
+    )
+    config = config.model_copy(
+        update={"training": training, "data": data, "diagnostics": diagnostics}
+    )
     index = build_training_index(
         corpus.manifest, corpus.records, corpus.caption_rows, DataSettings(validation_fraction=0.5)
     )
@@ -305,4 +322,5 @@ def tiny_training(
     validation = ClipDataset(
         validation_subset(held_out, 4), corpus.embeddings, augmentation=None, box_threshold=0.3
     )
-    return model, config, train_data, validation
+    probe = ClipDataset(train, corpus.embeddings, augmentation=None, box_threshold=0.3)
+    return model, config, train_data, validation, probe

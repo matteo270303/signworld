@@ -63,6 +63,27 @@ def physical_energy(
     return torch.stack(energies).mean()
 
 
+def physical_energy_per_clip(
+    predictions: Sequence[PhysicalPrediction],
+    target: Tensor,
+    confidence: Tensor,
+    context_lambda: float,
+) -> Tensor:
+    """(batch,) E_fis of every clip on its own, averaged over the masks: plausibility (§4.5.3)."""
+    normalized = functional.layer_norm(target.float(), (target.shape[-1],))
+    energies = []
+    for prediction in predictions:
+        masked_error = (prediction.masked.float() - normalized).abs().mean(dim=-1)
+        visible_error = (prediction.visible.float() - normalized).abs().mean(dim=-1)
+        masked = confidence * prediction.masked_count
+        l_pred = (masked * masked_error).sum((1, 2)) / masked.sum((1, 2)).clamp_min(1e-12)
+        visible = confidence * prediction.visible_count
+        weighted = confidence * prediction.visible_weight
+        l_ctx = (weighted * visible_error).sum((1, 2)) / visible.sum((1, 2)).clamp_min(1e-12)
+        energies.append(l_pred + context_lambda * l_ctx)
+    return torch.stack(energies).mean(dim=0)
+
+
 def semantic_energy(predicted: Tensor, target: Tensor) -> Tensor:
     """(batch,) E_sem = 1 - cos(ŷ, ẽ)."""
     energy: Tensor = 1.0 - functional.cosine_similarity(predicted, target, dim=-1)
@@ -142,6 +163,8 @@ class LossTerms:
     parts: dict[str, Tensor] = field(default_factory=dict)
     diagnostics: dict[str, Tensor] = field(default_factory=dict)
     """Values measured without entering the total (SIGReg on a frozen pose, ESP-3)."""
+    samples: dict[str, Tensor] = field(default_factory=dict)
+    """(batch,) energies of every clip, without gradient: ``e_sem`` and ``e_fis``."""
 
 
 class Objective(nn.Module):

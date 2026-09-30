@@ -137,11 +137,16 @@ class ClipMaterializer:
         size: int = 256,
         margin: float = 0.15,
         detection_frames: int = 8,
+        *,
+        contiguous: bool = True,
     ) -> None:
+        """``contiguous``: also estimate the pose of 64 consecutive frames, which only the
+        collaudo reads (§4.13.1); the training corpus skips it, halving the pose cost."""
         self._estimator = estimator
         self._size = size
         self._margin = margin
         self._detection_frames = detection_frames
+        self._contiguous = contiguous
 
     def materialize(self, source: Path, cut: ClipCut, root: Path) -> MaterializedRecord | None:
         """Write the cropped clip and its poses under ``root``; ``None`` without a signer."""
@@ -167,18 +172,19 @@ class ClipMaterializer:
         centre = max(0, len(crops) // 2 - FRAMES_PER_CLIP // 2)
         contiguous = np.clip(np.arange(centre, centre + FRAMES_PER_CLIP), 0, len(crops) - 1)
         pose.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            pose,
-            pose=np.stack([self._estimator.in_box(crops[i], inside) for i in selected]).astype(
+        arrays: dict[str, np.ndarray] = {
+            "pose": np.stack([self._estimator.in_box(crops[i], inside) for i in selected]).astype(
                 np.float16
             ),
-            idx=selected.astype(np.int32),
-            total=np.int32(len(crops)),
-            contiguous_pose=np.stack(
+            "idx": selected.astype(np.int32),
+            "total": np.asarray(len(crops), dtype=np.int32),
+        }
+        if self._contiguous:
+            arrays["contiguous_pose"] = np.stack(
                 [self._estimator.in_box(crops[i], inside) for i in contiguous]
-            ).astype(np.float16),
-            contiguous_idx=contiguous.astype(np.int32),
-        )
+            ).astype(np.float16)
+            arrays["contiguous_idx"] = contiguous.astype(np.int32)
+        np.savez_compressed(pose, **arrays)  # type: ignore[arg-type]  # numpy stubs: **kwds
         return MaterializedRecord(
             cut.clip_id, str(video), str(pose), fps, first, len(crops), signer.crop.tolist()
         )

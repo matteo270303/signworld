@@ -11,7 +11,7 @@ from signworld.worldmodel.data import Collate
 from signworld.worldmodel.model import StepRandomness, WorldSign
 from signworld.worldmodel.trainer import Trainer
 
-from .conftest import needs_hub, synthetic_corpus, tiny_training
+from .conftest import needs_hub, slow, synthetic_corpus, tiny_training
 
 
 def _setup(directory: Path, teacher: Path | None = None) -> tuple[Any, ...]:
@@ -25,12 +25,15 @@ def _records(output: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in lines]
 
 
+@slow
 @needs_hub
 def test_a_short_run_goes_through_every_stage_and_cools_down(tmp_path: Path) -> None:
-    model, config, train, validation = _setup(tmp_path)
+    model, config, train, validation, probe = _setup(tmp_path)
     output = tmp_path / "run"
 
-    state = Trainer(model, config, train, validation, output).fit()
+    state = Trainer(
+        model, config, train, validation, output, probe_data=probe, train_subset_data=probe
+    ).fit()
 
     assert state.finished and state.cooldown_start is not None
     records = _records(output)
@@ -43,15 +46,45 @@ def test_a_short_run_goes_through_every_stage_and_cools_down(tmp_path: Path) -> 
     for name in ("best", "latest", "final"):
         assert (output / "checkpoints" / f"{name}.pt").is_file()
 
+    # The fail-fast system read everything, from step 0 (§4.13.3-§4.13.5).
+    kinds = {r["kind"] for r in records}
+    assert {"frequent", "validation", "rare", "stop"} <= kinds
+    frequent = [r for r in records if r["kind"] == "frequent"]
+    assert frequent[0]["step"] == 0
+    assert {"r2_masked", "dynamics_margin", "s_rank_left", "video_share_max"} <= set().union(
+        *frequent
+    )
+    validation_reads = [r for r in records if r["kind"] == "validation"]
+    assert {"noise_drop", "hubness", "modality_gap", "leak_change", "cka_left"} <= set(
+        validation_reads[-1]
+    )
+    assert validation_reads[-1]["leak_change"] < 1e-4  # masked pixels never reach the encoder
+    assert {"loss_total", "t2v_mrr", "v2t_precision10", "t2v_recall5", "t2v_medr"} <= set(
+        validation_reads[-1]
+    )
+    assert {"alignment", "uniformity_text", "y_effective_rank", "text_condition_number"} <= set(
+        validation_reads[-1]
+    )
+    assert {"val_r2_visible", "val_keypoint_margin", "train_t2v_r1", "gap_v2t_r1"} <= set(
+        validation_reads[-1]
+    )
+    rare = [r for r in records if r["kind"] == "rare"]
+    assert "plausibility_time_reversed_increase" in set().union(*rare)
+    energies = sorted((output / "checkpoints" / "energies").glob("*.parquet"))
+    assert energies  # every training clip's energies, written with each latest checkpoint
+    assert {r["name"] for r in records if r["kind"] == "stop"} == {"F1", "F2", "F3"}
+
     # Killed after the cooldown began: the same command resumes and finishes the same way.
-    model, config, train, validation = _setup(tmp_path, teacher=tmp_path / "sjepa.pt")
-    resumed = Trainer(model, config, train, validation, output).fit()
+    model, config, train, validation, probe = _setup(tmp_path, teacher=tmp_path / "sjepa.pt")
+    resumed = Trainer(
+        model, config, train, validation, output, probe_data=probe, train_subset_data=probe
+    ).fit()
     assert resumed.finished and resumed.step == state.step
 
 
 @needs_hub
 def test_a_checkpoint_reloads_to_the_same_loss(tmp_path: Path) -> None:
-    model, _, train, _ = _setup(tmp_path)
+    model, _, train, _, _ = _setup(tmp_path)
     collate = Collate(model.text.centering.languages)
     batch = collate([train[(0, 0)], train[(1, 0)]])
     trainable = {n for n, p in model.named_parameters() if p.requires_grad}

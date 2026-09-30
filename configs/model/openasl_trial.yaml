@@ -1,0 +1,24 @@
+# Trial run on OpenASL alone: does the whole model train as it should, end to end?
+# worldsign.yaml + ablations/arm_A.yaml (alignment + SIGReg) + openasl_trial.yaml, on 4 GPUs
+# (32 clips each, batch 128), without augmentation.
+# OpenASL's own splits: train 96k clips, valid 967 (validated here), test 976 (kept for the end).
+# Short on purpose: 3 epochs ≈ 2,260 steps, every diagnostic at a dense cadence.
+name: worldsign-openasl-trial
+data:
+  index: /lustrehome/mvigone/data/training/openasl/index.parquet
+  embeddings: /lustrehome/mvigone/data/signworld/openasl/text/2fdc70f119730c4c
+  split_source: manifest      # OpenASL's train / valid / test
+  validation_split: valid
+  validation_clips: 967       # the whole valid split
+  statistics_clips: 5000      # enough for the keypoint scale; faster start
+  workers: 12                 # data loader processes per GPU (52 CPUs for 4 GPUs)
+training:
+  epochs: 3
+  preflight_overfit_steps: 60  # P13 on 32 real clips per GPU: some room before judging
+  validation_every: 250
+  log_every: 10
+diagnostics:
+  frequent_every: 100
+  rare_every: 500
+augmentation:
+  enabled: false              # the trial sees every clip as it was cropped

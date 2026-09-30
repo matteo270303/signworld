@@ -1,0 +1,26 @@
+# The training index of OpenASL (stage 0 is already done: videos_256 and poses exist), with its
+# own train / valid / test splits. CPU only; run it once before the trial run.
+#
+# Submit:  condor_submit -name ettore scripts/condor/openasl_index.sub
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/.venv/bin/signworld
+arguments  = train index \
+  --manifest /lustrehome/mvigone/data/signworld/openasl/manifest/clips.parquet \
+  --videos /lustrehome/mvigone/data/openASL/videos_256 \
+  --poses /lustrehome/mvigone/data/openASL/poses \
+  --embeddings /lustrehome/mvigone/data/signworld/openasl/text/2fdc70f119730c4c \
+  --output /lustrehome/mvigone/data/training/openasl/index.parquet \
+  -c configs/model/worldsign.yaml -c configs/model/openasl_trial.yaml --workers 16
+
+output = $(initialdir)/logs/condor/openasl_index_$(Cluster).out
+error  = $(initialdir)/logs/condor/openasl_index_$(Cluster).err
+log    = $(initialdir)/logs/condor/openasl_index_$(Cluster).log
+
+getenv         = True
+request_cpus   = 16
+request_memory = 32 GB
+request_disk   = 2 GB
+
+queue

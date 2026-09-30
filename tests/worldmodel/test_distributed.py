@@ -109,10 +109,19 @@ def _train_worker(rank: int, directory: str, corpus: Any) -> None:
     )
     collective = Distributed(rank, WORLD, rank, torch.device("cpu"))
     root = Path(directory)
-    model, config, train, validation = tiny_training(
+    model, config, train, validation, probe = tiny_training(
         root, corpus, teacher=root / "sjepa.pt", collective=collective
     )
-    state = Trainer(model, config, train, validation, root / "run", collective).fit()
+    state = Trainer(
+        model,
+        config,
+        train,
+        validation,
+        root / "run",
+        collective,
+        probe_data=probe,
+        train_subset_data=probe,
+    ).fit()
     trained = {n: p.detach().clone() for n, p in model.named_parameters()}
     torch.save({"step": state.step, "params": trained}, root / f"trained{rank}.pt")
     dist.destroy_process_group()

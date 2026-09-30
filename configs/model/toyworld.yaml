@@ -1,0 +1,23 @@
+# Collaudo «mondo giocattolo» (§4.13.1): the whole architecture on synthetic clips.
+# Build:  signworld train toyworld --output <root> (Condor: scripts/condor/toyworld.sub)
+#         signworld train toyworld-embed --output <root>
+#         signworld train index --manifest <root>/manifest/clips.parquet --materialized <root>
+#             --embeddings <root>/text/<fingerprint> --output <root>/index.parquet
+#             -c configs/model/worldsign.yaml -c configs/model/toyworld.yaml
+# Run:    worldsign.yaml + ablations/arm_A.yaml + toyworld.yaml, with data.index and
+#         data.embeddings set below. Every combination of motions is a «channel»: the held-out
+#         channel split is made of combinations never seen in training.
+name: worldsign-toyworld
+data:
+  index: null                 # <root>/index.parquet
+  embeddings: null            # <root>/text/<fingerprint>
+  validation_fraction: 0.2    # 20 % of the combinations held out
+  seen_video_fraction: 0.0    # one clip per video: no seen-video split
+  validation_clips: 1000      # the 1,000 clips of unseen combinations (§4.13.1)
+  statistics_clips: 2000
+training:
+  epochs: 3
+  validation_every: 500
+diagnostics:
+  frequent_every: 100
+  rare_every: 1000

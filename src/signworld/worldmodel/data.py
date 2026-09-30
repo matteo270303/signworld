@@ -17,6 +17,7 @@ can start mid-epoch, so a resumed run also keeps the sampler's order.
 import dataclasses
 import logging
 from collections.abc import Iterator, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +59,8 @@ INDEX_SCHEMA = pa.schema(
         pa.field("video_path", pa.string(), nullable=False),
         pa.field("pose_path", pa.string(), nullable=False),
         pa.field("split", pa.string(), nullable=False),
+        pa.field("duration_s", pa.float64(), nullable=False),
+        pa.field("caption_words", pa.int32(), nullable=False),
     ]
 )
 
@@ -90,7 +93,7 @@ def assign_splits(
     return split
 
 
-def build_training_index(
+def build_training_index(  # noqa: PLR0913 (the inputs and three options)
     manifest: pa.Table,
     records: Sequence[MaterializedRecord],
     caption_rows: pa.Table,
@@ -98,11 +101,13 @@ def build_training_index(
     *,
     check_poses: bool = True,
     excluded: frozenset[str] = frozenset(),
+    workers: int = 1,
 ) -> pa.Table:
     """One row per usable clip: materialised, captioned, with a pose reference and a split.
 
     ``excluded`` are the clips that overlap or repeat a benchmark's validation and test clips
-    (§3.9, ``checks.contamination``): they never enter the index.
+    (§3.9, ``checks.contamination``): they never enter the index. ``workers`` processes read
+    the poses in parallel (one read per clip: ~20 ms, ~30 minutes for 94k clips on one).
     """
     materialised = {record.clip_id: record for record in records}
     row_of = dict(
@@ -112,21 +117,43 @@ def build_training_index(
             strict=True,
         )
     )
-    columns = ["clip_id", "video_id", "channel_id", "sign_language", "caption_language"]
+    columns = [
+        "clip_id",
+        "video_id",
+        "channel_id",
+        "sign_language",
+        "caption_language",
+        "split",
+        "start_s",
+        "end_s",
+        "caption",
+    ]
+    candidates = [
+        clip
+        for clip in manifest.select(columns).to_pylist()
+        if clip["clip_id"] in materialised
+        and clip["clip_id"] in row_of
+        and clip["caption_language"] is not None
+        and clip["clip_id"] not in excluded
+    ]
+    if check_poses:
+        paths = [Path(materialised[clip["clip_id"]].pose) for clip in candidates]
+        with ProcessPoolExecutor(max(1, workers)) as pool:
+            usable = list(pool.map(usable_pose, paths, chunksize=256))
+        candidates = [clip for clip, ok in zip(candidates, usable, strict=True) if ok]
     rows = []
-    for clip in manifest.select(columns).to_pylist():
-        record = materialised.get(clip["clip_id"])
-        if record is None or clip["clip_id"] not in row_of or clip["caption_language"] is None:
-            continue
-        if clip["clip_id"] in excluded:
-            continue
-        if check_poses and not usable_pose(Path(record.pose)):
-            continue
+    for clip in candidates:
+        record = materialised[clip["clip_id"]]
+        official = clip.pop("split")
+        start, end, caption = clip.pop("start_s"), clip.pop("end_s"), clip.pop("caption")
         rows.append(
             {
                 **clip,
+                "official_split": official,
                 "channel_id": clip["channel_id"] or f"video:{clip['video_id']}",
                 "caption_row": row_of[clip["clip_id"]],
+                "duration_s": end - start,
+                "caption_words": len(caption.split()),
                 "video_path": record.video,
                 "pose_path": record.pose,
             }
@@ -134,11 +161,32 @@ def build_training_index(
     channels = np.array([row["channel_id"] for row in rows], dtype=object)
     languages = np.array([str(row["sign_language"]) for row in rows], dtype=object)
     videos = np.array([row["video_id"] for row in rows], dtype=object)
-    splits = assign_splits(channels, languages, settings, videos)
+    if settings.split_source == "manifest":
+        splits = np.array([row["official_split"] for row in rows], dtype=object)
+        if any(split is None for split in splits):
+            raise ValueError("split_source is manifest but some clips have no split")
+    else:
+        splits = assign_splits(channels, languages, settings, videos)
     for row, split in zip(rows, splits, strict=True):
+        del row["official_split"]
         row["split"] = split
     logger.info("Training index: %d usable clips of %d", len(rows), manifest.num_rows)
     return pa.Table.from_pylist(rows, schema=INDEX_SCHEMA)
+
+
+def records_from_files(manifest: pa.Table, videos: Path, poses: Path) -> list[MaterializedRecord]:
+    """Records of clips stored as flat folders of ``<clip>.mp4`` and ``<clip>.npz``.
+
+    The file name is the clip ID with ``:`` written as ``_`` (as the OpenASL clips were
+    stored); a clip whose video or pose is missing is left out.
+    """
+    records = []
+    for clip_id in manifest.column("clip_id").to_pylist():
+        stem = clip_id.replace(":", "_")
+        video, pose = videos / f"{stem}.mp4", poses / f"{stem}.npz"
+        if video.is_file() and pose.is_file():
+            records.append(MaterializedRecord(clip_id, str(video), str(pose), 0.0, 0, 0, []))
+    return records
 
 
 def write_index(table: pa.Table, path: Path) -> None:
@@ -180,6 +228,11 @@ class ClipSample:
     caption_row: int
     language: str
     video_id: str
+    clip_id: str = ""
+    duration_s: float = 0.0
+    caption_words: int = 0
+    view: Tensor | None = None
+    """(6,) the augmentation still to apply to ``frames`` (``augmentation.apply_views``)."""
 
 
 class ClipDataset(Dataset[ClipSample]):
@@ -210,10 +263,12 @@ class ClipDataset(Dataset[ClipSample]):
         row = self.table.slice(index, 1).to_pylist()[0]
         track = PoseTrack.load(Path(row["pose_path"]))
         frames = torch.from_numpy(ClipReader(Path(row["video_path"])).frames(track.frame_indices))
+        view = None
         if self.augmenter is not None:
+            # The keypoints (and so the boxes) move here; the frames move on the GPU with the
+            # same view (``apply_views``), where their resampling costs nothing.
             state = int(np.random.SeedSequence([self.seed, epoch, index]).generate_state(1)[0])
             view = self.augmenter.sample(torch.Generator().manual_seed(state))
-            frames = self.augmenter.frames(frames, view)
             moved = self.augmenter.points(torch.from_numpy(track.keypoints), view)
             track = dataclasses.replace(track, keypoints=moved.numpy())
         sequence = PoseSequence.from_track(track)
@@ -228,10 +283,14 @@ class ClipDataset(Dataset[ClipSample]):
             keypoint_weights=torch.from_numpy(weights),
             boxes=torch.from_numpy(boxes.astype(np.float32)),
             box_visible=torch.from_numpy(visible),
-            caption=torch.from_numpy(np.asarray(self.embeddings[row["caption_row"]], np.float32)),
+            caption=torch.from_numpy(np.array(self.embeddings[row["caption_row"]], np.float32)),
             caption_row=int(row["caption_row"]),
             language=row["caption_language"],
             video_id=row["video_id"],
+            clip_id=row["clip_id"],
+            duration_s=float(row["duration_s"]),
+            caption_words=int(row["caption_words"]),
+            view=None if view is None else view.as_tensor(),
         )
 
 
@@ -256,6 +315,10 @@ class Collate:
             languages=torch.tensor([self.number[sample.language] for sample in samples]),
             videos=[sample.video_id for sample in samples],
             caption_rows=torch.tensor([sample.caption_row for sample in samples]),
+            clip_ids=[sample.clip_id for sample in samples],
+            durations=torch.tensor([sample.duration_s for sample in samples]),
+            caption_words=torch.tensor([sample.caption_words for sample in samples]),
+            views=None if samples[0].view is None else stack("view"),
         )
 
 

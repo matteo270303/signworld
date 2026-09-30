@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import torch
 
+from signworld.worldmodel.augmentation import ClipAugmenter, View
 from signworld.worldmodel.config import AugmentationSettings, DataSettings
 from signworld.worldmodel.data import (
     INDEX_SCHEMA,
@@ -91,7 +92,12 @@ def test_augmentation_moves_frames_and_boxes_together_and_repeats_by_epoch(corpu
     first, again, other = augmented[(2, 0)], augmented[(2, 0)], augmented[(2, 1)]
     reference = plain[2]
 
-    assert torch.equal(first.frames, again.frames) and torch.equal(first.boxes, again.boxes)
+    assert first.view is not None and torch.equal(first.view, again.view)  # type: ignore[arg-type]
+    assert torch.equal(first.frames, reference.frames)  # the frames move later, on the GPU
+    batch = Collate(["en", "es"])([first, other]).augmented()
+    moved = ClipAugmenter.frames(first.frames, View.from_tensor(first.view))
+    assert torch.equal(batch.frames[0], moved) and batch.views is None
+    assert torch.equal(first.boxes, again.boxes)
     assert not torch.equal(first.boxes, other.boxes)
     assert not torch.equal(first.boxes, reference.boxes)
     both = (first.keypoint_weights > 0) & (reference.keypoint_weights > 0)

@@ -19,10 +19,11 @@ from typing import Any
 import numpy as np
 import torch
 from torch import Tensor, nn
+from torch.nn import functional
 
 from .config import TrainingSettings, WorldSignConfig
 from .distributed import SINGLE, Distributed
-from .losses import LossTerms, Objective, physical_energy
+from .losses import LossTerms, Objective, physical_energy, physical_energy_per_clip
 from .masking import TokenGrid
 from .pose_branch import PoseBranch, articulator_confidence
 from .text_branch import TextBranch
@@ -53,6 +54,33 @@ class WorldSignBatch:
     """Source video of each clip: InfoNCE does not use clips of one video as negatives."""
     caption_rows: Tensor | None = None
     """(batch,) long: each clip's caption row; validation counts equal captions as matches."""
+    views: Tensor | None = None
+    """(batch, 6) augmentation still to apply to ``frames``; None once applied or if none."""
+    clip_ids: Sequence[str] | None = None
+    durations: Tensor | None = None
+    """(batch,) seconds of each clip, for the R@1 by duration band."""
+    caption_words: Tensor | None = None
+    """(batch,) words of each caption, for the R@1 by caption length."""
+
+    def augmented(self) -> "WorldSignBatch":
+        """The frames moved by their views (on the frames' device), which are then spent."""
+        if self.views is None:
+            return self
+        from .augmentation import apply_views  # noqa: PLC0415 (augmentation imports config only)
+
+        return dataclasses.replace(self, frames=apply_views(self.frames, self.views), views=None)
+
+    def take(self, count: int) -> "WorldSignBatch":
+        """The first ``count`` clips."""
+        taken: dict[str, Any] = {
+            f.name: getattr(self, f.name)[:count]
+            for f in dataclasses.fields(self)
+            if getattr(self, f.name) is not None
+        }
+        taken["videos"] = list(self.videos[:count])
+        if self.clip_ids is not None:
+            taken["clip_ids"] = list(self.clip_ids[:count])
+        return dataclasses.replace(self, **taken)
 
     def to(self, device: torch.device) -> "WorldSignBatch":
         moved = {
@@ -168,15 +196,33 @@ class WorldSign(nn.Module):
         """
         terms: dict[str, Tensor] = {}
         diagnostics: dict[str, Tensor] = {}
+        seen: dict[str, Any] = record if record is not None else {}
         if physical and self.has_physical_level:
-            found, diagnostics = self.physical_terms(batch, step, total_steps, randomness, record)
+            found, diagnostics = self.physical_terms(batch, step, total_steps, randomness, seen)
             terms.update(found)
         if semantic:
-            terms.update(self.semantic_terms(batch, randomness, record))
+            terms.update(self.semantic_terms(batch, randomness, seen))
         if not terms:
             raise ValueError("no pass selected")
         combined = self.objective.combine(terms)
-        return LossTerms(combined.total, combined.parts, diagnostics)
+        return LossTerms(combined.total, combined.parts, diagnostics, self._per_clip(seen))
+
+    @staticmethod
+    @torch.no_grad()
+    def _per_clip(seen: dict[str, Any]) -> dict[str, Tensor]:
+        """Each clip's energies: E_sem through its best hypothesis, E_fis over the step's masks."""
+        out: dict[str, Tensor] = {}
+        if "predicted" in seen:
+            cosine = functional.cosine_similarity(
+                seen["predicted"], seen["target"][:, None], dim=-1
+            )
+            out["e_sem"] = (1 - cosine.amax(dim=1)).float()
+        if "physical" in seen:
+            output = seen["physical"]
+            out["e_fis"] = physical_energy_per_clip(
+                output.predictions, seen["latent"], seen["confidence"], output.context_lambda
+            ).float()
+        return out
 
     forward = loss
     """DDP synchronises the gradients of what ``forward`` computes: the whole step."""

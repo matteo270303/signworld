@@ -1,0 +1,20 @@
+# The toy world of the collaudo (§4.13.1), rendered in shards on CPU nodes; resumable.
+#
+# Submit:  condor_submit -name ettore -a 'output=/lustrehome/mvigone/data/toyworld' \
+#              -a 'shards=16' scripts/condor/toyworld.sub
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/.venv/bin/signworld
+arguments  = train toyworld --output $(output) --clips $(clips:20000) --shard $(Process) --num-shards $(shards:16)
+
+output = $(initialdir)/logs/condor/toyworld_$(Cluster).$(Process).out
+error  = $(initialdir)/logs/condor/toyworld_$(Cluster).$(Process).err
+log    = $(initialdir)/logs/condor/toyworld_$(Cluster).log
+
+getenv         = True
+request_cpus   = $(cpus:2)
+request_memory = $(memory:8 GB)
+request_disk   = $(disk:4 GB)
+
+queue $(shards:16)

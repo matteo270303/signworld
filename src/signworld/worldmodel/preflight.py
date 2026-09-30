@@ -88,8 +88,10 @@ def _check(code: str, ok: bool, detail: str) -> Assertion:
 # ---------------------------------------------------------------- data
 
 
-def p1_channels(train: pa.Table, held_out: Sequence[pa.Table]) -> Assertion:
+def p1_channels(train: pa.Table, held_out: Sequence[pa.Table], official: bool = False) -> Assertion:
     """No channel in common between training and the held-out splits."""
+    if official:
+        return Assertion("P1", Status.SKIP, "the benchmark's own splits, not ours by channel")
     seen = set(train.column("channel_id").to_pylist())
     shared = {c for table in held_out for c in table.column("channel_id").to_pylist()} & seen
     return _check("P1", not shared, f"{len(shared)} channels in both" if shared else "disjoint")
@@ -399,7 +401,7 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
         "pose_encoder": config.pose_encoder.checkpoint_sha256,
     }
     checks: list[Callable[[], Assertion]] = [
-        lambda: p1_channels(train, held_out),
+        lambda: p1_channels(train, held_out, config.data.split_source == "manifest"),
         lambda: p2_contamination(clip_ids, config.data.manifest, config.data.benchmarks),
         lambda: p3_budget(model),
         lambda: p4_frozen(model),
@@ -410,7 +412,11 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
         lambda: p9_pose_format(batch),
         lambda: p10_pose_normalised(batch),
         lambda: p11_text_centred(model, *captions),
-        lambda: p12_geometry(augmenter),
+        lambda: (
+            p12_geometry(augmenter)
+            if config.augmentation.enabled
+            else Assertion("P12", Status.SKIP, "augmentation off: frames and keypoints untouched")
+        ),
         lambda: p13_overfit(model, batch, overfit_steps),
         lambda: p14_pose_isolated(model, batch, generator),
         lambda: p15_infonce(model),

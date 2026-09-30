@@ -23,7 +23,7 @@ from .conftest import needs_hub, slow, synthetic_corpus, tiny_training
 def setup(tmp_path_factory: pytest.TempPathFactory):  # type: ignore[no-untyped-def]
     directory = tmp_path_factory.mktemp("preflight")
     corpus = synthetic_corpus(directory / "corpus")
-    model, config, train, validation = tiny_training(directory, corpus)
+    model, config, train, validation, _ = tiny_training(directory, corpus)
     encoder = config.encoder.model_copy(update={"checkpoint_sha256": None})
     pose = config.pose_encoder.model_copy(update={"checkpoint_sha256": None})
     config = config.model_copy(update={"encoder": encoder, "pose_encoder": pose})

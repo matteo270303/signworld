@@ -6,6 +6,7 @@ by every GPU, so all start from the same numbers (§4.6: nothing from validation
 """
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +19,7 @@ from ..text.embedding import EmbeddingStore
 from .checkpoint import TrainingState
 from .config import WorldSignConfig
 from .data import (
-    SPLITS,
     TRAIN,
-    VALIDATION_CHANNEL,
     ClipDataset,
     Collate,
     caption_statistics,
@@ -58,7 +57,18 @@ def load_statistics(model: WorldSign, saved: dict[str, Any]) -> None:
         model.pose.keypoint_variance.copy_(saved["keypoint_variance"])
 
 
-def run(config: WorldSignConfig, output: Path, collective: Distributed) -> TrainingState:
+@dataclass(frozen=True, slots=True)
+class Prepared:
+    """A run ready to start: its trainer and what the assertions before launching read."""
+
+    trainer: Trainer
+    train: pa.Table
+    train_data: ClipDataset
+    embeddings: np.ndarray
+
+
+def prepare(config: WorldSignConfig, output: Path, collective: Distributed) -> Prepared:
+    """The model with its statistics, the datasets and the trainer of a run."""
     data = config.data
     if data.index is None or data.embeddings is None:
         raise ValueError("data.index and data.embeddings must name the stage-0 outputs")
@@ -73,38 +83,64 @@ def run(config: WorldSignConfig, output: Path, collective: Distributed) -> Train
     load_statistics(model, torch.load(statistics, map_location="cpu", weights_only=False))
 
     known = pa.array(list(model.text.centering.languages))
-    held_out = read_index(data.index, VALIDATION_CHANNEL)
+    held_out = read_index(data.index, data.validation_split)
     held_out = held_out.filter(pc.is_in(held_out.column("caption_language"), known))
     validation = validation_subset(held_out, data.validation_clips)
     logger.info("%d training clips, %d validation clips", train.num_rows, validation.num_rows)
+    threshold = config.physical.box_threshold
     train_data = ClipDataset(
         train,
         embeddings,
-        augmentation=config.augmentation,
-        box_threshold=config.physical.box_threshold,
+        augmentation=config.augmentation if config.augmentation.enabled else None,
+        box_threshold=threshold,
         seed=config.training.seed,
     )
     trainer = Trainer(
         model,
         config,
         train_data,
-        ClipDataset(
-            validation, embeddings, augmentation=None, box_threshold=config.physical.box_threshold
-        ),
+        ClipDataset(validation, embeddings, augmentation=None, box_threshold=threshold),
         output,
         collective,
+        probe_data=ClipDataset(
+            validation_subset(train, config.diagnostics.probe_clips),
+            embeddings,
+            augmentation=None,
+            box_threshold=threshold,
+        ),
+        train_subset_data=ClipDataset(
+            validation_subset(train, validation.num_rows),
+            embeddings,
+            augmentation=None,
+            box_threshold=threshold,
+        ),
     )
+    return Prepared(trainer, train, train_data, embeddings)
+
+
+def run(config: WorldSignConfig, output: Path, collective: Distributed) -> TrainingState:
+    """The assertions before launching (§4.13.2), then the training loop."""
+    prepared = prepare(config, output, collective)
+    trainer, model = prepared.trainer, prepared.trainer.model
     fresh = not trainer.checkpoints.exists("latest")
-    splits = {name: read_index(data.index, name) for name in SPLITS}
-    batch = Collate(model.text.centering.languages)(
-        [train_data[(index, 0)] for index in range(trainer.per_gpu)]
-    ).to(collective.device)
+    data = config.data
+    assert data.index is not None  # checked by prepare
+    index = read_index(data.index)
+    names = sorted(set(index.column("split").to_pylist()))
+    splits = {name: read_index(data.index, name) for name in names}
+    batch = (
+        Collate(model.text.centering.languages)(
+            [prepared.train_data[(index, 0)] for index in range(trainer.per_gpu)]
+        )
+        .to(collective.device)
+        .augmented()
+    )
     report = run_preflight(
         model,
         config,
         splits,
         batch,
-        caption_statistics(train, embeddings),
+        caption_statistics(prepared.train, prepared.embeddings),
         output / "checksums.json",
         collective,
         overfit_steps=config.training.preflight_overfit_steps if fresh else 0,

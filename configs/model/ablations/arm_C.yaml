@@ -1,0 +1,3 @@
+# ESP-1, arm C: InfoNCE + SIGReg, batch 128 like the other arms; same-video clips are not negatives.
+name: worldsign-C
+losses: {arm: C}

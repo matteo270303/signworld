@@ -2,8 +2,14 @@
 
 For random unit directions ``v``, the projections ``<v, x>`` of an isotropic N(0, I) sample
 are N(0, 1). The Epps-Pulley statistic compares the empirical characteristic function of each
-projection with that of N(0, 1), ``exp(-t^2 / 2)``, weighted by ``w(t) = exp(-t^2 / 2)``; SIGReg
-averages it over the directions (Balestriero and LeCun, 2025).
+projection with that of N(0, 1), ``exp(-t^2 / 2)``, weighted by ``w(t) = exp(-t^2 / 2)``, and
+multiplies by the number of samples; SIGReg averages it over the directions. This is LeJEPA's
+reference implementation (Balestriero and LeCun, 2025, §4.2.3): knots ``linspace(-5, 5, 17)``,
+trapezoidal rule, times N.
+
+The factor N makes the statistic of a true Gaussian sample stay near a constant (its
+expectation is ``∫ (1 - exp(-t^2)) exp(-t^2 / 2) dt ≈ 1.06``) whatever the batch size, while a
+non-Gaussian sample grows with N: it is what gives LeJEPA's λ = 0.05 its meaning.
 """
 
 from typing import Final
@@ -30,23 +36,27 @@ def random_directions(
 
 
 class SIGReg:
-    """Sliced Epps-Pulley test against N(0, I).
+    """Sliced Epps-Pulley test against N(0, I), as in LeJEPA.
 
-    The integrand is even in ``t``, so the integral over the real line is twice the integral
-    over ``[0, t_max]``, computed with the trapezoidal rule; the weight makes the tail beyond
-    ``t_max = 3`` negligible. The characteristic function is split into its cosine and sine
-    means, which keeps the computation real-valued and stable in low precision. It runs in
+    The characteristic function is split into its cosine and sine means, which keeps the
+    computation real-valued; ``|φ̂(t) - exp(-t²/2)|² = (cos-mean - e)² + sin-mean²``. It runs in
     float32 regardless of the input type, as the triage table of §4.13.6 prescribes.
     """
 
-    def __init__(self, knots: int = 17, t_max: float = 3.0) -> None:
+    def __init__(self, knots: int = 17, t_max: float = 5.0) -> None:
         if knots < _MIN_KNOTS:
             raise ValueError("the quadrature needs at least two knots")
-        self._t = torch.linspace(0.0, t_max, knots)
+        self._t = torch.linspace(-t_max, t_max, knots)
         self._target = torch.exp(-0.5 * self._t.pow(2))
 
-    def __call__(self, embeddings: Tensor, directions: Tensor) -> Tensor:
-        """Statistic averaged over ``directions``; ``embeddings`` is (samples, dimensions)."""
+    def __call__(
+        self, embeddings: Tensor, directions: Tensor, samples: int | None = None
+    ) -> Tensor:
+        """Statistic averaged over ``directions``; ``embeddings`` is (samples, dimensions).
+
+        ``samples`` is the N of the factor, by default the rows given; with the characteristic
+        function averaged across GPUs it is the number of rows on all of them (LeJEPA).
+        """
         require_matrix("embeddings", embeddings)
         require_matrix("directions", directions)
         if embeddings.shape[1] != directions.shape[1]:
@@ -61,5 +71,6 @@ class SIGReg:
         real = phase.cos().mean(dim=0)
         imaginary = phase.sin().mean(dim=0)
         integrand = ((real - target).pow(2) + imaginary.pow(2)) * target
-        per_direction = 2.0 * torch.trapezoid(integrand, t, dim=-1)
+        count = embeddings.shape[0] if samples is None else samples
+        per_direction = torch.trapezoid(integrand, t, dim=-1) * count
         return per_direction.mean()

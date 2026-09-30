@@ -1,0 +1,86 @@
+# WorldSign, reference configuration (§4, project document). It is arm A of ESP-1.
+# A run = this file + overlays, applied in order, each overriding only what it names:
+#   uv run ... -c configs/model/worldsign.yaml -c configs/model/ablations/arm_B.yaml
+# Values the document leaves open are marked [Aperto]; PC7 (dry run) calibrates them.
+name: worldsign-A
+
+encoder:                      # §4.4.1: V-JEPA 2.1 ViT-L distilled, frozen + LoRA (PC3, 29/9)
+  hub_repo: /lustrehome/mvigone/cache/torch/hub/facebookresearch_vjepa2_main
+  entrypoint: vjepa2_1_vit_large_384
+  checkpoint: /lustrehome/mvigone/models/vjepa21/vjepa2_1_vitl_384.pt
+  levels: [5, 11, 17, 23]     # blocks 6/12/18/24, the code's hierarchical_layers
+  lora: {rank: 16, alpha: 16.0, targets: [qkv, proj, fc1, fc2]}   # alpha [Aperto]
+  train_norms: true           # the 0.10 M «LayerNorm e bias» of §4.8
+  activation_checkpointing: true
+
+masking:                      # §4.5.2: V-JEPA's masks unchanged, both kinds at every step
+  specs:
+    - {blocks: 8, spatial_scale: 0.15, temporal_scale: 1.0, aspect_ratio: [0.75, 1.5]}
+    - {blocks: 2, spatial_scale: 0.70, temporal_scale: 1.0, aspect_ratio: [0.75, 1.5]}
+
+fusion:                       # §4.4.5: mlp (V-JEPA 2.1) | linear | residual  [Aperto]
+  kind: mlp
+  hidden: 1024
+
+physical:
+  enabled: true
+  lora: {rank: 16, alpha: 16.0, targets: [qkv, proj, fc1, fc2]}
+  target_dim: 256             # C, width of the S-JEPA latent (PC5)
+  mask_index: 0               # the only trained mask token (PC6)
+  context_lambda: 0.5         # λ of the visible tokens (V-JEPA 2.1)
+  lambda_warmup: [0.0595, 0.119]   # V-JEPA 2.1's 15k-30k of 252k steps, as fractions
+  box_threshold: 0.3          # [Aperto: 0.3 (Uni-Sign) or 1.0 (§3.6)]
+
+semantic:                     # §4.4.6: VL-JEPA's scheme, 4 blocks at 384, from scratch
+  width: 384
+  depth: 4
+  heads: 12
+  queries: 8
+  hypotheses: 1               # 4 only in ESP-4
+  relaxation: 0.05            # ε of ESP-4 [Aperto: PC7]
+  output_dim: 512
+  mlp_ratio: 4.0
+  dropout: 0.1                # [Aperto: PC7]
+  drop_path: 0.1              # [Aperto: PC7]
+  layer_scale: 1.0e-4         # [Aperto: PC7]
+
+losses:                       # §4.5.7
+  arm: A
+  sigreg_weight: 0.05         # λ, as LeJEPA
+  sigreg_directions: 1024     # LeJEPA's recommendation
+  sigreg_knots: 17
+  uniformity_t: 2.0
+  infonce_temperature: 0.07
+
+sampling:                     # §3.6: 32 frames by local motion + 32 uniform in time
+  strategy: motion
+  frames: 64
+  uniform_fraction: 0.5
+  stride: 3
+  block: 8
+  top_blocks: 8
+
+augmentation:                 # §3.8: same geometry on video and keypoints; no flip
+  box_jitter: 0.10
+  brightness: 0.2             # [Aperto]
+  contrast: 0.2               # [Aperto]
+  saturation: 0.2             # [Aperto]
+
+pose_encoder:                 # §4.4.3: S-JEPA, trainable lightly (pose branch, next iteration)
+  trainable: true
+  lora_rank: 4
+  learning_rate_multiplier: 0.05
+
+training:                     # §4.10, starting values for PC7
+  batch_size: 128
+  epochs: 6
+  patience: 2
+  learning_rate: 2.0e-4       # [Aperto: PC7, {1e-4, 2e-4, 5e-4}]
+  betas: [0.9, 0.999]         # AdamW as V-JEPA 2.1
+  weight_decay: 0.04          # V-JEPA 2.1, constant
+  gradient_clip: null         # V-JEPA 2.1 does not clip
+  warmup_fraction: 0.05
+  cooldown_fraction: 0.05
+  stages: {"1a": 0.01, "1": 0.05, "2a": 0.01}   # [Aperto: PC7]
+  precision: bf16
+  seed: 0

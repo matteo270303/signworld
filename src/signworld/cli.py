@@ -17,6 +17,7 @@ from .acquisition.sources.base import DatasetSource
 from .analysis_cli import check_app, experiment_app, manifest_app, testdata_app, text_app
 from .checks.report import write_report
 from .cli_support import SourceArgument, reports_user_errors
+from .collaudo import result_path
 from .logs import configure_logging
 
 app = typer.Typer(
@@ -134,7 +135,7 @@ def probe_youtube(
         typer.echo(f"{result.variant:<16}{result.video_id:<14}{result.status:<12}{rejected}")
         if result.status is not Status.DONE:
             typer.echo(f"{'':<30}{result.detail[:120]}")
-    typer.echo(write_report(dataset.layout.reports / "youtube-probe.json", "probe", results))
+    typer.echo(write_report(result_path("sonda-youtube", f"{dataset.name}.json"), "probe", results))
 
 
 @app.command()

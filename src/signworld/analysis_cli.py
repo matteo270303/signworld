@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 import typer
 
 from .cli_support import SourceArgument, reports_user_errors
+from .collaudo import result_path
 
 if TYPE_CHECKING:
     from .acquisition.sources.base import DatasetSource
@@ -101,7 +102,9 @@ def durations(source: SourceArgument, config: ConfigOption = DEFAULT_CONFIG) -> 
         f"p99 {overall.quantiles_s['p99']:.2f} s, max {overall.max_s:.2f} s, "
         f"invalid {overall.invalid}"
     )
-    typer.echo(write_report(dataset.layout.reports / "durations.json", "durations", report))
+    typer.echo(
+        write_report(result_path("durate-didascalie", f"{dataset.name}.json"), "durations", report)
+    )
 
 
 @check_app.command("contamination")
@@ -128,7 +131,9 @@ def contamination(corpus: SourceArgument, config: ConfigOption = DEFAULT_CONFIG)
         f"{report.overlapping} overlapping and {report.near_duplicate_captions} duplicated "
         f"clips, {len(report.excluded)} excluded of {report.corpus_clips}"
     )
-    report_path = dataset.layout.reports / f"contamination-{benchmark.name}.json"
+    report_path = result_path(
+        "contaminazione-benchmark", f"{dataset.name}.vs-{benchmark.name}.json"
+    )
     typer.echo(write_report(report_path, "contamination", report))
     typer.echo(exclusions)
 
@@ -146,7 +151,9 @@ def split_duplicates(source: SourceArgument, config: ConfigOption = DEFAULT_CONF
         _manifest(dataset), settings.contamination.duration_tolerance_s
     )
     typer.echo(f"{dataset.name}: {len(groups)} caption groups span more than one split")
-    typer.echo(write_report(dataset.layout.reports / "split-duplicates.json", "split", groups))
+    typer.echo(
+        write_report(result_path("duplicati-fra-split", f"{dataset.name}.json"), "split", groups)
+    )
 
 
 @text_app.command("embed")
@@ -243,7 +250,9 @@ def _prompt_reproduced(dataset: "DatasetSource[Any]", store: Any, encoder: Any) 
 
     report = verify_reproduction(store, encoder, encoder.identity)
     typer.echo(f"{dataset.name}: minimum cosine {report.min_cosine:.6f}, passed={report.passed}")
-    typer.echo(write_report(dataset.layout.reports / "embedding-prompt.json", "A2", report))
+    typer.echo(
+        write_report(result_path("prompt-embeddinggemma", f"{dataset.name}.json"), "A2", report)
+    )
     return report.passed
 
 
@@ -266,7 +275,9 @@ def _text_geometry(dataset: "DatasetSource[Any]", store: Any, settings: "Analysi
             f"neighbours kept {row.neighbour_recall:.3f}"
         )
     typer.echo(f"chosen d_MRL = {report.chosen_dimension}")
-    typer.echo(write_report(dataset.layout.reports / "text-geometry.json", "PC1", report))
+    typer.echo(
+        write_report(result_path("pc1-geometria-testo", f"{dataset.name}.json"), "PC1", report)
+    )
 
 
 @check_app.command("checkpoint")
@@ -298,7 +309,7 @@ def checkpoint(
         )
     if minor:
         typer.echo(f"({minor} sections under 1 % of the largest, e.g. optimizer state, omitted)")
-    typer.echo(write_report(settings.models_root / "reports" / f"{name}.json", name, report))
+    typer.echo(write_report(result_path("contenuto-checkpoint", f"{name}.json"), name, report))
 
 
 def _embedding(settings: "AnalysisConfig", prompt: str | None) -> Any:
@@ -408,7 +419,7 @@ def unisign(
             f"{result.r2_contiguous_own_probe:.3f}"
         )
     typer.echo(f"passed={report.passed} on {report.test_clips} held-out clips of {report.clips}")
-    report_path = _test_root(dataset, settings) / "reports" / f"unisign-{checkpoint}.json"
+    report_path = result_path("pc5-encoder-posa", f"{dataset.name}.unisign-{checkpoint}.json")
     typer.echo(write_report(report_path, "PC5", report))
 
 
@@ -446,11 +457,7 @@ def frame_selection(source: SourceArgument, config: ConfigOption = DEFAULT_CONFI
     options = settings.pose_checks
     report = frame_selection_report(_materialized(dataset, settings, options.selection_clips))
     typer.echo(f"{dataset.name}: {report.reproduced}/{report.clips} selections reproduced")
-    typer.echo(
-        write_report(
-            _test_root(dataset, settings) / "reports" / "frame-selection.json", "A3", report
-        )
-    )
+    typer.echo(write_report(result_path("selezione-frame", f"{dataset.name}.json"), "A3", report))
     if not report.passed:
         raise typer.Exit(1)
 
@@ -478,9 +485,7 @@ def pose_alignment(
         f"(p95 {report.hand_error_p95:.4f}); by shift {shifts}; passed={report.passed}"
     )
     typer.echo(
-        write_report(
-            _test_root(dataset, settings) / "reports" / "pose-alignment.json", "A3", report
-        )
+        write_report(result_path("allineamento-video-posa", f"{dataset.name}.json"), "A3", report)
     )
     if not report.passed:
         raise typer.Exit(1)
@@ -510,13 +515,13 @@ def pose_quality(source: SourceArgument, config: ConfigOption = DEFAULT_CONFIG) 
     )
     for failure in report.failures:
         typer.echo(f"  failed: {failure}")
-    typer.echo(
-        write_report(_test_root(dataset, settings) / "reports" / "pose-quality.json", "A4", report)
-    )
-    sheets = _test_root(dataset, settings) / "reports" / "pose-boxes"
+    typer.echo(write_report(result_path("qualita-posa", f"{dataset.name}.json"), "A4", report))
+    sheets = result_path("qualita-posa", f"{dataset.name}.riquadri")
     sheets.mkdir(parents=True, exist_ok=True)
     for clip in everything[: options.contact_sheets]:
-        contact_sheet(clip.video, clip.pose).save(sheets / f"{clip.video.stem}.png")
+        contact_sheet(clip.video, clip.pose).convert("RGB").save(
+            sheets / f"{clip.video.stem}.jpg", quality=85
+        )
     typer.echo(sheets)
     if not report.passed:
         raise typer.Exit(1)
@@ -584,7 +589,11 @@ def pose_teachers(
             f"on unseen channels {candidate.language_accuracy_unseen_channels:.2f} "
             f"(chance {candidate.language_chance_unseen_channels:.2f})"
         )
-    typer.echo(write_report(root / "report.json", "pose-teachers", report))
+    typer.echo(
+        write_report(
+            result_path("pc5-encoder-posa", f"{dataset.name}.json"), "pose-teachers", report
+        )
+    )
 
 
 @experiment_app.command("pose-spectrum")
@@ -617,8 +626,14 @@ def pose_spectrum(
             f"k = {result.chosen_k}: R² {chosen.r2_position:.3f} / {chosen.r2_velocity:.3f}, "
             f"iso after whitening {chosen.isoscore_whitened:.3f}"
         )
-    typer.echo(save_whitenings(whitenings, root / "sjepa-whitening.npz"))
-    typer.echo(write_report(root / "spectrum.json", "pose-spectrum", report))
+    typer.echo(
+        save_whitenings(
+            whitenings, result_path("spettro-posa", f"{dataset.name}.sjepa-whitening.npz")
+        )
+    )
+    typer.echo(
+        write_report(result_path("spettro-posa", f"{dataset.name}.json"), "pose-spectrum", report)
+    )
 
 
 def _labelled_clips(dataset: "DatasetSource[Any]", settings: "AnalysisConfig") -> list[Any]:
@@ -636,3 +651,434 @@ def _labelled_clips(dataset: "DatasetSource[Any]", settings: "AnalysisConfig") -
         for clip in _materialized(dataset, settings)
         if clip.clip_id in about
     ]
+
+
+# --------------------------------------------------------------------------- frozen video
+
+
+def _video_settings(settings: "AnalysisConfig") -> Any:
+    if settings.video_probes is None:
+        raise ValueError("the analysis settings have no video_probes section")
+    return settings.video_probes
+
+
+def _readout_corpus(dataset: "DatasetSource[Any]", settings: "AnalysisConfig") -> Any:
+    """The read-out clips of the pose-teacher comparison: same seeded subset, same split."""
+    from .experiments.pose_teachers import PoseCorpus, probe_subset
+    from .metrics.probes import video_split
+
+    corpus = PoseCorpus.load(_labelled_clips(dataset, settings), settings.pose_teachers.min_score)
+    probe, _, _ = probe_subset(corpus, video_split(corpus.videos), settings.pose_teachers)
+    return probe
+
+
+def _records(dataset: "DatasetSource[Any]", settings: "AnalysisConfig") -> dict[str, Any]:
+    from .corpus.materialize import MaterializedIndex
+
+    return {r.clip_id: r for r in MaterializedIndex(_test_root(dataset, settings)).records()}
+
+
+def _video_encoder(name: str, settings: "AnalysisConfig", device: str) -> tuple[Any, Any]:
+    """The frozen encoder and, for V-JEPA 2.1, its predictor and load report."""
+    import torch
+
+    from .models.video_encoders import build_encoder
+
+    video = _video_settings(settings)
+    if name not in video.encoders:
+        raise ValueError(f"unknown encoder {name!r}; available: {', '.join(video.encoders)}")
+    options = video.encoders[name]
+    checkpoint = None
+    if options.checkpoint is not None:
+        checkpoint = settings.checkpoints[options.checkpoint].materialize(
+            settings.models_root, settings.acquisition().http
+        )
+    encoder, extra = build_encoder(name, options, video.hub_repo, checkpoint)
+    return encoder.to(torch.device(device)), extra
+
+
+def _stored_frames(clip: Any) -> Any:
+    """The 64 selected frames of a stored test clip, (64, H, W, 3) uint8."""
+    from .pose.wholebody import PoseTrack
+    from .video import ClipReader
+
+    track = PoseTrack.load(clip.pose)
+    return ClipReader(_clip_video(clip)).frames(track.frame_indices)
+
+
+def _clip_video(clip: Any) -> Path:
+    return Path(clip.pose).parent.parent / "clips" / f"{clip.clip_id}.mp4"
+
+
+@experiment_app.command("video-features")
+@reports_user_errors
+def video_features(
+    source: SourceArgument,
+    run: Annotated[str, typer.Option(help="Run listed under video_probes.runs.")],
+    config: ConfigOption = DEFAULT_CONFIG,
+    device: Annotated[str, typer.Option(help="Device of the encoder.")] = "cuda",
+    shard: Annotated[int, typer.Option(min=0, help="Index of this shard.")] = 0,
+    num_shards: Annotated[int, typer.Option(min=1, help="Total number of shards.")] = 1,
+) -> None:
+    """Frozen video features of the read-out clips for PC2, PC3, PC4 and the frame collaudo.
+
+    A finished shard is not recomputed, so a failed submission can be resubmitted unchanged.
+    """
+    from .acquisition.sharding import Shard
+    from .experiments.video_probes import FrameSource, extract
+
+    settings = _load(config)
+    dataset = _source(source, settings)
+    video = _video_settings(settings)
+    options = video.runs[run]
+    output = _test_root(dataset, settings) / "video-features" / run
+    path = output / f"shard-{shard:05d}-of-{num_shards:05d}.npz"
+    if path.is_file():
+        typer.echo(f"{path}: already extracted")
+        return
+    part = Shard(shard, num_shards)
+    clips = _readout_corpus(dataset, settings).clips[: options.clips]
+    clips = [clip for clip in clips if part.owns(clip.clip_id)]
+    encoder, _ = _video_encoder(options.encoder, settings, device)
+    frames = FrameSource(options, settings.test_data.size, dataset.layout.raw / "videos")
+    typer.echo(f"{run}: {len(clips)} clips on shard {shard}/{num_shards}, {encoder.name}")
+    features = extract(
+        clips, _records(dataset, settings), frames, encoder, video.batch_size, typer.echo
+    )
+    typer.echo(features.save(path))
+
+
+def _align(features: Any, corpus: Any) -> tuple[Any, Any]:
+    """Features and corpus restricted to their common clips, in corpus order."""
+    import numpy as np
+
+    present = set(features.clip_ids)
+    rows = np.array([i for i, c in enumerate(corpus.clips) if c.clip_id in present], dtype=int)
+    subset = corpus.subset(rows)
+    return features.select([c.clip_id for c in subset.clips]), subset
+
+
+def _text_targets(dataset: "DatasetSource[Any]", corpus: Any) -> Any:
+    import numpy as np
+
+    from .corpus.languages import written_language
+    from .experiments.video_probes import TextTargets
+    from .metrics.probes import video_split
+    from .text.embedding import EmbeddingStore
+
+    stores = sorted(dataset.layout.text_embeddings.glob("*/identity.json"))
+    if len(stores) != 1:
+        raise FileNotFoundError(f"{dataset.layout.text_embeddings}: expected one embedding set")
+    store = EmbeddingStore(stores[0].parent)
+    mapping = store.clip_rows().to_pydict()
+    row_of = dict(zip(mapping["clip_id"], mapping["row"], strict=True))
+    manifest = _manifest(dataset).select(["clip_id", "caption_language"]).to_pydict()
+    track_of = dict(zip(manifest["clip_id"], manifest["caption_language"], strict=True))
+    ids = [clip.clip_id for clip in corpus.clips]
+    languages = np.array([written_language(track_of[c]) if track_of[c] else "?" for c in ids])
+    return TextTargets.of(
+        np.array([row_of[c] for c in ids]),
+        np.asarray(store.embeddings()),
+        languages,
+        ~video_split(corpus.videos),
+    )
+
+
+@experiment_app.command("video-probes")
+@reports_user_errors
+def video_probes(source: SourceArgument, config: ConfigOption = DEFAULT_CONFIG) -> None:
+    """PC2, PC3, PC4 and the selected-against-contiguous collaudo, from extracted features."""
+    from .checks.report import write_report
+    from .experiments.video_probes import ClipFeatures, run_scores
+
+    settings = _load(config)
+    dataset = _source(source, settings)
+    video = _video_settings(settings)
+    corpus = _readout_corpus(dataset, settings)
+    feature_root = _test_root(dataset, settings) / "video-features"
+    scores, aligned = {}, {}
+    for name, options in video.runs.items():
+        if options.frames != "selected":
+            continue
+        directory = feature_root / name
+        if not directory.is_dir():
+            typer.echo(f"{name}: no features, skipped")
+            continue
+        features, subset = _align(ClipFeatures.load(directory), corpus)
+        targets = _text_targets(dataset, subset)
+        result = run_scores(name, features, subset, targets, video.keypoint_clips)
+        scores[name], aligned[name] = result, (features, subset)
+        hands = " · ".join(
+            f"{part} {s.r2_position:.3f}/{s.r2_velocity:.3f}" for part, s in result.hands.items()
+        )
+        typer.echo(
+            f"{name}: {result.clips} clips; hands R² pos/vel {hands}; T2V R@1 "
+            f"{result.text.t2v[1]:.3f} [{result.text.t2v_r1.low:.3f}, "
+            f"{result.text.t2v_r1.high:.3f}] of {result.text.gallery}"
+        )
+        typer.echo(
+            write_report(
+                result_path("letture-video", f"{dataset.name}.{name}.json"),
+                "video-probes",
+                result,
+            )
+        )
+    _video_decisions(dataset, settings, scores, aligned)
+    if video.low_resolution_run in aligned:
+        _frame_collaudo(
+            dataset.name, settings, corpus, feature_root, aligned[video.low_resolution_run]
+        )
+
+
+def _video_decisions(
+    dataset: "DatasetSource[Any]",
+    settings: "AnalysisConfig",
+    scores: dict[str, Any],
+    aligned: dict[str, Any],
+) -> None:
+    """PC2, PC3 and PC4 from the read-outs of the selected-frame runs present."""
+    import numpy as np
+
+    from .checks.report import write_report
+    from .experiments.video_probes import baseline_report, choose_encoder, choose_resolution
+
+    video = _video_settings(settings)
+    compared = [scores[run] for run in video.encoder_runs if run in scores]
+    if compared:
+        _, subset = aligned[compared[0].run]
+        records = _records(dataset, settings)
+        durations = np.array(
+            [records[c.clip_id].frames / records[c.clip_id].fps for c in subset.clips]
+        )
+        baseline = baseline_report(
+            durations,
+            _text_targets(dataset, subset),
+            subset.videos,
+            {s.run: s.text for s in compared},
+            video.seed,
+        )
+        typer.echo(
+            f"PC2: chance R@1 {baseline.chance_r1:.4f}, "
+            f"random {baseline.random_features.t2v[1]:.4f}, "
+            f"duration {baseline.duration_only.t2v[1]:.4f}; floor {baseline.floor_r1:.4f}"
+        )
+        typer.echo(
+            write_report(result_path("pc2-baseline", f"{dataset.name}.json"), "PC2", baseline)
+        )
+    if len(compared) >= 2:  # noqa: PLR2004
+        choice = choose_encoder(compared, video.default_encoder_run)
+        typer.echo(f"PC3: wins {choice.wins}; chosen {choice.chosen}")
+        typer.echo(
+            write_report(result_path("pc3-encoder-video", f"{dataset.name}.json"), "PC3", choice)
+        )
+    low, high = video.low_resolution_run, video.high_resolution_run
+    if low in scores and high in scores:
+        resolution = choose_resolution(
+            scores[low],
+            scores[high],
+            video.runs[low].size,
+            video.runs[high].size,
+            video.min_hand_gain,
+        )
+        typer.echo(f"PC4: hand R² gain {resolution.gain:+.3f}; chosen {resolution.chosen}²")
+        typer.echo(
+            write_report(result_path("pc4-risoluzione", f"{dataset.name}.json"), "PC4", resolution)
+        )
+
+
+def _frame_collaudo(
+    dataset_name: str,
+    settings: "AnalysisConfig",
+    corpus: Any,
+    feature_root: Path,
+    selected: tuple[Any, Any],
+) -> None:
+    """Selected against contiguous frames, on the clips both runs cover."""
+    import numpy as np
+
+    from .checks.report import write_report
+    from .experiments.pose_teachers import PoseCorpus
+    from .experiments.video_probes import ClipFeatures, frame_selection
+
+    video = _video_settings(settings)
+    directory = feature_root / video.contiguous_run
+    if not video.contiguous_run or not directory.is_dir():
+        typer.echo(f"{video.contiguous_run}: no features, frame collaudo skipped")
+        return
+    contiguous = ClipFeatures.load(directory)
+    extracted = set(contiguous.clip_ids)
+    clips = [c for c in corpus.clips if c.clip_id in extracted]
+    other = PoseCorpus.load(clips, settings.pose_teachers.min_score, "contiguous_")
+    selected_features, selected_corpus = selected
+    common = {c.clip_id for c in other.clips} & set(selected_features.clip_ids)
+
+    def restricted(side: Any) -> Any:
+        rows = [i for i, c in enumerate(side.clips) if c.clip_id in common]
+        return side.subset(np.array(rows, dtype=int))
+
+    mine, theirs = restricted(selected_corpus), restricted(other)
+    ids = [c.clip_id for c in mine.clips]
+    result = frame_selection(
+        selected_features.select(ids),
+        mine,
+        contiguous.select(ids),
+        theirs,
+        video.frame_tolerance,
+    )
+    typer.echo(
+        f"frames: selected {result.selected_r2:.3f} vs contiguous {result.contiguous_r2:.3f} "
+        f"on {result.clips} clips; passed={result.passed}"
+    )
+    typer.echo(
+        write_report(
+            result_path("frame-selezionati-vs-contigui", f"{dataset_name}.json"),
+            "A-frames",
+            result,
+        )
+    )
+
+
+@check_app.command("video-reproduction")
+@reports_user_errors
+def video_reproduction_check(
+    source: SourceArgument,
+    encoder: Annotated[str, typer.Option(help="Encoder listed under video_probes.encoders.")],
+    config: ConfigOption = DEFAULT_CONFIG,
+    device: Annotated[str, typer.Option(help="Device of the encoder.")] = "cuda",
+) -> None:
+    """Collaudo: every weight loads, and our input path gives the official tokens."""
+    from .checks.model_reproduction import video_reproduction
+    from .checks.report import write_report
+
+    settings = _load(config)
+    dataset = _source(source, settings)
+    video = _video_settings(settings)
+    frozen, extra = _video_encoder(encoder, settings, device)
+    load = extra[1] if extra is not None else {}
+    clips = _readout_corpus(dataset, settings).clips[: video.reference_clips]
+    report = video_reproduction(frozen, [_stored_frames(c) for c in clips], load)
+    typer.echo(
+        f"{encoder}: fp32 min cosine {report.fp32.min_cosine:.6f}, max diff "
+        f"{report.fp32.max_abs_difference:.2e}; "
+        f"BGR control {report.swapped_channels.min_cosine:.4f}; "
+        f"bf16 mean cosine {report.bf16.mean_cosine:.5f}; passed={report.passed}"
+    )
+    path = result_path("riproduzione-pesi-video", f"{dataset.name}.{encoder}.json")
+    typer.echo(write_report(path, "A1-video", report))
+    if not report.passed:
+        raise typer.Exit(1)
+
+
+@check_app.command("pose-reproduction")
+@reports_user_errors
+def pose_reproduction_check(
+    source: SourceArgument,
+    config: ConfigOption = DEFAULT_CONFIG,
+    device: Annotated[str, typer.Option(help="Device of the teacher.")] = "cuda",
+) -> None:
+    """Collaudo: the saved S-JEPA teacher reloads whole and reproduces its reference latents."""
+    import torch
+
+    from .checks.model_reproduction import pose_reproduction
+    from .checks.report import write_report
+    from .experiments.pose_teachers import teacher_shape
+    from .models.pose_teachers import SJEPATeacher
+
+    settings = _load(config)
+    dataset = _source(source, settings)
+    video = _video_settings(settings)
+    root = _test_root(dataset, settings) / "pose-teachers"
+    options = settings.pose_teachers
+    teacher = SJEPATeacher(
+        teacher_shape(options), momentum=(options.ema_start, 1.0), centre_rate=options.centre_rate
+    )
+    teacher.load_state_dict(torch.load(root / "sjepa.pt", map_location="cpu"), strict=True)
+    teacher.to(torch.device(device)).eval()
+    tokens = torch.from_numpy(_readout_corpus(dataset, settings).tokens[: video.reference_clips])
+    report = pose_reproduction(
+        lambda t: teacher.encode(t.to(device)), tokens, root / "sjepa-reference.npz"
+    )
+    state = "reference written"
+    if report.agreement is not None:
+        state = f"min cosine {report.agreement.min_cosine:.6f}"
+    typer.echo(f"S-JEPA: {state}; deterministic={report.deterministic}; passed={report.passed}")
+    typer.echo(
+        write_report(
+            result_path("riproduzione-pesi-posa", f"{dataset.name}.json"), "A1-pose", report
+        )
+    )
+    if not report.passed:
+        raise typer.Exit(1)
+
+
+@check_app.command("predictor")
+@reports_user_errors
+def predictor_check(
+    source: SourceArgument,
+    encoder: Annotated[str, typer.Option(help="A V-JEPA 2.1 encoder of video_probes.encoders.")],
+    config: ConfigOption = DEFAULT_CONFIG,
+    device: Annotated[str, typer.Option(help="Device of the model.")] = "cuda",
+) -> None:
+    """PC6: what the predictor holds, and the multi-level input reproducing it at zero."""
+    import torch
+
+    from .checks.model_reproduction import predictor_report
+    from .checks.report import write_report
+
+    settings = _load(config)
+    dataset = _source(source, settings)
+    frozen, extra = _video_encoder(encoder, settings, device)
+    if extra is None:
+        raise ValueError(f"{encoder}: PC6 applies to V-JEPA 2.1 checkpoints only")
+    predictor, load = extra
+    predictor.to(torch.device(device)).eval()
+    clip = _readout_corpus(dataset, settings).clips[0]
+    report = predictor_report(encoder, frozen, predictor, load, _stored_frames(clip))
+    typer.echo(
+        f"{encoder}: levels {report.hierarchical_layers}, {report.per_level_norms} level norms "
+        f"(drift from init {[round(d, 3) for d in report.level_norm_drift]}); "
+        f"predictor {report.predictor_input} -> {report.predictor_output}, depth "
+        f"{report.predictor_depth}, trained mask tokens {report.trained_mask_tokens}; "
+        f"fusion difference {report.fusion_difference:.2e}; passed={report.passed}"
+    )
+    typer.echo(write_report(result_path("pc6-predictor", f"{encoder}.json"), "PC6", report))
+    if not report.passed:
+        raise typer.Exit(1)
+
+
+@experiment_app.command("pose-isotropy")
+@reports_user_errors
+def pose_isotropy(
+    source: SourceArgument,
+    config: ConfigOption = DEFAULT_CONFIG,
+    device: Annotated[
+        str, typer.Option(help="Device of the teacher, the flows and k-NN.")
+    ] = "cuda",
+) -> None:
+    """§4.4.3: whitening, RBIG, SINF and a flow on the S-JEPA latent, before and after."""
+    import torch
+
+    from .checks.report import write_report
+    from .experiments.pose_isotropy import run
+
+    settings = _load(config)
+    dataset = _source(source, settings)
+    weights = _test_root(dataset, settings) / "pose-teachers" / "sjepa.pt"
+    if not weights.is_file():
+        raise FileNotFoundError(f"{weights}: run `signworld experiment pose-teachers` first")
+    report = run(
+        _labelled_clips(dataset, settings),
+        weights,
+        settings.pose_teachers,
+        settings.pose_isotropy,
+        torch.device(device),
+        progress=typer.echo,
+    )
+    for result in report.configs:
+        passed = [part for part, r in result.parts.items() if r.passed]
+        typer.echo(
+            f"{result.method:<9} {result.setting:<14} channel {result.channel_accuracy:.2f} "
+            f"(chance {result.channel_chance:.2f}) · passes on {passed or 'none'}"
+        )
+    path = result_path("isotropizzazione-posa", f"{dataset.name}.json")
+    typer.echo(write_report(path, "pose-isotropy", report))

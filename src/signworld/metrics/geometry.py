@@ -61,6 +61,36 @@ def isoscore(embeddings: Tensor) -> float:
     return float((dimension * fraction - 1.0) / (dimension - 1.0))
 
 
+def covariance_spectrum(embeddings: Tensor) -> Tensor:
+    """Eigenvalues of the covariance, largest first, zero-padded to the dimension."""
+    matrix = centered(_as_matrix(embeddings))
+    variances = torch.linalg.svdvals(matrix).pow(2) / max(matrix.shape[0] - 1, 1)
+    return torch.cat([variances, variances.new_zeros(matrix.shape[1] - len(variances))])
+
+
+def participation_ratio(embeddings: Tensor) -> float:
+    """(Σλ)² / Σλ²: the dimension for isotropic data, 1 when one direction holds all."""
+    variances = covariance_spectrum(embeddings)
+    return float(variances.sum().pow(2) / variances.pow(2).sum())
+
+
+def condition_number(embeddings: Tensor, floor: float = 1e-12) -> float:
+    """Largest over smallest covariance eigenvalue; 1 for isotropic data.
+
+    The smallest is floored at ``floor`` times the largest, so a rank-deficient set reads as
+    ``1 / floor`` instead of infinity.
+    """
+    variances = covariance_spectrum(embeddings)
+    largest = variances[0]
+    return float(largest / variances[-1].clamp_min(floor * largest))
+
+
+def stable_rank(embeddings: Tensor) -> float:
+    """Σλ / λ_max: how many directions carry the largest variance's worth of spread."""
+    variances = covariance_spectrum(embeddings)
+    return float(variances.sum() / variances[0])
+
+
 def mean_random_pair_cosine(
     embeddings: Tensor, pairs: int = 100_000, generator: torch.Generator | None = None
 ) -> float:

@@ -4,6 +4,7 @@ The physical level reads the predicted tokens that fall inside each articulator'
 box is derived from the confident keypoints and projected onto the 16-by-16 patch grid.
 """
 
+import warnings
 from dataclasses import dataclass
 from typing import Final
 
@@ -58,3 +59,25 @@ def articulator_boxes(
             boxes[frame, column] = (*(low - pad), *(high + pad))
             visible[frame, column] = True
     return ArticulatorBoxes(boxes, visible)
+
+
+FRAMES_PER_STEP: Final = 2
+"""Frames per tubelet: a step of the token grid covers two frames."""
+
+
+def step_boxes(
+    track: PoseTrack, threshold: float = CONFIDENCE_THRESHOLD
+) -> tuple[np.ndarray, np.ndarray]:
+    """(steps, 4, 4) box of each articulator over the two frames of each step, (steps, 4) visible.
+
+    The box of a step is the union of its two frames' boxes; it exists if either frame has it.
+    """
+    boxes = articulator_boxes(track, threshold)
+    steps = len(track.keypoints) // FRAMES_PER_STEP
+    frames = boxes.boxes.reshape(steps, FRAMES_PER_STEP, len(Articulator), 4)
+    visible = boxes.visible.reshape(steps, FRAMES_PER_STEP, len(Articulator)).any(axis=1)
+    with warnings.catch_warnings():  # an articulator missing in both frames stays NaN
+        warnings.simplefilter("ignore", RuntimeWarning)
+        low = np.nanmin(frames[..., :2], axis=1)
+        high = np.nanmax(frames[..., 2:], axis=1)
+    return np.concatenate([low, high], axis=-1), visible

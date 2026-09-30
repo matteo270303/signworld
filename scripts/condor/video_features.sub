@@ -1,0 +1,22 @@
+# One frozen-video feature run, split into shards on separate GPU nodes. A finished shard is
+# kept, so the same submission can be repeated after a failure.
+#
+# Submit:  condor_submit -name ettore -a 'dataset=youtube_sl25' -a 'run=vjepa2_1_vitl-256' \
+#              -a 'shards=4' scripts/condor/video_features.sub
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/scripts/condor/video_features.sh
+arguments  = $(dataset) $(run) $(Process) $(shards:4)
+
+output = $(initialdir)/logs/condor/features_$(run)_$(Cluster).$(Process).out
+error  = $(initialdir)/logs/condor/features_$(run)_$(Cluster).$(Process).err
+log    = $(initialdir)/logs/condor/features_$(run)_$(Cluster).log
+
+getenv         = True
+request_cpus   = $(cpus:8)
+request_memory = $(memory:48 GB)
+request_disk   = $(disk:10 GB)
+request_gpus   = 1
+
+queue $(shards:4)

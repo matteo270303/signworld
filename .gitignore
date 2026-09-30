@@ -17,3 +17,4 @@ logs/
 
 # Local secrets
 .env
+collaudo/

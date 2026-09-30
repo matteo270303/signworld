@@ -1,0 +1,3 @@
+# ESP-1, arm A₀: alignment only, no SIGReg on the semantic level (what SIGReg adds).
+name: worldsign-A0
+losses: {arm: A0}

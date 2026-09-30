@@ -45,6 +45,33 @@ def channel_split(
     return test
 
 
+def ridge_path(
+    features: np.ndarray, targets: np.ndarray, weights: np.ndarray, penalties: tuple[float, ...]
+) -> dict[float, np.ndarray]:
+    """``fit_ridge`` for several penalties at once.
+
+    Keypoints with the same weights share one Gram matrix, and every penalty reuses it: the
+    joints of a hand are mostly present or missing together, so a few products replace one per
+    keypoint and penalty, which dominates the cost with wide features.
+    """
+    design = np.concatenate([features, np.ones((len(features), 1))], axis=1)
+    identity = np.eye(design.shape[1])
+    identity[-1, -1] = 0.0
+    paths = {p: np.zeros((design.shape[1], targets.shape[1], 2)) for p in penalties}
+    groups: dict[bytes, list[int]] = {}
+    for keypoint in range(targets.shape[1]):
+        groups.setdefault(weights[:, keypoint].tobytes(), []).append(keypoint)
+    for keypoints in groups.values():
+        weighted = design * weights[:, keypoints[0], None]
+        gram = design.T @ weighted
+        right = np.concatenate([weighted.T @ targets[:, k] for k in keypoints], axis=1)
+        for penalty in penalties:
+            solved = np.linalg.solve(gram + penalty * len(design) * identity, right)
+            for position, keypoint in enumerate(keypoints):
+                paths[penalty][:, keypoint] = solved[:, 2 * position : 2 * position + 2]
+    return paths
+
+
 def fit_ridge(
     features: np.ndarray, targets: np.ndarray, weights: np.ndarray, penalty: float
 ) -> np.ndarray:
@@ -53,15 +80,7 @@ def fit_ridge(
     Features are standardised by the caller. Missing keypoints (weight 0) do not enter the fit
     of their own coordinate, as the confidence-weighted anchor of §4.5.3 would treat them.
     """
-    design = np.concatenate([features, np.ones((len(features), 1))], axis=1)
-    identity = np.eye(design.shape[1])
-    identity[-1, -1] = 0.0
-    coefficients = np.zeros((design.shape[1], targets.shape[1], 2))
-    for keypoint in range(targets.shape[1]):
-        weighted = design * weights[:, keypoint, None]
-        gram = design.T @ weighted + penalty * len(design) * identity
-        coefficients[:, keypoint] = np.linalg.solve(gram, weighted.T @ targets[:, keypoint])
-    return coefficients
+    return ridge_path(features, targets, weights, (penalty,))[penalty]
 
 
 def predict(features: np.ndarray, coefficients: np.ndarray) -> np.ndarray:
@@ -95,13 +114,17 @@ class Probe:
         mean, scale = features.mean(axis=0), features.std(axis=0) + 1e-6
         standard = (features - mean) / scale
         validation = video_split(videos, 0.15)
-        scores = {}
-        for penalty in RIDGE_PENALTIES:
-            coefficients = fit_ridge(
-                standard[~validation], targets[~validation], weights[~validation], penalty
+        path = ridge_path(
+            standard[~validation], targets[~validation], weights[~validation], RIDGE_PENALTIES
+        )
+        scores = {
+            penalty: weighted_r2(
+                targets[validation],
+                predict(standard[validation], coefficients),
+                weights[validation],
             )
-            prediction = predict(standard[validation], coefficients)
-            scores[penalty] = weighted_r2(targets[validation], prediction, weights[validation])
+            for penalty, coefficients in path.items()
+        }
         best = max(scores, key=lambda penalty: np.nan_to_num(scores[penalty], nan=-np.inf))
         return cls(mean, scale, fit_ridge(standard, targets, weights, best))
 

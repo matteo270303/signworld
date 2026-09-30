@@ -90,6 +90,65 @@ pose_teachers:
   probe_clips: 8000       # clips of the linear read-outs, split by video
   seed: 0
 
+# Maps that make the S-JEPA latent isotropic: whitening, RBIG, SINF, RealNVP flow (§4.4.3).
+# Fitted on the training videos of the pose-teacher read-outs, measured on held-out videos.
+pose_isotropy:
+  whitening_shrinkage: [0.0, 0.001, 0.01]
+  iterations: [1, 5, 10, 20, 50]     # RBIG and SINF read at these iterations
+  marginal_knots: 1024
+  sinf_directions: 32
+  sinf_steps: 100
+  sinf_rows: 16384
+  flow_depths: [4, 8]
+  flow_hidden: 512
+  flow_batch: 4096
+  flow_learning_rate: 1.0e-3
+  flow_max_epochs: 60
+  flow_patience: 5
+  knn_neighbours: 20
+  knn_fit_rows: 50000
+  knn_query_rows: 10000
+  diagnostic_rows: 16384
+  sigreg_directions: 256
+  neighbour_queries: 2000
+  neighbour_pool: 20000
+  min_isoscore: 0.8         # success criteria, fixed before the run
+  max_r2_drop: 0.02
+  max_sigreg_ratio: 2.0
+  seed: 0
+
+# Frozen video features and the controls that read them: PC2, PC3, PC4, frame collaudo (§4.12.1).
+video_probes:
+  hub_repo: /lustrehome/mvigone/cache/torch/hub/facebookresearch_vjepa2_main
+  encoders:
+    vjepa2_1_vitl:
+      family: vjepa2_1
+      entrypoint: vjepa2_1_vit_large_384
+      checkpoint: vjepa2_1_vitl_384
+    vjepa2_1_vitb:
+      family: vjepa2_1
+      entrypoint: vjepa2_1_vit_base_384
+      checkpoint: vjepa2_1_vitb_384
+    vjepa2_vitl:
+      family: vjepa2_hf
+      model_id: facebook/vjepa2-vitl-fpc64-256
+  runs:
+    vjepa2_1_vitl-256: {encoder: vjepa2_1_vitl, size: 256}
+    vjepa2_vitl-256: {encoder: vjepa2_vitl, size: 256}
+    vjepa2_1_vitl-384: {encoder: vjepa2_1_vitl, size: 384}
+    vjepa2_1_vitl-256-contiguous: {encoder: vjepa2_1_vitl, size: 256, frames: contiguous, clips: 1000}
+  batch_size: 4
+  keypoint_clips: 4000    # hand read-outs; the text read-out uses all 8 000 read-out clips
+  encoder_runs: [vjepa2_1_vitl-256, vjepa2_vitl-256]
+  default_encoder_run: vjepa2_1_vitl-256
+  low_resolution_run: vjepa2_1_vitl-256
+  high_resolution_run: vjepa2_1_vitl-384
+  min_hand_gain: 0.05
+  contiguous_run: vjepa2_1_vitl-256-contiguous
+  frame_tolerance: 0.05
+  reference_clips: 20
+  seed: 0
+
 contamination:
   benchmark: openasl
   # §3.9: margin around each evaluation clip of the same video.

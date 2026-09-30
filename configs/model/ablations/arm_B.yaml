@@ -1,0 +1,3 @@
+# ESP-1, arm B: alignment + L_unif + SIGReg (do the two mechanisms add up?).
+name: worldsign-B
+losses: {arm: B}

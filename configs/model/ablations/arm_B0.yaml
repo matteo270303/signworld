@@ -1,0 +1,3 @@
+# ESP-1, arm B₀: alignment + L_unif (Wang and Isola), no SIGReg (pairwise uniformity alone).
+name: worldsign-B0
+losses: {arm: B0}

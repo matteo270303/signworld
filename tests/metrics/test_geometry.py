@@ -6,10 +6,13 @@ import torch
 from signworld.metrics.geometry import (
     CollapseAlarm,
     CollapseReading,
+    condition_number,
     effective_rank,
     explained_variance,
     isoscore,
     mean_random_pair_cosine,
+    participation_ratio,
+    stable_rank,
 )
 
 
@@ -57,6 +60,24 @@ def test_random_pair_cosine_detects_a_shared_direction() -> None:
 
     assert mean_random_pair_cosine(isotropic) == pytest.approx(0.0, abs=0.01)
     assert mean_random_pair_cosine(anisotropic) > 0.8
+
+
+def test_spectrum_diagnostics_on_isotropic_and_one_dimensional_data() -> None:
+    isotropic = _gaussian(50_000, 16)
+    one_dimensional = isotropic[:, :1] * torch.eye(16)[0]
+
+    assert participation_ratio(isotropic) == pytest.approx(16.0, rel=0.02)
+    assert stable_rank(isotropic) == pytest.approx(16.0, rel=0.05)
+    assert condition_number(isotropic) == pytest.approx(1.0, abs=0.1)
+    assert participation_ratio(one_dimensional) == pytest.approx(1.0)
+    assert stable_rank(one_dimensional) == pytest.approx(1.0)
+    assert condition_number(one_dimensional) == pytest.approx(1e12)
+
+
+def test_condition_number_reads_the_scale_of_the_axes() -> None:
+    stretched = _gaussian(50_000, 4) * torch.tensor([1.0, 1.0, 1.0, 10.0])
+
+    assert condition_number(stretched) == pytest.approx(100.0, rel=0.05)
 
 
 def test_collapse_alarm_fires_on_constant_vectors_only() -> None:

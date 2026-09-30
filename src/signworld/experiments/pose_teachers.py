@@ -74,11 +74,17 @@ class PoseCorpus:
     frame misses the joint."""
 
     @classmethod
-    def load(cls, clips: Sequence[LabelledClip], min_score: float) -> "PoseCorpus":
-        """Clips without a shoulder reference in any frame are left out."""
+    def load(
+        cls, clips: Sequence[LabelledClip], min_score: float, prefix: str = ""
+    ) -> "PoseCorpus":
+        """Clips without a shoulder reference in any frame are left out.
+
+        ``prefix="contiguous_"`` reads the poses of 64 consecutive frames instead of the
+        selected ones (§4.13.1).
+        """
         kept, tokens, positions, weights, motion = [], [], [], [], []
         for clip in clips:
-            sequence = PoseSequence.from_track(PoseTrack.load(clip.pose), min_score)
+            sequence = PoseSequence.from_track(PoseTrack.load(clip.pose, prefix), min_score)
             if sequence is None:
                 continue
             kept.append(clip)

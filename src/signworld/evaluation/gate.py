@@ -1,13 +1,15 @@
-"""The phase-1 gates (§4.12.2), written down before the training loop so no result can move them.
+"""The gate (§4.12.2), written down before the training loop so no result can move it.
 
-Both read R@1 text → video, in percent, on the OpenASL test split **without fine-tuning**,
+It reads R@1 text → video, in percent, on the OpenASL test split **without fine-tuning**,
 against C²RL, which reaches 62.2 **with** fine-tuning, a ResNet-18 at 224² and other data
 [Lett. 87]: a sanity check, not a claim.
 
-* The first gate judges the gate run (ASL only, ViT-B, arm A).
-* The second gate applies only when the first lands between 0.5 and 0.9 of C²RL. It sits before
-  the ViT-L row of ESP-1, about 43 % of the whole budget (§4.14): the best ViT-B arm of ESP-1
-  must reach X = 0.75 of C²RL, else the ViT-L row does not start.
+* The gate run is run 1 of the plan (§4.14): ViT-L, arm A (alignment + SIGReg). The other
+  four arms of ESP-1 start once it passes stop F2 and stop with it at F3; the ablations on the
+  best arm follow ESP-1.
+* At stop F3 the extrapolated R@1 curve must stay compatible with X = 0.75 of C²RL. X was the
+  second gate before the ViT-L row of ESP-1; with the ViT-B row gone (revision of 29/9) it only
+  judges F3.
 """
 
 from dataclasses import dataclass
@@ -16,34 +18,30 @@ from typing import Final
 
 C2RL_R1_T2V: Final = 62.2
 """C²RL on the OpenASL test split, text → video R@1, after fine-tuning [Lett. 87]."""
-SECOND_GATE_R1: Final = 46.7
+X_R1: Final = 46.7
 """X = 0.75 * 62.2 = 46.65, rounded up to the precision R@1 is reported with."""
 
 
 class Decision(StrEnum):
     STOP_BELOW_BASELINE = "stop: below the ridge baseline of PC2, a bug or a harmful objective"
     STOP = "stop: below half of C²RL, beyond what adjustments can recover"
-    SECOND_GATE = "proceed to the ViT-B row of ESP-1; the second gate decides the ViT-L row"
-    PROCEED = "proceed"
+    PROCEED = "proceed: compare the arms and build the final model"
 
 
 @dataclass(frozen=True, slots=True)
 class GatePolicy:
     reference: float = C2RL_R1_T2V
     stop_below: float = 0.5
-    proceed_from: float = 0.9
-    second_gate: float = SECOND_GATE_R1
+    x: float = X_R1
 
-    def first(self, r1: float, ridge_baseline: float) -> Decision:
-        """The gate run's R@1 against the ridge baseline of PC2 and the share of C²RL."""
+    def final(self, r1: float, ridge_baseline: float) -> Decision:
+        """The gate run's R@1 at F4 against the ridge baseline of PC2 and half of C²RL."""
         if r1 < ridge_baseline:
             return Decision.STOP_BELOW_BASELINE
         if r1 < self.stop_below * self.reference:
             return Decision.STOP
-        if r1 < self.proceed_from * self.reference:
-            return Decision.SECOND_GATE
         return Decision.PROCEED
 
-    def second(self, best_vit_b_r1: float) -> bool:
-        """Whether the ViT-L row of ESP-1 may start, from its best ViT-B arm."""
-        return best_vit_b_r1 >= self.second_gate
+    def on_track(self, extrapolated_r1: float) -> bool:
+        """Stop F3: whether the extrapolated R@1 curve stays compatible with X."""
+        return extrapolated_r1 >= self.x

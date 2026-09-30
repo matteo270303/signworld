@@ -1,0 +1,3 @@
+# ESP-2, on the best arm θ* of ESP-1: no physical level (no pose encoder, physical predictor,
+# anchor or pose SIGReg); only the semantic pass. Lay it over the winning arm_*.yaml.
+physical: {enabled: false}

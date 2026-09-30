@@ -66,7 +66,8 @@ with another shard count is safe: items are assigned to shards by a stable hash.
 Each dataset gets its own manifest, `<data_root>/<source>/manifest/clips.parquet`, with one row
 per captioned sentence clip; corpora are never merged at this stage. The checks of the
 pre-training collaudo (§4.13.1 of the project document) and the preliminary controls (§4.12.1)
-write JSON reports to `<data_root>/<source>/reports/`. Settings live in
+write JSON reports to `collaudo/<test>/`, one folder per test with a README
+(why, what, how); see `collaudo/README.md`. Settings live in
 `configs/analysis.yaml`.
 
 ```bash
@@ -100,6 +101,19 @@ other spoken languages are excluded by §3.8, and videos whose sign language the
 The metrics shared with training and evaluation (`signworld.metrics`: recall@k with a
 duplicate-tolerant variant and bootstrap intervals, hubness, effective rank, IsoScore, collapse
 alarm, SIGReg) are tested on synthetic cases with known answers, as the collaudo requires.
+
+### Frozen video encoders (PC2, PC3, PC4, PC6, weight reproduction)
+
+V-JEPA 2.1 is built from a local copy of Meta's torch.hub repository (`video_probes.hub_repo`),
+V-JEPA 2 from the Hugging Face cache; the nodes run offline. One script submits every GPU job
+in parallel: three feature runs in shards, the contiguous-frame run and the model checks.
+
+```bash
+scripts/condor/submit_video_collaudo.sh youtube_sl25 4
+# when the feature jobs are done (CPU):
+condor_submit -name ettore -a 'arguments = experiment video-probes youtube_sl25 -c configs/analysis.yaml' \
+    -a 'job=video_probes' -a 'cpus=16' -a 'memory=64 GB' scripts/condor/analysis.sub
+```
 
 ## Reproducibility
 

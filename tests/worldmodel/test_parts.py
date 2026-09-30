@@ -55,17 +55,23 @@ def test_inject_replaces_named_linears_and_only_adapters_train() -> None:
 # ----------------------------------------------------------------------------- masks
 
 
-def test_masks_are_tubes_disjoint_and_equal_in_length() -> None:
+def test_a_mask_is_the_same_tube_in_every_frame_and_covers_every_token() -> None:
+    grid = TokenGrid()  # the full 32 steps: a cut would show in the last ones
     generator = torch.Generator().manual_seed(0)
     for spec in (MaskSpec(blocks=8, spatial_scale=0.15), MaskSpec(blocks=2, spatial_scale=0.7)):
-        mask = MultiBlockMasks(spec, GRID)(6, generator)
-        for context, target in zip(mask.context, mask.target, strict=True):
-            assert not set(context.tolist()) & set(target.tolist())
-            steps = GRID.positions(target)[:, 0]
-            spatial = GRID.positions(target)[:, 1:]
+        masks = MultiBlockMasks(spec, grid)
+        mask = masks(64, generator)
+        for indices in (mask.context[0], mask.target[0]):
+            steps, spatial = grid.positions(indices)[:, 0], grid.positions(indices)[:, 1:]
             first = {tuple(p) for p in spatial[steps == 0].tolist()}
-            assert all({tuple(p) for p in spatial[steps == s].tolist()} == first for s in range(4))
-        assert 0.5 < mask.ratio < 0.99
+            assert all(
+                {tuple(p) for p in spatial[steps == s].tolist()} == first for s in range(grid.steps)
+            )
+        assert mask.context.shape[1] + mask.target.shape[1] == grid.size  # nothing cut
+        assert not set(mask.context[0].tolist()) & set(mask.target[0].tolist())
+        assert torch.equal(mask.context, mask.context[:1].expand(64, -1))  # one per batch
+        assert not torch.equal(masks(64, generator).context[0], mask.context[0])  # new draw
+        assert 0.3 < mask.ratio < 0.999
 
 
 def test_the_policy_draws_every_mask_kind_each_step() -> None:
@@ -85,10 +91,20 @@ def test_visible_tokens_weigh_one_over_the_root_of_their_distance() -> None:
     weights = context_weights(mask, grid)
 
     assert torch.allclose(weights[0], torch.tensor([4.0, 3.0, 2.0, 1.0]).rsqrt())
-    roles = token_roles(mask, grid)
+    roles = token_roles(mask, grid, weight_distance=True)
     assert roles.masked[0].tolist() == [0.0, 0.0, 0.0, 0.0, 1.0]
     assert roles.visible[0].tolist() == [1.0, 1.0, 1.0, 1.0, 0.0]
     assert torch.allclose(roles.distance[0, :4], weights[0]) and roles.distance[0, 4] == 0.0
+
+
+def test_in_the_cooldown_every_visible_token_weighs_one() -> None:
+    grid = TokenGrid(steps=1, rows=1, columns=5)
+    mask = Mask(context=torch.tensor([[0, 1, 2, 3]]), target=torch.tensor([[4]]))
+
+    roles = token_roles(mask, grid)
+
+    assert roles.distance[0].tolist() == [1.0, 1.0, 1.0, 1.0, 0.0]
+    assert LambdaSchedule.constant(0.5).at(0, 100) == 0.5
 
 
 def test_lambda_warms_up_then_holds() -> None:

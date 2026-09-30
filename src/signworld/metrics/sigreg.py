@@ -12,6 +12,7 @@ expectation is ``∫ (1 - exp(-t^2)) exp(-t^2 / 2) dt ≈ 1.06``) whatever the b
 non-Gaussian sample grows with N: it is what gives LeJEPA's λ = 0.05 its meaning.
 """
 
+from collections.abc import Callable
 from typing import Final
 
 import torch
@@ -50,12 +51,17 @@ class SIGReg:
         self._target = torch.exp(-0.5 * self._t.pow(2))
 
     def __call__(
-        self, embeddings: Tensor, directions: Tensor, samples: int | None = None
+        self,
+        embeddings: Tensor,
+        directions: Tensor,
+        samples: int | None = None,
+        reduce: Callable[[Tensor], Tensor] | None = None,
     ) -> Tensor:
         """Statistic averaged over ``directions``; ``embeddings`` is (samples, dimensions).
 
-        ``samples`` is the N of the factor, by default the rows given; with the characteristic
-        function averaged across GPUs it is the number of rows on all of them (LeJEPA).
+        ``reduce`` sums a tensor over the GPUs of a data-parallel run: the characteristic
+        function is then that of the samples of every GPU and N is their total number, as in
+        LeJEPA. ``samples`` overrides N.
         """
         require_matrix("embeddings", embeddings)
         require_matrix("directions", directions)
@@ -68,9 +74,12 @@ class SIGReg:
         target = self._target.to(embeddings.device)
         projections = embeddings.float() @ directions.float().T
         phase = projections[..., None] * t
-        real = phase.cos().mean(dim=0)
-        imaginary = phase.sin().mean(dim=0)
+        sums = torch.stack([phase.cos().sum(dim=0), phase.sin().sum(dim=0)])
+        count = torch.tensor(float(embeddings.shape[0]), device=embeddings.device)
+        if reduce is not None:
+            sums, count = reduce(sums), reduce(count)
+        real, imaginary = sums / count
         integrand = ((real - target).pow(2) + imaginary.pow(2)) * target
-        count = embeddings.shape[0] if samples is None else samples
-        per_direction = torch.trapezoid(integrand, t, dim=-1) * count
+        factor = count if samples is None else torch.tensor(float(samples))
+        per_direction = torch.trapezoid(integrand, t, dim=-1) * factor
         return per_direction.mean()

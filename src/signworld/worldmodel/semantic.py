@@ -7,6 +7,8 @@ retrieval vector. With ``hypotheses = K > 1`` (ESP-4, optional) the queries form
 each group's mean is one hypothesis ŷ_k, at zero extra parameters (§4.5.9).
 """
 
+from typing import cast
+
 import torch
 from torch import Tensor, nn
 from torch.nn import functional
@@ -82,16 +84,42 @@ class SemanticPredictor(nn.Module):
         self.norm = nn.LayerNorm(width)
         self.outputs = nn.Linear(width, settings.output_dim)
 
-    def forward(self, tokens: Tensor) -> Tensor:
-        """(batch, N, input_dim) encoder tokens of the whole clip to (batch, K, output_dim)."""
-        batch = tokens.shape[0]
+    def _inputs(self, tokens: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         if tokens.shape[1] != self.grid.size:
             raise ValueError(f"expected {self.grid.size} tokens, got {tokens.shape[1]}")
         cos, sin = self.rope.rotation(tokens.device)
-        x = torch.cat([self.inputs(tokens), self.queries.expand(batch, -1, -1)], dim=1)
+        x = torch.cat([self.inputs(tokens), self.queries.expand(len(tokens), -1, -1)], dim=1)
+        return x, cos.to(x.dtype), sin.to(x.dtype)
+
+    def query_outputs(self, tokens: Tensor) -> Tensor:
+        """(batch, queries, width): the normalised output of every query, before the mean."""
+        x, cos, sin = self._inputs(tokens)
         for block in self.blocks:
-            x = block(x, cos.to(x.dtype), sin.to(x.dtype))
-        queries = self.norm(x[:, -self.settings.queries :])
-        groups = queries.view(batch, self.settings.hypotheses, -1, queries.shape[-1]).mean(dim=2)
-        predicted: Tensor = self.outputs(groups)
+            x = block(x, cos, sin)
+        outputs: Tensor = self.norm(x[:, -self.settings.queries :])
+        return outputs
+
+    def project(self, queries: Tensor) -> Tensor:
+        """Query outputs to (batch, K, output_dim): the mean of each group of queries."""
+        groups = queries.view(len(queries), self.settings.hypotheses, -1, queries.shape[-1])
+        predicted: Tensor = self.outputs(groups.mean(dim=2))
         return predicted
+
+    def forward(self, tokens: Tensor) -> Tensor:
+        """(batch, N, input_dim) encoder tokens of the whole clip to (batch, K, output_dim)."""
+        return self.project(self.query_outputs(tokens))
+
+    @torch.no_grad()
+    def query_attention(self, tokens: Tensor) -> Tensor:
+        """(batch, heads, queries, N): how the queries attend to the video in the last block."""
+        x, cos, sin = self._inputs(tokens)
+        for block in self.blocks[:-1]:
+            x = block(x, cos, sin)
+        last = cast(Block, self.blocks[-1])
+        batch, length, width = x.shape
+        qkv = last.qkv(last.norm1(x)).view(batch, length, 3, last.heads, -1).permute(2, 0, 3, 1, 4)
+        q, k = RoPE3D.apply(qkv[0], cos, sin), RoPE3D.apply(qkv[1], cos, sin)
+        queries = q[:, :, -self.settings.queries :]
+        scores = queries @ k.transpose(-2, -1) / (width // last.heads) ** 0.5
+        attention: Tensor = scores.softmax(dim=-1)[..., : self.grid.size]
+        return attention

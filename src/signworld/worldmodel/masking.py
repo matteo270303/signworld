@@ -1,14 +1,20 @@
 """V-JEPA's multi-block masks and V-JEPA 2.1's distance weights (§4.5.2).
 
-``MultiBlockMasks`` reproduces ``src/masks/multiseq_multiblock3d._MaskGenerator`` of the
-official repository: one block size per call, ``blocks`` blocks at random positions per clip,
-the union removed from the context; context and target lists are truncated to the shortest in
-the batch, so tokens beyond it are neither context nor target. ``MaskPolicy`` draws every kind
-of mask at every step, as V-JEPA does with its short (8 x 15 %) and long (2 x 70 %) masks.
+``MultiBlockMasks`` draws the blocks as ``src/masks/multiseq_multiblock3d._MaskGenerator`` of
+the official repository: a random block size, ``blocks`` blocks at random positions, each
+spanning every step (a tube), the union removed from the context. One draw serves every clip of
+the batch on this GPU, so the mask is identical in every frame of a clip and nothing is cut.
+V-JEPA draws the positions per clip and truncates every clip's lists to the shortest in the
+batch; at 64 clips per GPU that would drop 43 % (short masks) and 74 % (long masks) of the
+visible tokens, all from the last steps, so the clip with the most context would see it only
+in its first 13 or 6 of 32 steps. Masks still change at every step, on every GPU, and between
+the two kinds. ``MaskPolicy`` draws every kind at every step, as V-JEPA does with its short
+(8 x 15 %) and long (2 x 70 %) masks.
 
 ``context_weights`` gives each visible token ``1 / √d``, with ``d`` its Euclidean distance on
 the (step, row, column) grid to the nearest masked token: ``compute_mask_distance`` of
-V-JEPA 2.1 with ``weight_distance_loss``.
+V-JEPA 2.1 with ``weight_distance_loss``, used in its pre-training. Its cooldown, which we
+follow, weighs every visible token 1.
 """
 
 import math
@@ -88,20 +94,14 @@ class MultiBlockMasks:
         return keep.flatten()
 
     def __call__(self, batch: int, generator: torch.Generator) -> Mask:
+        """One mask for the ``batch`` clips: every token is either visible or masked."""
         size = self._block_size(generator)
-        contexts: list[Tensor] = []
-        targets: list[Tensor] = []
-        while len(contexts) < batch:
+        keep = self._clip(size, generator)
+        while not keep.any():  # an all-masked draw is redrawn, as in V-JEPA
             keep = self._clip(size, generator)
-            if keep.any():  # an all-masked clip is redrawn, as in V-JEPA
-                contexts.append(torch.nonzero(keep).squeeze(1))
-                targets.append(torch.nonzero(~keep).squeeze(1))
-        n_context = min(len(c) for c in contexts)
-        n_target = min(len(t) for t in targets)
-        return Mask(
-            torch.stack([c[:n_context] for c in contexts]),
-            torch.stack([t[:n_target] for t in targets]),
-        )
+        context = torch.nonzero(keep).squeeze(1)
+        target = torch.nonzero(~keep).squeeze(1)
+        return Mask(context.expand(batch, -1), target.expand(batch, -1))
 
 
 class MaskPolicy:
@@ -117,6 +117,12 @@ class MaskPolicy:
 
 def context_weights(mask: Mask, grid: TokenGrid) -> Tensor:
     """(batch, n_context) ``1 / √d_min``: V-JEPA 2.1's weights of the visible tokens."""
+    shared = bool(
+        (mask.context == mask.context[:1]).all() and (mask.target == mask.target[:1]).all()
+    )
+    if shared and len(mask.context) > 1:  # one mask for the batch: measure it once
+        first = context_weights(Mask(mask.context[:1], mask.target[:1]), grid)
+        return first.expand(len(mask.context), -1)
     context = grid.positions(mask.context).float()
     target = grid.positions(mask.target).float()
     nearest = torch.stack(
@@ -140,14 +146,16 @@ class TokenRoles:
     visible: Tensor
     """1 for a visible token: it enters ``L_ctx`` (``predict_all``)."""
     distance: Tensor
-    """``1 / √d`` for a visible token, 0 elsewhere: its weight in ``L_ctx``."""
+    """Weight of a visible token in ``L_ctx`` (1, or ``1 / √d``), 0 elsewhere."""
 
 
-def token_roles(mask: Mask, grid: TokenGrid) -> TokenRoles:
-    """Masked and visible indicators and the visible tokens' distance weights on the grid."""
+def token_roles(mask: Mask, grid: TokenGrid, weight_distance: bool = False) -> TokenRoles:
+    """Masked and visible indicators and the visible tokens' weights on the grid."""
     batch, device = mask.context.shape[0], mask.context.device
     masked = torch.zeros(batch, grid.size, device=device).scatter_(1, mask.target, 1.0)
     visible = torch.zeros(batch, grid.size, device=device).scatter_(1, mask.context, 1.0)
+    if not weight_distance:
+        return TokenRoles(masked, visible, visible.clone())
     distance = torch.zeros(batch, grid.size, device=device).scatter_(
         1, mask.context, context_weights(mask, grid)
     )
@@ -162,6 +170,11 @@ class LambdaSchedule:
     start: float
     end: float
     """``start`` and ``end`` as fractions of the run."""
+
+    @classmethod
+    def constant(cls, value: float) -> "LambdaSchedule":
+        """λ from the first step, as V-JEPA 2.1's cooldown."""
+        return cls(value, 0.0, 0.0)
 
     def at(self, step: int, total: int) -> float:
         progress = step / max(total, 1)

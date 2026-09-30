@@ -33,6 +33,8 @@ class EncoderSettings(FrozenModel):
     hub_repo: Path
     entrypoint: str = "vjepa2_1_vit_large_384"
     checkpoint: Path
+    checkpoint_sha256: str | None = None
+    """Expected SHA-256 of ``checkpoint`` (P5); None: recorded at the first launch."""
     levels: tuple[int, ...] = (5, 11, 17, 23)
     """Blocks 6/12/18/24 (0-based), as V-JEPA 2.1's own ``hierarchical_layers``."""
     lora: LoRASettings = Field(default_factory=LoRASettings)
@@ -83,8 +85,15 @@ class PhysicalSettings(FrozenModel):
     """Only the first mask token of the released predictor is trained (PC6)."""
     context_lambda: float = 0.5
     """λ of the visible-token term (V-JEPA 2.1)."""
+    lambda_progressive: bool = False
+    """False: λ from the first step, as V-JEPA 2.1's cooldown (``lambda_progressive: false``),
+    which is our regime: 64-frame clips from an already trained model. True: its pre-training
+    warm-up, over ``lambda_warmup``."""
     lambda_warmup: tuple[float, float] = (15_000 / 252_000, 30_000 / 252_000)
     """Warm-up of λ from 0 to its value, as fractions of the run: V-JEPA 2.1's 15k-30k of 252k."""
+    weight_distance: bool = False
+    """False: every visible token weighs 1 in L_ctx, as V-JEPA 2.1's cooldown
+    (``weight_distance_loss: false``). True: ``1 / √d``, as its pre-training."""
     box_threshold: float = 0.3
     """Keypoint score above which a joint shapes its articulator's box [Aperto: 0.3 or 1.0]."""
 
@@ -152,12 +161,45 @@ class AugmentationSettings(FrozenModel):
 
 
 class PoseEncoderSettings(FrozenModel):
-    """S-JEPA as the physical target; implemented with the pose branch (§4.4.3)."""
+    """S-JEPA, pre-trained by us in PC5, as the target of the physical level (§4.4.3)."""
 
+    checkpoint: Path | None = None
+    """The S-JEPA teacher of PC5 (``pose-teachers/sjepa.pt``); its EMA encoder is the target."""
+    checkpoint_sha256: str | None = None
+    """Expected SHA-256 of ``checkpoint`` (P5); None: recorded at the first launch."""
+    width: PositiveInt = 256
+    depth: PositiveInt = 8
+    heads: PositiveInt = 8
+    """Shape of the checkpoint's encoder: 8 blocks, d = 256, 8 heads (PC5)."""
     trainable: bool = True
-    """False for ESP-3: frozen, no LoRA, SIGReg on the pose only as a diagnostic."""
+    """False for ESP-3: frozen, with neither LoRA nor final layer; SIGReg on the pose is then
+    a diagnostic and the anchor trains only its decoders."""
     lora_rank: PositiveInt = 4
+    lora_alpha: PositiveFloat = 4.0
+    """alpha / r = 1, as in the video LoRA [Aperto]."""
+    final_layer: bool = True
+    """A trainable linear map per articulator on s_{t,a}, initialised to the identity."""
     learning_rate_multiplier: float = 0.05
+    """On S-JEPA's LoRA: the encoder of the target moves slowly (VL-JEPA's x0.05)."""
+    final_layer_learning_rate_multiplier: float = 0.5
+    """Peak learning rate of the final layer, relative to the base [Aperto]."""
+    final_layer_warmup: float = 0.10
+    """Linear warm-up of the final layer over this fraction of the run."""
+    final_layer_decay_end: float = 0.5
+    """Cosine decay of the final layer from the end of its warm-up to 0 at this fraction of the
+    run, after which it no longer moves: the target settles, as FreezeOut anneals each layer to
+    zero on its own schedule [Aperto]."""
+
+
+class TextSettings(FrozenModel):
+    """The text branch after the pre-computed EmbeddingGemma rows (§4.4.4)."""
+
+    input_dim: PositiveInt = 768
+    """EmbeddingGemma's whole vector: no truncation (29/9)."""
+    hidden: PositiveInt = 512
+    output_dim: PositiveInt = 512
+    dropout: float = 0.1
+    """Between the two layers of the head: «dropout nelle teste» of §4.11 [Aperto: PC7]."""
 
 
 class TrainingSettings(FrozenModel):
@@ -180,6 +222,41 @@ class TrainingSettings(FrozenModel):
     """Curriculum stages as fractions of the steps [Aperto: PC7]."""
     precision: Literal["bf16", "fp32"] = "bf16"
     seed: int = 0
+    validation_every: PositiveInt = 4_000
+    """Steps between validations and checkpoints: ~500,000 clips at batch 128 (§4.10)."""
+    log_every: PositiveInt = 20
+    find_unused_parameters: bool = False
+    """DDP's search for parameters a step did not use; the curriculum freezes them instead."""
+    preflight_overfit_steps: PositiveInt = 30
+    """P13: steps of the single-batch overfit, with SIGReg off, before a run starts."""
+
+
+class DataSettings(FrozenModel):
+    """Where the clips come from and how they are split and loaded (§3.4, §4.10)."""
+
+    index: Path | None = None
+    """The training index of stage 0 (``build_training_index``), one row per usable clip."""
+    embeddings: Path | None = None
+    """The directory of the pre-computed EmbeddingGemma rows (``EmbeddingStore``)."""
+    validation_fraction: float = 0.1
+    """Share of the channels of each sign language held out for validation [Aperto]."""
+    held_out_languages: tuple[str, ...] = ()
+    """Sign languages kept out of training entirely: the held-out language split [Aperto]."""
+    seen_video_fraction: float = 0.02
+    """Share of the videos of training channels held out, to measure the gap between seen
+    channels and held-out channels (§4.13.4) [Aperto]."""
+    manifest: Path | None = None
+    """The corpus manifest, for the contamination assertion P2."""
+    benchmarks: tuple[Path, ...] = ()
+    """Manifests of the benchmarks (OpenASL, ...) whose validation and test clips must not
+    overlap the corpus (§3.9, P2)."""
+    validation_clips: PositiveInt = 2_000
+    """Fixed subset of the held-out channel split validated during training (§4.10)."""
+    statistics_clips: PositiveInt = 20_000
+    """Training clips whose keypoints fix the scale of L_anchor."""
+    workers: int = 8
+    """Data loader processes per GPU."""
+    prefetch: PositiveInt = 2
 
 
 class WorldSignConfig(FrozenModel):
@@ -193,7 +270,23 @@ class WorldSignConfig(FrozenModel):
     sampling: SamplingSettings = Field(default_factory=SamplingSettings)
     augmentation: AugmentationSettings = Field(default_factory=AugmentationSettings)
     pose_encoder: PoseEncoderSettings = Field(default_factory=PoseEncoderSettings)
+    text: TextSettings = Field(default_factory=TextSettings)
     training: TrainingSettings = Field(default_factory=TrainingSettings)
+    data: DataSettings = Field(default_factory=DataSettings)
+
+    @model_validator(mode="after")
+    def _widths(self) -> Self:
+        if self.text.output_dim != self.semantic.output_dim:
+            raise ValueError(
+                f"the text head gives {self.text.output_dim} dimensions and the semantic "
+                f"predictor {self.semantic.output_dim}: E_sem compares them"
+            )
+        if self.physical.enabled and self.physical.target_dim != self.pose_encoder.width:
+            raise ValueError(
+                f"the physical head predicts {self.physical.target_dim} channels and the pose "
+                f"encoder gives {self.pose_encoder.width}"
+            )
+        return self
 
 
 def merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

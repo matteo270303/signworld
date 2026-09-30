@@ -10,9 +10,9 @@ with ``L_pred_sem`` and ``SIGReg_sem`` set by the arm of ESP-1:
     C    InfoNCE              ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
 
 SIGReg is applied to each modality apart, as LeJEPA applies it to each view, with the same
-random directions for both. The pose terms (``L_anchor``, ``SIGReg_posa``) belong to the pose
-branch and enter as given tensors; with the physical level off (ESP-2) every physical term is
-absent.
+random directions for both; on the pose it is applied to each articulator apart
+(``SIGReg_posa``, §4.5.6). ``L_anchor`` comes from the pose branch. With the physical level off
+(ESP-2) every physical term is absent.
 """
 
 from collections.abc import Sequence
@@ -24,6 +24,7 @@ from torch.nn import functional
 
 from ..metrics.sigreg import SIGReg, random_directions
 from .config import LossSettings, SemanticSettings
+from .distributed import SINGLE, Distributed
 from .physical import PhysicalPrediction
 
 
@@ -41,9 +42,10 @@ def physical_energy(
 
     * ``L_pred``: the box read from its masked tokens, weighted by how many they are, so that
       every masked token counts once, as in V-JEPA's mean over the masked tokens;
-    * ``L_ctx``: the box read from its visible tokens, weighted by the sum of their ``1 / √d``
-      and divided by their number: V-JEPA's mean over the visible tokens of the error times
-      ``1 / √d``.
+    * ``L_ctx``: the box read from its visible tokens, weighted by the sum of their weights and
+      divided by their number: V-JEPA's mean over the visible tokens of the weighted error.
+      The weight is 1 in V-JEPA 2.1's cooldown, which we follow, and ``1 / √d`` in its
+      pre-training.
 
     ``target`` (batch, steps, parts, C); ``confidence`` (batch, steps, parts).
     """
@@ -94,12 +96,17 @@ class InfoNCE(nn.Module):
         super().__init__()
         self.log_temperature = nn.Parameter(torch.tensor(temperature).log())
 
-    def forward(self, video: Tensor, text: Tensor, videos: Sequence[str]) -> Tensor:
+    def logits(self, video: Tensor, text: Tensor, videos: Sequence[str]) -> Tensor:
+        """(batch, batch) scaled cosines; pairs of different clips of one video at -inf (P15)."""
         logits = functional.normalize(video, dim=-1) @ functional.normalize(text, dim=-1).T
         logits = logits / self.log_temperature.exp()
         same = torch.tensor([[a == b for b in videos] for a in videos], device=logits.device)
         excluded = same & ~torch.eye(len(videos), dtype=torch.bool, device=logits.device)
-        logits = logits.masked_fill(excluded, float("-inf"))
+        masked: Tensor = logits.masked_fill(excluded, float("-inf"))
+        return masked
+
+    def forward(self, video: Tensor, text: Tensor, videos: Sequence[str]) -> Tensor:
+        logits = self.logits(video, text, videos)
         labels = torch.arange(len(videos), device=logits.device)
         return 0.5 * (
             functional.cross_entropy(logits, labels) + functional.cross_entropy(logits.T, labels)
@@ -109,18 +116,22 @@ class InfoNCE(nn.Module):
 class SIGRegLoss:
     """SIGReg with fresh random directions at every call (LeJEPA) [Lett. 35].
 
-    The views share the directions of the call; the statistic is averaged over them.
+    The views share the directions of the call; the statistic is averaged over them. Across
+    GPUs each view's characteristic function is that of the samples of every GPU, and the
+    ``generator`` must draw the same directions on every rank.
     """
 
-    def __init__(self, directions: int, knots: int) -> None:
+    def __init__(self, directions: int, knots: int, collective: Distributed = SINGLE) -> None:
         self.directions = directions
         self.statistic = SIGReg(knots)
+        self.collective = collective
 
     def __call__(self, views: Sequence[Tensor], generator: torch.Generator) -> Tensor:
         rows = [view.reshape(-1, view.shape[-1]).float() for view in views]
         slices = random_directions(rows[0].shape[1], self.directions, generator=generator)
         slices = slices.to(rows[0].device)
-        return torch.stack([self.statistic(view, slices) for view in rows]).mean()
+        reduce = self.collective.all_sum if self.collective.active else None
+        return torch.stack([self.statistic(view, slices, reduce=reduce) for view in rows]).mean()
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,17 +140,26 @@ class LossTerms:
 
     total: Tensor
     parts: dict[str, Tensor] = field(default_factory=dict)
+    diagnostics: dict[str, Tensor] = field(default_factory=dict)
+    """Values measured without entering the total (SIGReg on a frozen pose, ESP-3)."""
 
 
 class Objective(nn.Module):
     """The objective of one arm; the pose terms arrive from the pose branch."""
 
-    def __init__(self, losses: LossSettings, semantic: SemanticSettings, physical: bool) -> None:
+    def __init__(
+        self,
+        losses: LossSettings,
+        semantic: SemanticSettings,
+        physical: bool,
+        collective: Distributed = SINGLE,
+    ) -> None:
         super().__init__()
         self.settings = losses
         self.relaxation = semantic.relaxation if semantic.hypotheses > 1 else 0.0
         self.physical = physical
-        self.sigreg = SIGRegLoss(losses.sigreg_directions, losses.sigreg_knots)
+        self.collective = collective
+        self.sigreg = SIGRegLoss(losses.sigreg_directions, losses.sigreg_knots, collective)
         self.infonce = InfoNCE(losses.infonce_temperature) if losses.arm == "C" else None
 
     @property
@@ -153,24 +173,41 @@ class Objective(nn.Module):
     def semantic_terms(
         self, predicted: Tensor, text: Tensor, videos: Sequence[str], generator: torch.Generator
     ) -> dict[str, Tensor]:
-        """``predicted`` (batch, K, d) and ``text`` (batch, d)."""
+        """``predicted`` (batch, K, d) and ``text`` (batch, d), this GPU's share of the batch.
+
+        InfoNCE and L_unif compare all the pairs of the whole batch, gathered from every GPU.
+        """
         terms: dict[str, Tensor] = {}
+        gather = self.collective.all_gather
         if self.infonce is not None:
             if predicted.shape[1] != 1:
                 raise ValueError("arm C with several hypotheses is not defined here")
-            terms["infonce"] = self.infonce(predicted[:, 0], text, videos)
+            everyone = self.collective.gather_objects(videos)
+            terms["infonce"] = self.infonce(gather(predicted[:, 0]), gather(text), everyone)
         elif predicted.shape[1] > 1:
             terms["e_sem"] = free_energy(predicted, text, self.relaxation).mean()
         else:
             terms["e_sem"] = semantic_energy(predicted[:, 0], text).mean()
         if self.uses_uniformity:
             terms["unif"] = 0.5 * (
-                uniformity(predicted.flatten(0, 1), self.settings.uniformity_t)
-                + uniformity(text, self.settings.uniformity_t)
+                uniformity(gather(predicted.flatten(0, 1)), self.settings.uniformity_t)
+                + uniformity(gather(text), self.settings.uniformity_t)
             )
         if self.uses_sigreg:
             terms["sigreg_sem"] = self.sigreg([predicted.flatten(0, 1), text], generator)
         return terms
+
+    def pose_sigreg(self, latent: Tensor, present: Tensor, generator: torch.Generator) -> Tensor:
+        """``SIGReg_posa = ¼ Σ_a SIGReg({s_{t,a}})`` over the steps where ``a`` is present.
+
+        ``latent`` (batch, steps, 4, C); ``present`` (batch, steps, 4) bool. An articulator with
+        fewer than two present steps in the whole batch is left out, on every GPU alike.
+        """
+        counts = self.collective.all_sum(present.sum(dim=(0, 1)).float())
+        parts = [part for part in range(latent.shape[2]) if counts[part] > 1]
+        if not parts:
+            return latent.new_zeros(())
+        return self.sigreg([latent[:, :, part][present[:, :, part]] for part in parts], generator)
 
     def combine(self, terms: dict[str, Tensor]) -> LossTerms:
         """``(1 - λ)·(predictive) + λ·(SIGReg)`` over whichever terms are present."""

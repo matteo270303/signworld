@@ -43,7 +43,7 @@ class PhysicalPrediction:
     visible_count: Tensor
     """(batch, steps, parts) visible tokens in the box."""
     visible_weight: Tensor
-    """(batch, steps, parts) sum of the visible tokens' ``1 / √d`` in the box."""
+    """(batch, steps, parts) sum of the visible tokens' weights in the box (1, or ``1 / √d``)."""
 
 
 class PhysicalPredictor(nn.Module):

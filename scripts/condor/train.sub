@@ -1,0 +1,25 @@
+# One WorldSign training run on one node, DDP over its GPUs (§4.10: 2 H100 per run).
+# The run resumes from its last checkpoint if the job is repeated.
+#
+# Submit (reference arm A):
+#   condor_submit -name ettore -a 'run=worldsign-A' -a 'gpus=2' \
+#       -a 'configs=configs/model/worldsign.yaml configs/model/ablations/arm_A.yaml' \
+#       scripts/condor/train.sub
+# Another arm or an ablation on θ*: change run and add the overlays to configs.
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/scripts/condor/train.sh
+arguments  = $(initialdir)/runs/$(run) $(gpus:2) $(configs)
+
+output = $(initialdir)/logs/condor/train_$(run)_$(Cluster).out
+error  = $(initialdir)/logs/condor/train_$(run)_$(Cluster).err
+log    = $(initialdir)/logs/condor/train_$(run)_$(Cluster).log
+
+getenv         = True
+request_gpus   = $(gpus:2)
+request_cpus   = $(cpus:32)
+request_memory = $(memory:192 GB)
+request_disk   = $(disk:20 GB)
+
+queue

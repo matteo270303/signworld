@@ -1,3 +1,3 @@
-# ESP-1, arm A: alignment + SIGReg on {ŷ} ∪ {ẽ}. The reference configuration and the gate run.
+# ESP-1, arm A: alignment + SIGReg on {ŷ} and on {ẽ}. The reference configuration and the gate run.
 name: worldsign-A
 losses: {arm: A}

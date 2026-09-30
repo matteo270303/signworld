@@ -19,6 +19,7 @@ from .checks.report import write_report
 from .cli_support import SourceArgument, reports_user_errors
 from .collaudo import result_path
 from .logs import configure_logging
+from .train_cli import train_app
 
 app = typer.Typer(
     help="WorldSign data pipeline.", no_args_is_help=True, pretty_exceptions_enable=False
@@ -29,6 +30,7 @@ app.add_typer(check_app, name="check")
 app.add_typer(text_app, name="text")
 app.add_typer(testdata_app, name="testdata")
 app.add_typer(experiment_app, name="experiment")
+app.add_typer(train_app, name="train")
 
 DEFAULT_CONFIG = Path("configs/acquisition.yaml")
 EXIT_INCOMPLETE = 3

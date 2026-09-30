@@ -8,6 +8,7 @@ encoder:                      # §4.4.1: V-JEPA 2.1 ViT-L distilled, frozen + Lo
   hub_repo: /lustrehome/mvigone/cache/torch/hub/facebookresearch_vjepa2_main
   entrypoint: vjepa2_1_vit_large_384
   checkpoint: /lustrehome/mvigone/models/vjepa21/vjepa2_1_vitl_384.pt
+  checkpoint_sha256: b25d62511e1ee624d0b42390c524996900a79eca81806b378477db2c0644c6d8   # P5
   levels: [5, 11, 17, 23]     # blocks 6/12/18/24, the code's hierarchical_layers
   lora: {rank: 16, alpha: 16.0, targets: [qkv, proj, fc1, fc2]}   # alpha [Aperto]
   train_norms: true           # the 0.10 M «LayerNorm e bias» of §4.8
@@ -28,7 +29,9 @@ physical:
   target_dim: 256             # C, width of the S-JEPA latent (PC5)
   mask_index: 0               # the only trained mask token (PC6)
   context_lambda: 0.5         # λ of the visible tokens (V-JEPA 2.1)
-  lambda_warmup: [0.0595, 0.119]   # V-JEPA 2.1's 15k-30k of 252k steps, as fractions
+  lambda_progressive: false   # V-JEPA 2.1 cooldown: λ from the first step
+  lambda_warmup: [0.0595, 0.119]   # used only if progressive (its pre-training: 15k-30k of 252k)
+  weight_distance: false      # V-JEPA 2.1 cooldown: every visible token weighs 1
   box_threshold: 0.3          # [Aperto: 0.3 (Uni-Sign) or 1.0 (§3.6)]
 
 semantic:                     # §4.4.6: VL-JEPA's scheme, 4 blocks at 384, from scratch
@@ -66,10 +69,26 @@ augmentation:                 # §3.8: same geometry on video and keypoints; no 
   contrast: 0.2               # [Aperto]
   saturation: 0.2             # [Aperto]
 
-pose_encoder:                 # §4.4.3: S-JEPA, trainable lightly (pose branch, next iteration)
-  trainable: true
-  lora_rank: 4
-  learning_rate_multiplier: 0.05
+pose_encoder:                 # §4.4.3: S-JEPA of PC5, trainable lightly
+  checkpoint: /lustrehome/mvigone/data/datiTest/youtube_sl25/pose-teachers/sjepa.pt
+  checkpoint_sha256: 12cf04b56be2287842b9e82b1c7b6656eff121dfa10f2c2b0c14a8b57c0dd7fa   # P5
+  width: 256                  # shape of the checkpoint: 8 blocks, d = 256, 8 heads
+  depth: 8
+  heads: 8
+  trainable: true             # false only in ESP-3
+  lora_rank: 4                # every block: q, k, v, attention output, both MLP layers
+  lora_alpha: 4.0             # alpha / r = 1 [Aperto]
+  final_layer: true           # linear C -> C per articulator, identity at step 0
+  learning_rate_multiplier: 0.05   # S-JEPA's LoRA, as VL-JEPA's target encoder
+  final_layer_learning_rate_multiplier: 0.5   # peak of the final layer [Aperto]
+  final_layer_warmup: 0.10    # warm-up over the first 10 % of the run
+  final_layer_decay_end: 0.5  # cosine to 0 by half the run, then it stays [Aperto]
+
+text:                         # §4.4.4: EmbeddingGemma pre-computed, centred per language
+  input_dim: 768              # whole vector, no truncation
+  hidden: 512                 # head 768 -> 512 -> 512, GELU, standard initialisation
+  output_dim: 512
+  dropout: 0.1                # [Aperto: PC7]
 
 training:                     # §4.10, starting values for PC7
   batch_size: 128
@@ -84,3 +103,19 @@ training:                     # §4.10, starting values for PC7
   stages: {"1a": 0.01, "1": 0.05, "2a": 0.01}   # [Aperto: PC7]
   precision: bf16
   seed: 0
+  validation_every: 4000      # steps: ~500,000 clips at batch 128
+  log_every: 20
+  find_unused_parameters: false
+
+data:                         # §3.4, §4.10; the index and embeddings come from stage 0
+  index: null                 # set when the corpus is downloaded and materialised
+  embeddings: null
+  validation_fraction: 0.1    # channels held out per sign language [Aperto]
+  held_out_languages: []      # the held-out language split [Aperto]
+  seen_video_fraction: 0.02   # new videos of seen channels, for the channel gap [Aperto]
+  manifest: null              # the corpus manifest, for P2
+  benchmarks: []              # benchmark manifests (OpenASL, ...) for P2 and the index
+  validation_clips: 2000
+  statistics_clips: 20000     # clips that fix the keypoint scale of L_anchor
+  workers: 8
+  prefetch: 2

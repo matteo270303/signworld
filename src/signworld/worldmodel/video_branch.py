@@ -33,7 +33,7 @@ class PhysicalOutput:
 
 
 class VideoBranch(nn.Module):
-    def __init__(
+    def __init__(  # noqa: PLR0913 (the parts of the branch and one loss option)
         self,
         backbone: VideoBackbone,
         physical: PhysicalPredictor | None,
@@ -41,6 +41,8 @@ class VideoBranch(nn.Module):
         masks: MaskPolicy,
         schedule: LambdaSchedule,
         grid: TokenGrid,
+        *,
+        weight_distance: bool = False,
     ) -> None:
         super().__init__()
         self.backbone = backbone
@@ -49,6 +51,7 @@ class VideoBranch(nn.Module):
         self.masks = masks
         self.schedule = schedule
         self.grid = grid
+        self.weight_distance = weight_distance
 
     @property
     def has_physical_level(self) -> bool:
@@ -77,14 +80,23 @@ class VideoBranch(nn.Module):
         for drawn_mask in self.masks(len(frames), generator):
             mask = drawn_mask.to(device)
             levels = self.backbone.context_levels(frames, mask.context)
-            roles = token_roles(mask, self.grid)
+            roles = token_roles(mask, self.grid, self.weight_distance)
             predictions.append(self.physical_predictor(levels, mask, members, roles))
             drawn.append(mask)
         return PhysicalOutput(predictions, drawn, lam)
 
-    def semantic(self, frames: Tensor) -> Tensor:
-        """(batch, K, d) predicted caption embeddings ŷ from the whole clip."""
-        predicted: Tensor = self.semantic_predictor(self.backbone.tokens(frames))
+    def semantic(self, frames: Tensor, record: dict[str, Tensor] | None = None) -> Tensor:
+        """(batch, K, d) predicted caption embeddings ŷ from the whole clip.
+
+        ``record``, if given, receives the encoder's mean token and every query's output, for
+        the collapse and query diagnostics (§4.13.3).
+        """
+        tokens = self.backbone.tokens(frames)
+        queries = self.semantic_predictor.query_outputs(tokens)
+        if record is not None:
+            record["encoder_mean"] = tokens.detach().mean(dim=1)
+            record["queries"] = queries.detach()
+        predicted: Tensor = self.semantic_predictor.project(queries)
         return predicted
 
 
@@ -123,7 +135,18 @@ def assemble(
             activation_checkpointing=config.encoder.activation_checkpointing,
         )
     semantic = SemanticPredictor(backbone.width, config.semantic, grid)
-    schedule = LambdaSchedule(config.physical.context_lambda, *config.physical.lambda_warmup)
+    settings = config.physical
+    schedule = (
+        LambdaSchedule(settings.context_lambda, *settings.lambda_warmup)
+        if settings.lambda_progressive
+        else LambdaSchedule.constant(settings.context_lambda)
+    )
     return VideoBranch(
-        backbone, physical, semantic, MaskPolicy(config.masking.specs, grid), schedule, grid
+        backbone,
+        physical,
+        semantic,
+        MaskPolicy(config.masking.specs, grid),
+        schedule,
+        grid,
+        weight_distance=settings.weight_distance,
     )

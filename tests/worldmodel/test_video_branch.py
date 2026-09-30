@@ -13,7 +13,7 @@ from signworld.worldmodel.masking import TokenGrid
 from signworld.worldmodel.physical import set_rope_grid
 from signworld.worldmodel.video_branch import assemble
 
-from .conftest import ABLATIONS, BASE, GRID, meta_modules, needs_hub, tiny_config
+from .conftest import ABLATIONS, BASE, GRID, full_size_stubs, meta_modules, needs_hub, tiny_config
 
 
 def _batch(size: int = 2) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -103,49 +103,11 @@ def test_esp2_has_no_physical_level_and_esp4_has_four_hypotheses() -> None:
     assert branch.semantic(_batch(1)[0]).shape == (1, 4, 512)
 
 
-class _Attention(nn.Module):
-    """The shapes of Meta's RoPE attention, and the attributes set_rope_grid looks for."""
-
-    def __init__(self, width: int) -> None:
-        super().__init__()
-        self.qkv = nn.Linear(width, 3 * width)
-        self.proj = nn.Linear(width, width)
-        self.grid_size = 24
-
-    def separate_positions(self) -> None: ...
-
-
-class _Block(nn.Module):
-    def __init__(self, width: int) -> None:
-        super().__init__()
-        self.norm1, self.norm2 = nn.LayerNorm(width), nn.LayerNorm(width)
-        self.attn = _Attention(width)
-        self.mlp = nn.ModuleDict(
-            {"fc1": nn.Linear(width, 4 * width), "fc2": nn.Linear(4 * width, width)}
-        )
-
-
-def _full_size_stubs() -> tuple[nn.Module, nn.Module]:
-    """ViT-L (24 x 1,024) and its predictor (12 x 384) with Meta's layer shapes, on meta."""
-    encoder = nn.Module()
-    encoder.blocks = nn.ModuleList(_Block(1024) for _ in range(24))
-    encoder.norms_block = nn.ModuleList(nn.LayerNorm(1024) for _ in range(4))
-    encoder.hierarchical_layers = [5, 11, 17, 23]
-    encoder.embed_dim = 1024
-    predictor = nn.Module()
-    predictor.predictor_blocks = nn.ModuleList(_Block(384) for _ in range(12))
-    predictor.predictor_embed = nn.Linear(1024, 384)
-    predictor.predictor_norm = nn.LayerNorm(384)
-    predictor.predictor_proj = nn.Linear(384, 1664)
-    predictor.predictor_proj_context = nn.Linear(384, 1664)
-    return encoder, predictor
-
-
 def test_the_full_size_budget_matches_the_document() -> None:
     """Trainable parameters per component at full size, against §4.8."""
     config = load_config(BASE)
     with torch.device("meta"):
-        encoder, predictor = _full_size_stubs()
+        encoder, predictor = full_size_stubs()
         branch = assemble(encoder, predictor, config, TokenGrid())
 
     budget = VideoBudget.of(branch)

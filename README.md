@@ -1,11 +1,29 @@
-# signworld
+# 🤟 signworld
 
 Code for **WorldSign**, an energy-based world model for multilingual sign-language retrieval.
+Every step, from the raw datasets to the trained model, is one `signworld` command.
 
-This first milestone covers **data acquisition**: every dataset of §3 of the project document
-is obtained reproducibly, resumably and at cluster scale.
+## 🛠️ Installation
 
-## Datasets
+```bash
+uv sync
+uv run signworld --help       # or: uv run python main.py --help
+```
+
+Commands are run from the repository root: every path in `parameters/` is relative to it
+(datasets under `data/`, weights and the V-JEPA 2.1 hub code under `checkpoints/`; see
+`parameters/PATHS.md`).
+
+- **YouTube** downloads from a datacenter IP need a Netscape cookies file of a logged-in
+  account (`youtube.cookies_file`, default `.secrets/youtube_cookies.txt`, mode 600), `deno`
+  on `PATH` and the server of the
+  [bgutil proof-of-origin token provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)
+  (`youtube.pot_server_home`, default `third_party/bgutil-ytdlp-pot-provider/server`).
+- **EmbeddingGemma** is gated: accept its licence on Hugging Face and export `HF_TOKEN`, or
+  leave the token in `~/.secrets/hf_token`, which the cluster wrappers read.
+- **BOBSL** credentials are read from `BOBSL_USERNAME` and `BOBSL_PASSWORD`.
+
+## 📚 Datasets
 
 | Source | Content | Access | Terms |
 |---|---|---|---|
@@ -16,131 +34,182 @@ is obtained reproducibly, resumably and at cluster scale.
 | `phoenix14t` | German weather forecasts in DGS, gloss and translation (41.7 GB) | public | see homepage |
 | `csl_daily` | Daily-life Chinese Sign Language, gloss and translation | agreement signed by staff | CSL release agreement |
 
-`uv run signworld sources` prints the same list with homepages.
-
-## Setup
-
 ```bash
-uv sync
+uv run signworld sources      # the same list, with homepages
 ```
 
-YouTube downloads from a datacenter IP additionally need:
+## ⬇️ Acquisition
 
-- a Netscape cookies file of a logged-in account (`youtube.cookies_file`, kept outside the
-  repository with mode 600);
-- `deno` on `PATH` and the server of the
-  [bgutil proof-of-origin token provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)
-  (`youtube.pot_server_home`).
-
-BOBSL credentials are read from `BOBSL_USERNAME` and `BOBSL_PASSWORD`.
-
-## Usage
+Settings: `parameters/acquisition/default.yaml` (`--config` or `SIGNWORLD_CONFIG` for another).
+Each dataset lands in `data/<source>/{metadata,raw,extracted,ledgers}`.
 
 ```bash
-uv run signworld fetch-metadata csl_news          # annotation files, with provenance
-uv run signworld fetch-media csl_news             # media, resuming from the ledgers
-uv run signworld status csl_news                  # settled, failing and remaining items
+uv run signworld fetch-metadata csl_news                 # annotation files, with provenance
+uv run signworld fetch-media csl_news --limit 100        # pilot run: at most 100 items
+uv run signworld fetch-media youtube_sl25 --shard 0 --num-shards 4
+uv run signworld status csl_news                         # settled, failing, still to fetch
+uv run signworld probe-youtube youtube_sl25              # account refusal or network refusal?
 ```
 
-Settings live in `configs/acquisition.yaml`; another file can be passed with `--config` or
-`SIGNWORLD_CONFIG`.
+`fetch-media` exits with 0 once the shard is settled, 3 while items remain and 4 when the host
+refused the run; running it again resumes from the ledgers, with any shard count.
 
-`fetch-media --limit N` fetches at most `N` items, for pilot runs. The command exits with 0
-once every item of the shard is settled and with 3 while some remain.
+## 🧾 Manifests and data checks
 
-On ReCaS, media are fetched in parallel shards on compute nodes (heavy downloads from the login
-node get its IP flagged by YouTube):
-
-```bash
-uv sync
-condor_submit -name ettore source=youtube_sl25 shards=4 scripts/condor/fetch_media.sub
-```
-
-A job whose shard is still incomplete waits an hour inside the job and runs again, up to 72
-rounds, so one submission keeps going until everything is settled (ReCaS removes held jobs after
-20 minutes, so Condor's own hold-and-release cannot be used). Stopping a cluster and submitting
-with another shard count is safe: items are assigned to shards by a stable hash.
-
-## Manifests and data checks
-
-Each dataset gets its own manifest, `<data_root>/<source>/manifest/clips.parquet`, with one row
-per captioned sentence clip; corpora are never merged at this stage. The checks of the
-pre-training collaudo (§4.13.1 of the project document) and the preliminary controls (§4.12.1)
-write JSON reports to `collaudo/<test>/`, one folder per test with a README
-(why, what, how); see `collaudo/README.md`. Settings live in
-`configs/analysis.yaml`.
+Settings: `parameters/analysis/default.yaml` (`--config` or `SIGNWORLD_ANALYSIS_CONFIG`).
+One manifest per dataset, `data/<source>/manifest/clips.parquet`; every check writes its JSON
+report to `collaudo/<test>/`.
 
 ```bash
 uv run signworld manifest build openasl
-uv run signworld check durations openasl              # caption durations, frame spacing T/32
-uv run signworld check split-duplicates openasl       # same caption and duration across splits
-uv run signworld check contamination youtube_sl25     # overlap with OpenASL evaluation clips
-uv run signworld text embed openasl --device cuda     # EmbeddingGemma, pinned prompt
-uv run signworld text verify openasl --device cuda    # prompt fingerprint and re-encoding
-uv run signworld check text-geometry openasl          # PC1: geometry per MRL dimension
-uv run signworld check checkpoint vjepa2_1_vitl_384   # PC5/PC6: checkpoint contents
+uv run signworld check durations openasl                 # caption durations, frame spacing
+uv run signworld check split-duplicates openasl          # same caption across splits
+uv run signworld check contamination youtube_sl25        # overlap with the benchmark clips
+uv run signworld check checkpoint vjepa2_1_vitl_384      # PC5/PC6: checkpoint contents
 ```
 
-Long commands belong on a compute node, where they survive a closed session:
+Caption embeddings (EmbeddingGemma, pinned model, commit and prompt):
 
 ```bash
-condor_submit -name ettore -a 'arguments = text embed openasl -c configs/analysis.yaml' \
-    scripts/condor/analysis.sub
+uv run signworld text embed openasl --device cuda
+uv run signworld text verify openasl --device cuda       # A2: fingerprint and re-encoding
+uv run signworld check text-geometry openasl             # PC1: geometry per MRL dimension
+uv run signworld text collaudo openasl --device cuda     # embed + verify + text-geometry
 ```
 
-EmbeddingGemma is a gated model: accept its licence on Hugging Face and export `HF_TOKEN`, or
-leave the token in `~/.secrets/hf_token`, which the Condor wrapper reads.
-Captions are encoded without a task prefix, the plain input VL-JEPA reports for its Y-Encoder;
-model, resolved commit and prompt form the fingerprint every consumer checks.
-
-For YouTube-SL-25 only the subtitle track written in the video's own language is kept
-(`corpus/languages.py` maps each sign language to its written languages); translations into
-other spoken languages are excluded by §3.8, and videos whose sign language the release marks
-`???` contribute no captioned clip.
-
-The metrics shared with training and evaluation (`signworld.metrics`: recall@k with a
-duplicate-tolerant variant and bootstrap intervals, hubness, effective rank, IsoScore, collapse
-alarm, SIGReg) are tested on synthetic cases with known answers, as the collaudo requires.
-
-### Frozen video encoders (PC2, PC3, PC4, PC6, weight reproduction)
-
-V-JEPA 2.1 is built from a local copy of Meta's torch.hub repository (`video_probes.hub_repo`),
-V-JEPA 2 from the Hugging Face cache; the nodes run offline. One script submits every GPU job
-in parallel: three feature runs in shards, the contiguous-frame run and the model checks.
+Test clips (cut, cropped, 64 frames, poses) and the checks that read them:
 
 ```bash
-scripts/condor/submit_video_collaudo.sh youtube_sl25 4
-# when the feature jobs are done (CPU):
-condor_submit -name ettore -a 'arguments = experiment video-probes youtube_sl25 -c configs/analysis.yaml' \
-    -a 'job=video_probes' -a 'cpus=16' -a 'memory=64 GB' scripts/condor/analysis.sub
+uv run signworld testdata build youtube_sl25 --device cuda --shard 0 --num-shards 4
+uv run signworld check frame-selection youtube_sl25      # A3: stored frame indices
+uv run signworld check pose-alignment youtube_sl25 --device cuda   # A3: video against pose
+uv run signworld check pose-quality youtube_sl25         # A4: shoulders, boxes, contact sheets
+uv run signworld check unisign youtube_sl25              # PC5: Uni-Sign pose representation
 ```
 
-## Reproducibility
+Frozen-model checks:
 
-- **Pinned releases.** OpenASL annotations by SHA-256 of commit `c7d2350`, CSL-News by Hub
-  revision, the YouTube-SL-25 metadata by SHA-256, PHOENIX-2014T by size.
-- **Provenance.** Each dataset's `metadata/PROVENANCE.json` lists the origin, SHA-256, size and
-  retrieval time of every annotation file.
-- **Ledgers.** Every media outcome (`done`, `unavailable`, `failed`, `blocked`) is appended to
-  `ledgers/shard-*.jsonl`. Items are assigned to shards by a stable hash of their key, so a
-  re-run resumes with any shard count.
-- **Safe transfers.** Downloads resume with HTTP Range requests and land under their final name
-  only when complete; archives are extracted idempotently and rejected if a member would escape
-  the destination.
-- **Failures.** An item whose fetch fails `max_attempts` times is abandoned; removed and private
-  videos are settled at once.
-- **Run budget.** `run_budget_s` ends a run before the host starts refusing (YouTube refuses a
-  shard after about an hour of continuous downloading), so the job rests and starts a new run.
-- **Refusals.** Refusals (bot wall, HTTP 429, rejected credentials) never count against an item.
-  Each consecutive refusal pauses the shard for a doubling cooldown, and `refusals.max_consecutive`
-  of them stop it instead of escalating the block.
-- **YouTube pacing.** Requests follow yt-dlp's recommended sleep intervals; each job reads a
-  private copy of the cookies, rebuilds its client after a refusal (picking up refreshed cookies),
-  and abandons a transfer stalled for `item_timeout_s`.
+```bash
+uv run signworld check video-reproduction youtube_sl25 --encoder vjepa2_1_vitl   # A1 video
+uv run signworld check pose-reproduction youtube_sl25                            # A1 pose
+uv run signworld check predictor youtube_sl25 --encoder vjepa2_1_vitl            # PC6
+```
 
-Data are laid out as `<data_root>/<source>/{metadata,raw,extracted,ledgers}`.
+## 🔬 Preliminary experiments
 
-## Development
+```bash
+uv run signworld experiment pose-teachers youtube_sl25   # kinematics, Uni-Sign, MAMP, S-JEPA
+uv run signworld experiment pose-spectrum youtube_sl25   # S-JEPA spectrum and whitening
+uv run signworld experiment pose-isotropy youtube_sl25   # whitening, RBIG, SINF, flows
+uv run signworld experiment video-features youtube_sl25 --run vjepa2_1_vitl-256 --shard 0 --num-shards 4
+uv run signworld experiment video-probes youtube_sl25    # PC2, PC3, PC4 from the features
+```
+
+## 🏋️ Training and evaluation
+
+A run is `parameters/model/worldsign.yaml` plus overlays laid in order: a loss arm or ablation
+from `parameters/ablation/`, then a data overlay (`openasl_trial.yaml`, `toyworld.yaml`,
+`gate.yaml`).
+
+```bash
+# stage 0: clips, poses and the training index
+uv run signworld train materialize youtube_sl25 --output data/training/youtube_sl25 --shard 0 --num-shards 32
+uv run signworld train index --manifest data/openasl/manifest/clips.parquet \
+    --videos data/openASL/videos_256 --poses data/openASL/poses \
+    --embeddings data/openasl/text/<fingerprint> --output data/training/openasl/index.parquet \
+    -c parameters/model/worldsign.yaml -c parameters/model/openasl_trial.yaml
+
+# training, on every GPU of the node
+uv run torchrun --standalone --nnodes=1 --nproc_per_node=2 --no-python signworld train run \
+    -c parameters/model/worldsign.yaml -c parameters/ablation/arm_A.yaml \
+    -c parameters/model/openasl_trial.yaml --output runs/openasl-trial
+
+# test of a trained run
+uv run signworld train evaluate -c parameters/model/worldsign.yaml -c parameters/ablation/arm_A.yaml \
+    -c parameters/model/openasl_trial.yaml --run runs/openasl-trial \
+    --index data/training/openasl/index.parquet --split test --checkpoint final \
+    --output runs/openasl-trial/test_final.json
+```
+
+Collaudo of the training (§4.13.1):
+
+```bash
+uv run signworld train toyworld --output data/toyworld           # synthetic clips
+uv run signworld train toyworld-embed --output data/toyworld
+uv run signworld train overfit -c parameters/model/worldsign.yaml -c parameters/model/openasl_trial.yaml \
+    --output runs/overfit.json                                    # a few clips, every loss on
+uv run signworld train benchmark -c parameters/model/worldsign.yaml -c parameters/model/openasl_trial.yaml \
+    --output runs/benchmark                                       # PC7: step time, MFU, memory
+```
+
+## 🖥️ Cluster
+
+**HTCondor (ReCaS).** Each `.sub` documents its own submission:
+
+```bash
+condor_submit -name ettore source=youtube_sl25 shards=4 slurm/condor/fetch_media.sub
+condor_submit -name ettore -a 'dataset=youtube_sl25' slurm/condor/youtube_probe.sub
+condor_submit -name ettore -a 'arguments = text embed openasl -c parameters/analysis/default.yaml' \
+    slurm/condor/analysis.sub                                     # any analysis command
+condor_submit -name ettore -a 'dataset=youtube_sl25' -a 'shards=4' slurm/condor/testdata_build.sub
+condor_submit -name ettore -a 'arguments = youtube_sl25' slurm/condor/pose_collaudo.sub
+condor_submit -name ettore -a 'arguments = youtube_sl25' slurm/condor/model_checks.sub
+condor_submit -name ettore -a 'dataset=youtube_sl25' -a 'run=vjepa2_1_vitl-256' -a 'shards=4' \
+    slurm/condor/video_features.sub
+slurm/condor/submit_video_collaudo.sh youtube_sl25 4              # every video GPU job at once
+condor_submit -name ettore -a 'source=youtube_sl25' -a 'output=data/training/youtube_sl25' \
+    -a 'shards=32' slurm/condor/materialize.sub
+condor_submit -name ettore slurm/condor/openasl_index.sub
+condor_submit -name ettore -a 'output=data/toyworld' -a 'shards=16' slurm/condor/toyworld.sub
+condor_submit -name ettore -a 'run=worldsign-A' -a 'gpus=2' \
+    -a 'configs=parameters/model/worldsign.yaml parameters/ablation/arm_A.yaml' slurm/condor/train.sub
+condor_submit -name ettore -a 'run=openasl-trial' \
+    -a 'configs=parameters/model/worldsign.yaml parameters/ablation/arm_A.yaml parameters/model/openasl_trial.yaml' \
+    slurm/condor/evaluate.sub
+```
+
+The `.sub` files still set an absolute `initialdir`: change it to your checkout.
+
+**Slurm.** The `#SBATCH` headers (account, partition, resources) are placeholders; the jobs
+read their caches from `$SCRATCH` and write logs to `out/`.
+
+```bash
+mkdir -p out
+sbatch slurm/launch_fetch_media youtube_sl25 --shard 0 --num-shards 4
+sbatch slurm/launch_analysis text embed openasl -c parameters/analysis/default.yaml
+sbatch slurm/launch_train -c parameters/model/worldsign.yaml -c parameters/ablation/arm_A.yaml --output runs/worldsign-A
+sbatch slurm/launch_evaluate -c parameters/model/worldsign.yaml -c parameters/ablation/arm_A.yaml \
+    --run runs/worldsign-A --index data/training/openasl/index.parquet --split test --output runs/worldsign-A/test_best.json
+```
+
+## ♻️ Reproducibility
+
+- **Pinned releases**: annotations and metadata by SHA-256, Hub datasets and models by revision.
+- **Provenance**: `metadata/PROVENANCE.json` lists origin, SHA-256, size and time of every file.
+- **Resumable**: every media outcome goes to `ledgers/shard-*.jsonl`; shards are a stable hash
+  of the item key, so any run resumes with any shard count.
+- **Polite fetching**: refusals never count against an item, pause the shard with a doubling
+  cooldown and stop it after `refusals.max_consecutive`.
+
+The project itself (architecture, losses, ablations) is described in `docs/`.
+
+## 🗂️ Structure
+
+```
+signworld/     the package: cli, data, models, loss, metrics, experiment, logger
+parameters/    settings: acquisition, analysis, model and ablation YAML files
+slurm/         sbatch jobs; slurm/condor/ for HTCondor
+tests/         pytest suite, mirroring the package
+docs/          project documents (architecture, losses, ablations)
+data/          datasets (local, not tracked)
+checkpoints/   weights and hub code (local, not tracked)
+notebooks/     exploration
+collaudo/      check reports (local, not tracked)
+runs/          training runs (local, not tracked)
+main.py        python main.py <command>, the same as signworld <command>
+```
+
+## 🧑‍💻 Development
 
 ```bash
 uv run ruff format && uv run ruff check && uv run mypy && uv run pytest

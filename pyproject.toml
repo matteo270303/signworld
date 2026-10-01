@@ -1,4 +1,4 @@
-[project]
+[project] # MADONNA SE NON LA SMETTI DI FARTI VIBECODARE IL PYPROJECT
 name = "signworld"
 version = "0.1.0"
 description = "WorldSign: an energy-based world model for multilingual sign-language retrieval."

@@ -1,10 +1,10 @@
 # The pose checks of the collaudo (A3, A4) on one GPU node, after testdata_build.sub.
 #
-# Submit:  condor_submit -name ettore -a 'arguments = youtube_sl25' scripts/condor/pose_collaudo.sub
+# Submit:  condor_submit -name ettore -a 'arguments = youtube_sl25' slurm/condor/pose_collaudo.sub
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/pose_collaudo.sh
+executable = $(initialdir)/slurm/condor/pose_collaudo.sh
 
 output = $(initialdir)/logs/condor/pose_collaudo_$(Cluster).out
 error  = $(initialdir)/logs/condor/pose_collaudo_$(Cluster).err

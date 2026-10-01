@@ -3,11 +3,11 @@
 #
 # Submit:  condor_submit -name ettore -a 'source=youtube_sl25' \
 #              -a 'output=/lustrehome/mvigone/data/training/youtube_sl25' -a 'shards=32' \
-#              scripts/condor/materialize.sub
+#              slurm/condor/materialize.sub
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/materialize.sh
+executable = $(initialdir)/slurm/condor/materialize.sh
 arguments  = $(source) $(output) $(Process) $(shards:32)
 
 output = $(initialdir)/logs/condor/materialize_$(source)_$(Cluster).$(Process).out

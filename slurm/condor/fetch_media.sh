@@ -27,7 +27,7 @@ if ! "${repo_dir}/.venv/bin/python" -c '' 2>/dev/null; then
 fi
 
 # shellcheck source=youtube_env.sh
-source "${repo_dir}/scripts/condor/youtube_env.sh"
+source "${repo_dir}/slurm/condor/youtube_env.sh"
 
 cd "${repo_dir}"
 cooldown_s="${round_cooldown_s}"

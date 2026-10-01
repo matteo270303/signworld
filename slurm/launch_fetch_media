@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#SBATCH -A IscrC_IMCAI
+#SBATCH -p boost_usr_prod
+#SBATCH --qos normal
+#SBATCH --time=24:00:00
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:1
+#SBATCH --mem=123000
+#SBATCH --job-name=fetch_media
+#SBATCH --out=out/fetch_media.log
+#SBATCH --err=out/fetch_media.log
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-user=<EMAIL>
+
+# One shard of a dataset's media; exit code 3 means items remain, resubmit it.
+# Launch from the repository root (out/ must exist): sbatch slurm/launch_fetch_media youtube_sl25 --shard 0 --num-shards 4
+srun ./slurm/launch_fetch_media_exe "$@"

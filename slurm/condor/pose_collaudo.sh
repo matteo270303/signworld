@@ -9,7 +9,7 @@ set -uo pipefail
 source_name="$1"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 signworld="${repo_dir}/.venv/bin/signworld"
-config="${repo_dir}/configs/analysis.yaml"
+config="${repo_dir}/parameters/analysis/default.yaml"
 cd "${repo_dir}"
 
 run() {

@@ -1,5 +1,5 @@
 # Collaudo «mondo giocattolo» (§4.13.1): the whole architecture on synthetic clips.
-# Build:  signworld train toyworld --output <root> (Condor: scripts/condor/toyworld.sub)
+# Build:  signworld train toyworld --output <root> (Condor: slurm/condor/toyworld.sub)
 #         signworld train toyworld-embed --output <root>
 #         signworld train index --manifest <root>/manifest/clips.parquet --materialized <root>
 #             --embeddings <root>/text/<fingerprint> --output <root>/index.parquet

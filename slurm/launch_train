@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#SBATCH -A IscrC_IMCAI
+#SBATCH -p boost_usr_prod
+#SBATCH --qos normal
+#SBATCH --time=24:00:00
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:1
+#SBATCH --mem=123000
+#SBATCH --job-name=train
+#SBATCH --out=out/train.log
+#SBATCH --err=out/train.log
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-user=<EMAIL>
+
+# One WorldSign training run on the GPUs of one node, one process per GPU (§4.10).
+# Launch from the repository root (out/ must exist): sbatch slurm/launch_train -c parameters/model/worldsign.yaml -c parameters/ablation/arm_A.yaml --output runs/worldsign-A
+srun ./slurm/launch_train_exe "$@"

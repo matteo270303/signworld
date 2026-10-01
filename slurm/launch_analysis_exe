@@ -1,0 +1,13 @@
+#!/bin/bash
+# Not offline: `text embed` resolves the pinned EmbeddingGemma commit on the Hub.
+
+export HF_HOME=${SCRATCH:?SCRATCH must name the cache directory}
+export TORCH_HOME=$SCRATCH
+# Gated models (EmbeddingGemma) need the token; it never lives in the repository.
+if [[ -r "${HOME}/.secrets/hf_token" ]]; then
+  HF_TOKEN="$(cat "${HOME}/.secrets/hf_token")"
+  export HF_TOKEN
+fi
+
+source .venv/bin/activate
+signworld "$@"

@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#SBATCH -A IscrC_IMCAI
+#SBATCH -p boost_usr_prod
+#SBATCH --qos normal
+#SBATCH --time=24:00:00
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:1
+#SBATCH --mem=123000
+#SBATCH --job-name=analysis
+#SBATCH --out=out/analysis.log
+#SBATCH --err=out/analysis.log
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-user=<EMAIL>
+
+# One signworld analysis command: manifests, checks, embeddings, experiments.
+# Launch from the repository root (out/ must exist): sbatch slurm/launch_analysis text embed openasl -c parameters/analysis/default.yaml
+srun ./slurm/launch_analysis_exe "$@"

@@ -1,11 +1,11 @@
 # Which way out still reaches YouTube from a ReCaS worker: cookies or not, IPv4 or IPv6.
 # About two minutes; the table lands in the job output and in the dataset's reports.
 #
-# Submit:  condor_submit -name ettore -a 'dataset=youtube_sl25' scripts/condor/youtube_probe.sub
+# Submit:  condor_submit -name ettore -a 'dataset=youtube_sl25' slurm/condor/youtube_probe.sub
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/youtube_probe.sh
+executable = $(initialdir)/slurm/condor/youtube_probe.sh
 arguments  = $(dataset)
 
 output = $(initialdir)/logs/condor/youtube_probe_$(Cluster).out

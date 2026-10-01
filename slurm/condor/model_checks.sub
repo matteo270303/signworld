@@ -1,10 +1,10 @@
 # Model checks of the collaudo (A1 video and pose, PC6) on one GPU node.
 #
-# Submit:  condor_submit -name ettore -a 'arguments = youtube_sl25' scripts/condor/model_checks.sub
+# Submit:  condor_submit -name ettore -a 'arguments = youtube_sl25' slurm/condor/model_checks.sub
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/model_checks.sh
+executable = $(initialdir)/slurm/condor/model_checks.sh
 
 output = $(initialdir)/logs/condor/model_checks_$(Cluster).out
 error  = $(initialdir)/logs/condor/model_checks_$(Cluster).err

@@ -1,7 +1,7 @@
 # The toy world of the collaudo (§4.13.1), rendered in shards on CPU nodes; resumable.
 #
 # Submit:  condor_submit -name ettore -a 'output=/lustrehome/mvigone/data/toyworld' \
-#              -a 'shards=16' scripts/condor/toyworld.sub
+#              -a 'shards=16' slurm/condor/toyworld.sub
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld

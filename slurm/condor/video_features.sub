@@ -2,11 +2,11 @@
 # kept, so the same submission can be repeated after a failure.
 #
 # Submit:  condor_submit -name ettore -a 'dataset=youtube_sl25' -a 'run=vjepa2_1_vitl-256' \
-#              -a 'shards=4' scripts/condor/video_features.sub
+#              -a 'shards=4' slurm/condor/video_features.sub
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/video_features.sh
+executable = $(initialdir)/slurm/condor/video_features.sh
 arguments  = $(dataset) $(run) $(Process) $(shards:4)
 
 output = $(initialdir)/logs/condor/features_$(run)_$(Cluster).$(Process).out

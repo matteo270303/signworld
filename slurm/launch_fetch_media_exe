@@ -1,0 +1,8 @@
+#!/bin/bash
+# Downloads need the network: no offline caches here, unlike the training jobs.
+
+source .venv/bin/activate
+# shellcheck source=condor/youtube_env.sh
+source slurm/condor/youtube_env.sh
+
+signworld fetch-media "$@"

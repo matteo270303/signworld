@@ -2,11 +2,11 @@
 # A shard resumes where it stopped: clips already in its index are skipped.
 #
 # Submit:  condor_submit -name ettore -a 'dataset=youtube_sl25' -a 'shards=4' \
-#              scripts/condor/testdata_build.sub
+#              slurm/condor/testdata_build.sub
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/testdata_build.sh
+executable = $(initialdir)/slurm/condor/testdata_build.sh
 arguments  = $(dataset) $(Process) $(shards:4)
 
 output = $(initialdir)/logs/condor/testdata_$(Cluster).$(Process).out

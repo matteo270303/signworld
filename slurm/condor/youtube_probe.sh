@@ -6,7 +6,7 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=youtube_env.sh
-source "${repo_dir}/scripts/condor/youtube_env.sh"
+source "${repo_dir}/slurm/condor/youtube_env.sh"
 
 cd "${repo_dir}"
 exec "${repo_dir}/.venv/bin/signworld" probe-youtube "$@"

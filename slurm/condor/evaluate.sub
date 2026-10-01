@@ -4,14 +4,14 @@
 #
 # Submit (the OpenASL trial run):
 #   condor_submit -name ettore -a 'run=openasl-trial' \
-#       -a 'configs=configs/model/worldsign.yaml configs/model/ablations/arm_A.yaml configs/model/openasl_trial.yaml' \
-#       scripts/condor/evaluate.sub
+#       -a 'configs=parameters/model/worldsign.yaml parameters/ablation/arm_A.yaml parameters/model/openasl_trial.yaml' \
+#       slurm/condor/evaluate.sub
 # Defaults: checkpoint final (the model at the end of the cooldown; -a 'checkpoint=best' for the
 # best of the constant phase), split test, the OpenASL index. Report: runs/<run>/test_final.json.
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/evaluate.sh
+executable = $(initialdir)/slurm/condor/evaluate.sh
 arguments  = $(initialdir)/runs/$(run) \
   $(index:/lustrehome/mvigone/data/training/openasl/index.parquet) \
   $(split:test) $(checkpoint:final) $(configs)

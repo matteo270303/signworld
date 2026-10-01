@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Compute nodes have no internet: models come from the $SCRATCH caches only.
+export HF_HOME=${SCRATCH:?SCRATCH must name the cache directory}
+export TORCH_HOME=$SCRATCH
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+# Data-loader processes do the decoding; keep each process's own threads few.
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+
+echo "HF_HOME: $HF_HOME"
+echo "TORCH_HOME: $TORCH_HOME"
+
+source .venv/bin/activate
+
+signworld train evaluate --device cuda "$@"

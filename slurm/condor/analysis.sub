@@ -1,12 +1,12 @@
 # Run one signworld analysis command on a ReCaS node.
 #
-# Submit:  condor_submit -name ettore -a 'arguments = text embed openasl -c configs/analysis.yaml' \
-#              scripts/condor/analysis.sub
+# Submit:  condor_submit -name ettore -a 'arguments = text embed openasl -c parameters/analysis/default.yaml' \
+#              slurm/condor/analysis.sub
 # Name the job with job=<name>; pass gpus=1 for commands that need a GPU.
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/analysis.sh
+executable = $(initialdir)/slurm/condor/analysis.sh
 
 output = $(initialdir)/logs/condor/$(job:analysis)_$(Cluster).out
 error  = $(initialdir)/logs/condor/$(job:analysis)_$(Cluster).err

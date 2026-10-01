@@ -3,13 +3,13 @@
 #
 # Submit (reference arm A):
 #   condor_submit -name ettore -a 'run=worldsign-A' -a 'gpus=2' \
-#       -a 'configs=configs/model/worldsign.yaml configs/model/ablations/arm_A.yaml' \
-#       scripts/condor/train.sub
+#       -a 'configs=parameters/model/worldsign.yaml parameters/ablation/arm_A.yaml' \
+#       slurm/condor/train.sub
 # Another arm or an ablation on θ*: change run and add the overlays to configs.
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/train.sh
+executable = $(initialdir)/slurm/condor/train.sh
 arguments  = $(initialdir)/runs/$(run) $(gpus:2) $(configs)
 
 output = $(initialdir)/logs/condor/train_$(run)_$(Cluster).out

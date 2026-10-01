@@ -6,4 +6,4 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_dir}"
 exec "${repo_dir}/.venv/bin/signworld" testdata build "$1" --device cuda \
-  --shard "$2" --num-shards "$3" -c "${repo_dir}/configs/analysis.yaml"
+  --shard "$2" --num-shards "$3" -c "${repo_dir}/parameters/analysis/default.yaml"

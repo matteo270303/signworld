@@ -9,7 +9,7 @@ set -uo pipefail
 source_name="$1"
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 signworld="${repo_dir}/.venv/bin/signworld"
-config="${repo_dir}/configs/analysis.yaml"
+config="${repo_dir}/parameters/analysis/default.yaml"
 export HF_HOME="${HF_HOME:-${HOME}/cache/hf}" HF_HUB_OFFLINE=1 TORCH_HOME="${HOME}/cache/torch"
 cd "${repo_dir}"
 

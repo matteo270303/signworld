@@ -1,6 +1,6 @@
 # Fetch one dataset's media in parallel shards on ReCaS.
 #
-# Submit:  condor_submit -name ettore source=youtube_sl25 shards=4 scripts/condor/fetch_media.sub
+# Submit:  condor_submit -name ettore source=youtube_sl25 shards=4 slurm/condor/fetch_media.sub
 # Rescale: condor_rm the cluster and submit again with another shard count; settled items
 #          are skipped whatever the partition.
 #
@@ -11,7 +11,7 @@
 
 universe   = vanilla
 initialdir = /lustrehome/mvigone/workspace/signworld
-executable = $(initialdir)/scripts/condor/fetch_media.sh
+executable = $(initialdir)/slurm/condor/fetch_media.sh
 arguments  = $(source) $(Process) $(shards) $(max_rounds:72) $(round_cooldown_s:3600) $(max_cooldown_s:86400)
 
 output = $(initialdir)/logs/condor/$(source)_$(Cluster).$(Process).out

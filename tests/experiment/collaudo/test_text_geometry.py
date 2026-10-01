@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from signworld.checks.text_geometry import (
+from signworld.experiment.collaudo.text_geometry import (
     GeometryAtDimension,
     TextGeometrySettings,
     center_by_language,

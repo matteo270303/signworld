@@ -18,7 +18,7 @@ from typing import Final
 import torch
 from torch import Tensor
 
-from .geometry import require_matrix
+from signworld.metrics.geometry import require_matrix
 
 _MIN_KNOTS: Final = 2
 

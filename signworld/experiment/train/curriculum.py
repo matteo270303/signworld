@@ -25,8 +25,8 @@ from dataclasses import dataclass
 
 from torch import nn
 
-from .lora import adapter_parameters
-from .model import WorldSign
+from signworld.models.worldsign.lora import adapter_parameters
+from signworld.models.worldsign.model import WorldSign
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from signworld.acquisition.config import HttpConfig
-from signworld.acquisition.transfer.http import DownloadError, HttpDownloader
+from signworld.data.acquisition.config import HttpConfig
+from signworld.data.acquisition.transfer.http import DownloadError, HttpDownloader
 
 from .conftest import FileServer
 

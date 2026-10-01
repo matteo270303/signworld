@@ -6,18 +6,18 @@ import numpy as np
 import pytest
 import torch
 
-from signworld.analysis import PoseIsotropySettings
-from signworld.experiments.pose_isotropy import (
+from signworld.data.pose.tokens import STEPS
+from signworld.data.pose.wholebody import Articulator
+from signworld.experiment.collaudo.analysis import PoseIsotropySettings
+from signworld.experiment.studies.pose_isotropy import (
     IsotropyRun,
     diagnostics,
     knn_r2,
     temporal_ratio,
 )
-from signworld.experiments.pose_teachers import PoseCorpus
+from signworld.experiment.studies.pose_teachers import PoseCorpus
+from signworld.loss.sigreg import SIGReg, random_directions
 from signworld.metrics.probes import video_split
-from signworld.metrics.sigreg import SIGReg, random_directions
-from signworld.pose.tokens import STEPS
-from signworld.pose.wholebody import Articulator
 
 from .test_pose_teachers import TINY, _clips
 

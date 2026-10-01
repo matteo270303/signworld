@@ -13,7 +13,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-from .config import TextSettings
+from signworld.experiment.train.config import TextSettings
 
 
 class LanguageCentering(nn.Module):

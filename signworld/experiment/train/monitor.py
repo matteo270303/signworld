@@ -33,16 +33,9 @@ import torch
 from torch import Tensor
 from torch.nn import functional
 
-from ..pose.tokens import JOINT_ARTICULATOR
-from .config import DiagnosticsSettings, WorldSignConfig
-from .curriculum import Stage, families
-from .distributed import SINGLE, Distributed
-from .lora import adapter_parameters
-from .masking import token_roles
-from .measures import collect, model_measures, pose_target_measures, split_measures
-from .model import StepRandomness, WorldSign, WorldSignBatch
-from .plausibility import as_measures, plausibility_tests
-from .readings import (
+from signworld.data.pose.tokens import JOINT_ARTICULATOR
+from signworld.metrics.measures import collect, model_measures, pose_target_measures, split_measures
+from signworld.metrics.readings import (
     Spread,
     gradient_norms,
     keypoint_errors,
@@ -57,7 +50,15 @@ from .readings import (
     term_gradients,
     text_head_spearman,
 )
-from .readout import membership
+from signworld.models.worldsign.lora import adapter_parameters
+from signworld.models.worldsign.masking import token_roles
+from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
+from signworld.models.worldsign.plausibility import as_measures, plausibility_tests
+from signworld.models.worldsign.readout import membership
+
+from .config import DiagnosticsSettings, WorldSignConfig
+from .curriculum import Stage, families
+from .distributed import SINGLE, Distributed
 from .validation import RetrievalScores, retrieval
 
 PARTS = ("body", "left", "right", "face")

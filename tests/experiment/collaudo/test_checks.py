@@ -5,10 +5,13 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from signworld.checks.contamination import contamination_report, duplicates_across_splits
-from signworld.checks.durations import duration_report, summarize
-from signworld.checks.report import write_report
-from signworld.corpus.manifest import SCHEMA, Clip
+from signworld.data.corpus.manifest import SCHEMA, Clip
+from signworld.experiment.collaudo.contamination import (
+    contamination_report,
+    duplicates_across_splits,
+)
+from signworld.experiment.collaudo.durations import duration_report, summarize
+from signworld.experiment.collaudo.report import write_report
 
 
 def _table(*clips: Clip) -> pa.Table:

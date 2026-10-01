@@ -34,6 +34,9 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
 
+from signworld.data.loaders import ClipDataset, Collate, EpochSampler
+from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
+
 from .checkpoint import CheckpointStore, TrainingState
 from .config import WorldSignConfig
 from .curriculum import (
@@ -44,9 +47,7 @@ from .curriculum import (
     families,
     trainable_names,
 )
-from .data import ClipDataset, Collate, EpochSampler
 from .distributed import SINGLE, Distributed
-from .model import StepRandomness, WorldSign, WorldSignBatch
 from .monitor import Monitor, RunStoppedError
 from .reporting import RunReport, finish_time
 from .validation import RetrievalScores

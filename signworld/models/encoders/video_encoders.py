@@ -23,7 +23,7 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
-from ..analysis import VideoEncoderSettings
+from signworld.experiment.collaudo.analysis import VideoEncoderSettings
 
 IMAGENET_MEAN: Final = (0.485, 0.456, 0.406)
 IMAGENET_STD: Final = (0.229, 0.224, 0.225)

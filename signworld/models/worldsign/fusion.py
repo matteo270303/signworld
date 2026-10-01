@@ -17,8 +17,8 @@ from collections.abc import Sequence
 import torch
 from torch import Tensor, nn
 
-from ..models.predictor_fusion import fused_embedding
-from .config import FusionSettings
+from signworld.experiment.train.config import FusionSettings
+from signworld.models.encoders.predictor_fusion import fused_embedding
 
 
 class _Fusion(nn.Module):

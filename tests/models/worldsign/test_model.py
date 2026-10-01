@@ -6,21 +6,20 @@ from typing import Any
 import pytest
 import torch
 
-from signworld.models.pose_teachers import TokenEmbedding, transformer
-from signworld.pose.tokens import JOINTS, STEPS
-from signworld.worldmodel.budget import ModelBudget
-from signworld.worldmodel.config import load_config
-from signworld.worldmodel.masking import TokenGrid
-from signworld.worldmodel.model import (
+from signworld.data.pose.tokens import JOINTS, STEPS
+from signworld.experiment.train.budget import ModelBudget
+from signworld.experiment.train.config import load_config
+from signworld.models.encoders.pose_teachers import TokenEmbedding, transformer
+from signworld.models.worldsign.masking import TokenGrid
+from signworld.models.worldsign.model import (
     StepRandomness,
     WorldSign,
     WorldSignBatch,
     assemble_worldsign,
 )
-from signworld.worldmodel.pose_branch import KeypointDecoders, PoseBranch, PoseEncoder
-from signworld.worldmodel.video_branch import assemble
-
-from .conftest import ABLATIONS, BASE, full_size_stubs, needs_hub, pose_tokens, tiny_worldsign
+from signworld.models.worldsign.pose_branch import KeypointDecoders, PoseBranch, PoseEncoder
+from signworld.models.worldsign.video_branch import assemble
+from tests.worldsign import ABLATIONS, BASE, full_size_stubs, needs_hub, pose_tokens, tiny_worldsign
 
 CAPTION_LANGUAGES = ["en", "es"]
 

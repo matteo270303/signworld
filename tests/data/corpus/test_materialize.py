@@ -2,8 +2,8 @@ import numpy as np
 import pyarrow as pa
 import pytest
 
-from signworld.acquisition.sharding import Shard
-from signworld.corpus.materialize import (
+from signworld.data.acquisition.sharding import Shard
+from signworld.data.corpus.materialize import (
     MaterializedIndex,
     MaterializedRecord,
     crop_square,

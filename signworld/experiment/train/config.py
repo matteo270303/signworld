@@ -13,7 +13,7 @@ from typing import Any, Literal, Self
 import yaml
 from pydantic import Field, PositiveFloat, PositiveInt, model_validator
 
-from ..acquisition.config import FrozenModel
+from signworld.data.acquisition.config import FrozenModel
 
 Arm = Literal["A0", "A", "B0", "B", "C"]
 """Loss arms of ESP-1 (§4.14): alignment with or without SIGReg and L_unif, or InfoNCE."""

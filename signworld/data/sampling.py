@@ -10,8 +10,8 @@ from typing import Protocol
 
 import numpy as np
 
-from ..pose.frames import local_motion, select_frames, uniform_indices
-from .config import SamplingSettings
+from signworld.data.pose.frames import local_motion, select_frames, uniform_indices
+from signworld.experiment.train.config import SamplingSettings
 
 
 class FrameSampler(Protocol):

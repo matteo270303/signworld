@@ -6,12 +6,12 @@ from typing import Literal, Self
 import yaml
 from pydantic import Field, PositiveFloat, PositiveInt
 
-from .acquisition.config import AcquisitionConfig, FrozenModel
-from .checks.checkpoint import CheckpointSource
-from .checks.pose_quality import OUTSIDE_LIMITS
-from .checks.text_geometry import TextGeometrySettings
-from .corpus.text import NEAR_DUPLICATE_RATIO
-from .text.embedding import EmbeddingSettings
+from signworld.data.acquisition.config import AcquisitionConfig, FrozenModel
+from signworld.data.corpus.text import NEAR_DUPLICATE_RATIO
+from signworld.data.text import EmbeddingSettings
+from signworld.experiment.collaudo.checkpoint import CheckpointSource
+from signworld.experiment.collaudo.pose_quality import OUTSIDE_LIMITS
+from signworld.experiment.collaudo.text_geometry import TextGeometrySettings
 
 
 class ContaminationSettings(FrozenModel):

@@ -22,10 +22,10 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from ..metrics.sigreg import SIGReg, random_directions
-from .config import LossSettings, SemanticSettings
-from .distributed import SINGLE, Distributed
-from .physical import PhysicalPrediction
+from signworld.experiment.train.config import LossSettings, SemanticSettings
+from signworld.experiment.train.distributed import SINGLE, Distributed
+from signworld.loss.sigreg import SIGReg, random_directions
+from signworld.models.worldsign.physical import PhysicalPrediction
 
 
 def physical_energy(

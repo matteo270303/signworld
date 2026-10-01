@@ -21,9 +21,10 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from .config import TrainingSettings, WorldSignConfig
-from .distributed import SINGLE, Distributed
-from .losses import LossTerms, Objective, physical_energy, physical_energy_per_clip
+from signworld.experiment.train.config import TrainingSettings, WorldSignConfig
+from signworld.experiment.train.distributed import SINGLE, Distributed
+from signworld.loss.worldsign import LossTerms, Objective, physical_energy, physical_energy_per_clip
+
 from .masking import TokenGrid
 from .pose_branch import PoseBranch, articulator_confidence
 from .text_branch import TextBranch
@@ -66,7 +67,8 @@ class WorldSignBatch:
         """The frames moved by their views (on the frames' device), which are then spent."""
         if self.views is None:
             return self
-        from .augmentation import apply_views  # noqa: PLC0415 (augmentation imports config only)
+        # augmentation imports config only
+        from signworld.data.augmentation import apply_views  # noqa: PLC0415
 
         return dataclasses.replace(self, frames=apply_views(self.frames, self.views), views=None)
 

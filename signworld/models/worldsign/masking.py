@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from .config import MaskSpec
+from signworld.experiment.train.config import MaskSpec
 
 
 @dataclass(frozen=True, slots=True)

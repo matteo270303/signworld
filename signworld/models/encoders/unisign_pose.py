@@ -16,7 +16,7 @@ from typing import Final, Self
 import torch
 from torch import Tensor, nn
 
-from ..pose.wholebody import ARTICULATOR_INDICES, Articulator
+from signworld.data.pose.wholebody import ARTICULATOR_INDICES, Articulator
 
 PROJECTION_CHANNELS: Final = 64
 SPATIAL_CHANNELS: Final = (64, 128, 256)

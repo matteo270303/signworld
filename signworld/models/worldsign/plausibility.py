@@ -18,8 +18,9 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from .distributed import SINGLE, Distributed
-from .losses import physical_energy_per_clip
+from signworld.experiment.train.distributed import SINGLE, Distributed
+from signworld.loss.worldsign import physical_energy_per_clip
+
 from .model import StepRandomness, WorldSign, WorldSignBatch
 from .pose_branch import articulator_confidence
 

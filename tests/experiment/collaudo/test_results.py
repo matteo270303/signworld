@@ -2,7 +2,7 @@
 
 import pytest
 
-from signworld.collaudo import ROOT, TESTS, result_path
+from signworld.experiment.collaudo.results import ROOT, TESTS, result_path
 
 
 def test_every_test_has_a_folder_with_a_readme() -> None:
@@ -16,7 +16,9 @@ def test_every_test_has_a_folder_with_a_readme() -> None:
 
 def test_every_folder_is_a_known_test() -> None:
     folders = {path.name for path in ROOT.iterdir() if path.is_dir()}
-    assert folders <= set(TESTS), f"folders not in signworld.collaudo.TESTS: {folders - set(TESTS)}"
+    assert folders <= set(TESTS), (
+        f"folders not in signworld.experiment.collaudo.results.TESTS: {folders - set(TESTS)}"
+    )
 
 
 def test_result_path_refuses_an_unknown_test() -> None:

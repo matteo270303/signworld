@@ -12,7 +12,7 @@ from typing import Final
 
 import pyarrow as pa
 
-from ..corpus.text import NEAR_DUPLICATE_RATIO, are_near_duplicates, normalize_caption
+from signworld.data.corpus.text import NEAR_DUPLICATE_RATIO, are_near_duplicates, normalize_caption
 
 EVALUATION_SPLITS: Final = frozenset({"valid", "dev", "test"})
 

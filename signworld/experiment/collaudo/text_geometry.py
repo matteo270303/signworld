@@ -16,14 +16,14 @@ import numpy as np
 import torch
 from pydantic import PositiveInt
 
-from ..acquisition.config import FrozenModel
-from ..metrics.geometry import (
+from signworld.data.acquisition.config import FrozenModel
+from signworld.loss.sigreg import SIGReg, random_directions
+from signworld.metrics.geometry import (
     effective_rank,
     explained_variance,
     isoscore,
     mean_random_pair_cosine,
 )
-from ..metrics.sigreg import SIGReg, random_directions
 
 
 class TextGeometrySettings(FrozenModel):

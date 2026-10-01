@@ -9,7 +9,7 @@ there, or ``tests/test_collaudo.py`` fails.
 from pathlib import Path
 from typing import Final
 
-ROOT: Final = Path(__file__).resolve().parents[2] / "collaudo"
+ROOT: Final = Path(__file__).resolve().parents[3] / "collaudo"
 
 TESTS: Final[dict[str, str]] = {
     "sonda-youtube": "YouTube refusals: account or network (acquisition)",
@@ -40,5 +40,5 @@ TESTS: Final[dict[str, str]] = {
 def result_path(test: str, name: str, root: Path = ROOT) -> Path:
     """``collaudo/<test>/<name>``; the test must be one of ``TESTS``."""
     if test not in TESTS:
-        raise KeyError(f"{test!r} is not a collaudo test; add it to signworld.collaudo.TESTS")
+        raise KeyError(f"{test!r} is not a collaudo test; add it to {__name__}.TESTS")
     return root / test / name

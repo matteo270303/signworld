@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from signworld.acquisition.provenance import ChecksumMismatchError, ProvenanceLog, verify_sha256
+from signworld.data.acquisition.provenance import (
+    ChecksumMismatchError,
+    ProvenanceLog,
+    verify_sha256,
+)
 
 
 def test_registered_files_keep_origin_and_checksum(tmp_path: Path) -> None:

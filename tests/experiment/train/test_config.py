@@ -5,9 +5,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from signworld.worldmodel.config import SemanticSettings, load_config, merge
-
-from .conftest import ABLATIONS, BASE
+from signworld.experiment.train.config import SemanticSettings, load_config, merge
+from tests.worldsign import ABLATIONS, BASE
 
 
 def test_the_base_file_is_arm_a_with_the_documented_sizes() -> None:

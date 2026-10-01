@@ -4,7 +4,11 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from signworld.checks.checkpoint import CheckpointSource, inspect_checkpoint, split_sections
+from signworld.experiment.collaudo.checkpoint import (
+    CheckpointSource,
+    inspect_checkpoint,
+    split_sections,
+)
 
 
 def test_sections_are_found_at_any_depth_next_to_metadata() -> None:

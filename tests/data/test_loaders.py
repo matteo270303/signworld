@@ -6,9 +6,8 @@ import numpy as np
 import pytest
 import torch
 
-from signworld.worldmodel.augmentation import ClipAugmenter, View
-from signworld.worldmodel.config import AugmentationSettings, DataSettings
-from signworld.worldmodel.data import (
+from signworld.data.augmentation import ClipAugmenter, View
+from signworld.data.loaders import (
     INDEX_SCHEMA,
     TRAIN,
     VALIDATION_CHANNEL,
@@ -23,8 +22,8 @@ from signworld.worldmodel.data import (
     validation_subset,
     write_index,
 )
-
-from .conftest import synthetic_corpus
+from signworld.experiment.train.config import AugmentationSettings, DataSettings
+from tests.worldsign import synthetic_corpus
 
 
 @pytest.fixture(scope="module")

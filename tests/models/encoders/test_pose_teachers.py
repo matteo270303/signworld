@@ -5,7 +5,8 @@ import math
 import pytest
 import torch
 
-from signworld.models.pose_teachers import (
+from signworld.data.pose.tokens import JOINTS, STEPS
+from signworld.models.encoders.pose_teachers import (
     MaskedMotionTeacher,
     PoseTeacher,
     SJEPATeacher,
@@ -15,7 +16,6 @@ from signworld.models.pose_teachers import (
     pool_articulators,
     token_motion,
 )
-from signworld.pose.tokens import JOINTS, STEPS
 
 TINY = TeacherShape(width=16, depth=1, heads=2, predictor_depth=1, decoder_depth=1)
 TOKENS = STEPS * len(JOINTS)

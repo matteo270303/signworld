@@ -4,7 +4,9 @@ from pathlib import Path
 
 import numpy as np
 
-from signworld.experiments.video_probes import (
+from signworld.data.pose.boxes import step_boxes
+from signworld.data.pose.wholebody import LEFT_SHOULDER, PoseTrack
+from signworld.experiment.studies.video_probes import (
     ClipFeatures,
     HandScores,
     RunScores,
@@ -17,8 +19,6 @@ from signworld.experiments.video_probes import (
 )
 from signworld.metrics.probes import fit_ridge, ridge_path
 from signworld.metrics.retrieval import Interval
-from signworld.pose.boxes import step_boxes
-from signworld.pose.wholebody import LEFT_SHOULDER, PoseTrack
 
 
 def _targets(clips: int, dimension: int = 32, seed: int = 0) -> TextTargets:

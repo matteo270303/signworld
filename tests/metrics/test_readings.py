@@ -4,9 +4,7 @@ import pytest
 import torch
 from torch import nn
 
-from signworld.worldmodel.lora import LoRALinear
-from signworld.worldmodel.physical import PhysicalPrediction
-from signworld.worldmodel.readings import (
+from signworld.metrics.readings import (
     Spread,
     _temporal_baselines,
     attention_readings,
@@ -22,6 +20,8 @@ from signworld.worldmodel.readings import (
     variance_ratio,
     weighted_r2,
 )
+from signworld.models.worldsign.lora import LoRALinear
+from signworld.models.worldsign.physical import PhysicalPrediction
 
 
 def _normal(*shape: int, seed: int = 0) -> torch.Tensor:

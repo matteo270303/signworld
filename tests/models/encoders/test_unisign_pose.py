@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from signworld.models.unisign_pose import OUTPUT_CHANNELS, UniSignPoseEncoder
-from signworld.pose.wholebody import ARTICULATOR_INDICES, Articulator
+from signworld.data.pose.wholebody import ARTICULATOR_INDICES, Articulator
+from signworld.models.encoders.unisign_pose import OUTPUT_CHANNELS, UniSignPoseEncoder
 
 REFERENCE = os.environ.get("UNISIGN_REFERENCE")
 CHECKPOINT = os.environ.get("UNISIGN_CHECKPOINT")

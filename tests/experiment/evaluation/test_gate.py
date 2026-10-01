@@ -2,7 +2,7 @@
 
 import pytest
 
-from signworld.evaluation.gate import Decision, GatePolicy
+from signworld.experiment.evaluation.gate import Decision, GatePolicy
 
 POLICY = GatePolicy()
 

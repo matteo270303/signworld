@@ -4,15 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from signworld.worldmodel.curriculum import (
+from signworld.experiment.train.curriculum import (
     FAMILIES,
     CosineSchedule,
     Curriculum,
     LearningRateSchedule,
     families,
 )
-
-from .conftest import ABLATIONS, needs_hub, tiny_worldsign
+from tests.worldsign import ABLATIONS, needs_hub, tiny_worldsign
 
 FRACTIONS = {"1a": 0.01, "1": 0.05, "2a": 0.01}
 

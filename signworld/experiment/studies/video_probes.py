@@ -25,15 +25,16 @@ from typing import Final
 import numpy as np
 import torch
 
-from ..analysis import VideoRun
-from ..corpus.materialize import MaterializedRecord, crop_square
-from ..metrics.probes import ProbeTask, video_split
-from ..metrics.retrieval import Interval, bootstrap_recall, grouped_relevance, recall_at_k
-from ..models.video_encoders import FrozenVideoEncoder, box_pool
-from ..pose.boxes import step_boxes
-from ..pose.tokens import articulator_columns
-from ..pose.wholebody import Articulator, PoseTrack
-from ..video import ClipReader
+from signworld.data.corpus.materialize import MaterializedRecord, crop_square
+from signworld.data.pose.boxes import step_boxes
+from signworld.data.pose.tokens import articulator_columns
+from signworld.data.pose.wholebody import Articulator, PoseTrack
+from signworld.data.video import ClipReader
+from signworld.experiment.collaudo.analysis import VideoRun
+from signworld.metrics.probes import ProbeTask, video_split
+from signworld.metrics.retrieval import Interval, bootstrap_recall, grouped_relevance, recall_at_k
+from signworld.models.encoders.video_encoders import FrozenVideoEncoder, box_pool
+
 from .pose_teachers import LabelledClip, PoseCorpus
 
 logger = logging.getLogger(__name__)

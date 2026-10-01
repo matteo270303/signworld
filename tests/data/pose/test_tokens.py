@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-from signworld.pose.frames import FRAMES_PER_CLIP
-from signworld.pose.tokens import JOINTS, STEPS, PoseSequence, articulator_columns
-from signworld.pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER, Articulator, PoseTrack
+from signworld.data.pose.frames import FRAMES_PER_CLIP
+from signworld.data.pose.tokens import JOINTS, STEPS, PoseSequence, articulator_columns
+from signworld.data.pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER, Articulator, PoseTrack
 
 
 def _track(score: float = 5.0) -> PoseTrack:

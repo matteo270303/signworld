@@ -3,9 +3,9 @@
 import pytest
 import torch
 
-from signworld.worldmodel.config import WorldSignConfig
-from signworld.worldmodel.measures import Collected, split_measures
-from signworld.worldmodel.validation import ranked, retrieval
+from signworld.experiment.train.config import WorldSignConfig
+from signworld.experiment.train.validation import ranked, retrieval
+from signworld.metrics.measures import Collected, split_measures
 
 
 def test_every_ranking_measure_on_a_ranking_worked_out_by_hand() -> None:

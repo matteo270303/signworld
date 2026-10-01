@@ -6,10 +6,9 @@ import numpy as np
 import pyarrow as pa
 import torch
 
-from signworld.corpus.materialize import MaterializedIndex
-from signworld.worldmodel.config import DataSettings
-from signworld.worldmodel.data import ClipDataset, build_training_index
-from signworld.worldmodel.toyworld import (
+from signworld.data.corpus.materialize import MaterializedIndex
+from signworld.data.loaders import ClipDataset, build_training_index
+from signworld.data.toyworld import (
     COMBINATIONS,
     MOTIONS,
     build,
@@ -18,6 +17,7 @@ from signworld.worldmodel.toyworld import (
     render,
     toy_clips,
 )
+from signworld.experiment.train.config import DataSettings
 
 
 def test_captions_and_combinations() -> None:

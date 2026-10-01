@@ -23,11 +23,11 @@ from typing import Final
 import numpy as np
 import torch
 
-from ..metrics.geometry import effective_rank, isoscore
-from ..metrics.probes import ProbeTask, video_split
-from ..metrics.sigreg import SIGReg, random_directions
-from ..models.unisign_pose import UniSignPoseEncoder
-from ..pose.wholebody import Articulator, PoseTrack, unisign_parts
+from signworld.data.pose.wholebody import Articulator, PoseTrack, unisign_parts
+from signworld.loss.sigreg import SIGReg, random_directions
+from signworld.metrics.geometry import effective_rank, isoscore
+from signworld.metrics.probes import ProbeTask, video_split
+from signworld.models.encoders.unisign_pose import UniSignPoseEncoder
 
 MIN_R2: Final = 0.7
 """PC5 threshold on the linear read-out of the keypoints from the frozen representation."""

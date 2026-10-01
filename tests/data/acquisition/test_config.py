@@ -3,10 +3,10 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from signworld.acquisition.config import AcquisitionConfig
-from signworld.acquisition.sources import SOURCES, UnknownSourceError, build_source
+from signworld.data.acquisition.config import AcquisitionConfig
+from signworld.data.acquisition.sources import SOURCES, UnknownSourceError, build_source
 
-REPOSITORY = Path(__file__).resolve().parents[2]
+REPOSITORY = Path(__file__).resolve().parents[3]
 
 
 def test_repository_configuration_is_valid_for_every_source() -> None:

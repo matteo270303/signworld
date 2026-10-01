@@ -4,13 +4,13 @@ from pathlib import Path
 
 import numpy as np
 
-from signworld.checks.pose_quality import pose_quality_report
-from signworld.pose.wholebody import (
+from signworld.data.pose.wholebody import (
     ARTICULATOR_INDICES,
     LEFT_SHOULDER,
     RIGHT_SHOULDER,
     Articulator,
 )
+from signworld.experiment.collaudo.pose_quality import pose_quality_report
 
 FRAMES = 8
 LEFT_ELBOW, RIGHT_ELBOW = 7, 8

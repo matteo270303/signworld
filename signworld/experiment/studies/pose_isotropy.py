@@ -30,9 +30,12 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from ..analysis import PoseIsotropySettings, PoseTeacherSettings
-from ..metrics.divergence import gaussian_divergence, sliced_negentropy
-from ..metrics.geometry import (
+from signworld.data.pose.tokens import articulator_columns
+from signworld.data.pose.wholebody import Articulator
+from signworld.experiment.collaudo.analysis import PoseIsotropySettings, PoseTeacherSettings
+from signworld.loss.sigreg import SIGReg, random_directions
+from signworld.metrics.divergence import gaussian_divergence, sliced_negentropy
+from signworld.metrics.geometry import (
     condition_number,
     effective_rank,
     explained_variance,
@@ -41,9 +44,9 @@ from ..metrics.geometry import (
     participation_ratio,
     stable_rank,
 )
-from ..metrics.probes import ProbeTask, label_accuracy, video_split, weighted_r2
-from ..metrics.sigreg import SIGReg, random_directions
-from ..models.gaussianize import (
+from signworld.metrics.probes import ProbeTask, label_accuracy, video_split, weighted_r2
+from signworld.models.encoders.pose_teachers import SJEPATeacher
+from signworld.models.gaussianize import (
     FlowFit,
     FlowTransform,
     Identity,
@@ -53,9 +56,7 @@ from ..models.gaussianize import (
     Whitening,
     fit_flow,
 )
-from ..models.pose_teachers import SJEPATeacher
-from ..pose.tokens import articulator_columns
-from ..pose.wholebody import Articulator
+
 from .pose_teachers import LabelledClip, PoseCorpus, probe_subset, teacher_features, teacher_shape
 
 logger = logging.getLogger(__name__)

@@ -18,12 +18,12 @@ from typing import Any
 import torch
 from torch.utils.flop_counter import FlopCounterMode
 
-from ..metrics.retrieval import grouped_relevance, recall_at_k
-from .curriculum import STAGES, Curriculum, families
-from .model import StepRandomness, WorldSign, WorldSignBatch
-from .readings import physical_readings
-from .trainer import Trainer
-from .validation import similarity
+from signworld.experiment.train.curriculum import STAGES, Curriculum, families
+from signworld.experiment.train.trainer import Trainer
+from signworld.experiment.train.validation import similarity
+from signworld.metrics.readings import physical_readings
+from signworld.metrics.retrieval import grouped_relevance, recall_at_k
+from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
 
 H100_BF16_PEAK: float = 989e12
 """Dense bf16 FLOP/s of an H100 SXM, the value torchtitan uses (§4.9, to be checked)."""
@@ -109,7 +109,7 @@ def measure_efficiency(
         loaded += len(next(source).videos)
     loader_rate = loaded / (time.perf_counter() - began)
 
-    from .checkpoint import TrainingState  # noqa: PLC0415
+    from signworld.experiment.train.checkpoint import TrainingState  # noqa: PLC0415
 
     state = TrainingState()
     for _ in range(warmup):

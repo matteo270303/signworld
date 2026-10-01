@@ -4,25 +4,25 @@ from unittest import mock
 
 import pytest
 
-from signworld.acquisition.config import AcquisitionConfig
-from signworld.acquisition.ledger import read_ledgers
-from signworld.acquisition.outcome import Outcome, Status
-from signworld.acquisition.sharding import Shard
-from signworld.acquisition.sources import build_source
-from signworld.acquisition.sources.base import (
+from signworld.data.acquisition.config import AcquisitionConfig
+from signworld.data.acquisition.ledger import read_ledgers
+from signworld.data.acquisition.outcome import Outcome, Status
+from signworld.data.acquisition.sharding import Shard
+from signworld.data.acquisition.sources import build_source
+from signworld.data.acquisition.sources.base import (
     Access,
     AccessRequiredError,
     DatasetSource,
     NoSettings,
 )
-from signworld.acquisition.sources.csl_news import CSLNewsSettings, CSLNewsSource
-from signworld.acquisition.sources.openasl import (
+from signworld.data.acquisition.sources.csl_news import CSLNewsSettings, CSLNewsSource
+from signworld.data.acquisition.sources.openasl import (
     COLUMNS,
     OpenASLSettings,
     OpenASLSource,
     read_video_ids,
 )
-from signworld.acquisition.sources.youtube_sl25 import (
+from signworld.data.acquisition.sources.youtube_sl25 import (
     VideoEntry,
     download_order,
     interleave_by_language,
@@ -125,7 +125,7 @@ def test_a_run_stops_when_its_time_budget_is_spent(config: AcquisitionConfig) ->
         source.calls.append(key) or Outcome(key, Status.DONE)
     )
 
-    with mock.patch("signworld.acquisition.sources.base.monotonic", lambda: next(clock)):
+    with mock.patch("signworld.data.acquisition.sources.base.monotonic", lambda: next(clock)):
         report = source.fetch_media(Shard.whole())
 
     assert source.calls == ["a"]

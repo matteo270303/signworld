@@ -14,10 +14,10 @@ from urllib.parse import urlparse
 import torch
 from pydantic import PositiveInt, model_validator
 
-from ..acquisition.config import FrozenModel, HttpConfig
-from ..acquisition.provenance import sha256sum
-from ..acquisition.transfer.http import HttpDownloader
-from ..acquisition.transfer.hub import HubDataset
+from signworld.data.acquisition.config import FrozenModel, HttpConfig
+from signworld.data.acquisition.provenance import sha256sum
+from signworld.data.acquisition.transfer.http import HttpDownloader
+from signworld.data.acquisition.transfer.hub import HubDataset
 
 _NORM_MARKERS: Final = ("norm", "ln_", "layernorm")
 

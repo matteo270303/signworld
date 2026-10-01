@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from signworld.acquisition.transfer.archive import ArchiveError, extract_tar, extract_zip_flat
+from signworld.data.acquisition.transfer.archive import ArchiveError, extract_tar, extract_zip_flat
 
 
 def _zip(path: Path, members: dict[str, bytes]) -> Path:

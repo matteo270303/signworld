@@ -8,8 +8,8 @@ import pytest
 import torch
 from torch import nn
 
-from signworld.models.predictor_fusion import fused_embedding
-from signworld.models.video_encoders import (
+from signworld.models.encoders.predictor_fusion import fused_embedding
+from signworld.models.encoders.video_encoders import (
     IMAGENET_MEAN,
     IMAGENET_STD,
     FrozenVideoEncoder,

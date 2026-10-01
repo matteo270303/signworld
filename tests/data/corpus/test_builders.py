@@ -1,13 +1,13 @@
 import json
 from pathlib import Path
 
-from signworld.acquisition.config import AcquisitionConfig
-from signworld.acquisition.ledger import Ledger
-from signworld.acquisition.outcome import Outcome, Status
-from signworld.acquisition.sources.openasl import COLUMNS, OpenASLSettings, OpenASLSource
-from signworld.acquisition.sources.youtube_sl25 import YouTubeSL25Settings, YouTubeSL25Source
-from signworld.corpus.builders import OpenASLManifest, YouTubeSL25Manifest
-from signworld.corpus.manifest import clips_of, read_manifest
+from signworld.data.acquisition.config import AcquisitionConfig
+from signworld.data.acquisition.ledger import Ledger
+from signworld.data.acquisition.outcome import Outcome, Status
+from signworld.data.acquisition.sources.openasl import COLUMNS, OpenASLSettings, OpenASLSource
+from signworld.data.acquisition.sources.youtube_sl25 import YouTubeSL25Settings, YouTubeSL25Source
+from signworld.data.corpus.builders import OpenASLManifest, YouTubeSL25Manifest
+from signworld.data.corpus.manifest import clips_of, read_manifest
 
 
 def test_openasl_manifest_keeps_splits_times_and_availability(

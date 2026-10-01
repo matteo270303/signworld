@@ -25,13 +25,14 @@ import torch
 from torch import Tensor
 from torch.nn import functional
 
+from signworld.experiment.train.config import WorldSignConfig
+from signworld.experiment.train.validation import EVERY_INTERVAL
+from signworld.metrics.measures import collect, model_measures, pose_target_measures, split_measures
+from signworld.metrics.probes import video_split
+from signworld.models.worldsign.model import WorldSign, WorldSignBatch
+from signworld.models.worldsign.plausibility import PlausibilityResult, plausibility_tests
+
 from ..evaluation.gate import GatePolicy
-from ..metrics.probes import video_split
-from .config import WorldSignConfig
-from .measures import collect, model_measures, pose_target_measures, split_measures
-from .model import WorldSign, WorldSignBatch
-from .plausibility import PlausibilityResult, plausibility_tests
-from .validation import EVERY_INTERVAL
 
 # ------------------------------------------------------------------ probes
 

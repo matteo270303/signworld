@@ -1,169 +1,18 @@
 """``signworld train``: the training index of stage 0 and the training runs (§4.10)."""
 
-import logging
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from .cli_support import reports_user_errors
+from signworld.cli.corpus import index, materialize
+from signworld.cli.support import ConfigFiles, reports_user_errors
 
 train_app = typer.Typer(help="Train WorldSign.", no_args_is_help=True)
-logger = logging.getLogger(__name__)
 
-ConfigFiles = Annotated[
-    list[Path],
-    typer.Option(
-        "--config",
-        "-c",
-        exists=True,
-        dir_okay=False,
-        help="Model YAML; repeat to lay overlays (arm, ablation) over the base, in order.",
-    ),
-]
-
-
-@train_app.command("index")
-@reports_user_errors
-def index(  # noqa: PLR0913, PLR0917 (typer options)
-    manifest: Annotated[Path, typer.Option(exists=True, dir_okay=False, help="Clip manifest.")],
-    embeddings: Annotated[
-        Path, typer.Option(exists=True, file_okay=False, help="EmbeddingStore directory.")
-    ],
-    output: Annotated[Path, typer.Option(dir_okay=False, help="Index to write (Parquet).")],
-    config: ConfigFiles,
-    check_poses: Annotated[
-        bool, typer.Option(help="Read every pose and drop those without shoulders.")
-    ] = True,
-    benchmark: Annotated[
-        list[Path] | None,
-        typer.Option(
-            exists=True,
-            dir_okay=False,
-            help="Benchmark manifest whose validation and test clips are removed (§3.9); repeat.",
-        ),
-    ] = None,
-    materialized: Annotated[
-        Path | None,
-        typer.Option(exists=True, file_okay=False, help="Root of clips materialised by us."),
-    ] = None,
-    videos: Annotated[
-        Path | None,
-        typer.Option(exists=True, file_okay=False, help="Flat folder of <clip>.mp4 (OpenASL)."),
-    ] = None,
-    poses: Annotated[
-        Path | None,
-        typer.Option(exists=True, file_okay=False, help="Flat folder of <clip>.npz (OpenASL)."),
-    ] = None,
-    workers: Annotated[int, typer.Option(min=1, help="Processes that read the poses.")] = 8,
-) -> None:
-    """Join manifest, materialised clips and captions into the training index, with splits."""
-    from .checks.contamination import contamination_report  # noqa: PLC0415
-    from .corpus.manifest import read_manifest  # noqa: PLC0415 (heavy imports on demand)
-    from .corpus.materialize import MaterializedIndex  # noqa: PLC0415
-    from .text.embedding import EmbeddingStore  # noqa: PLC0415
-    from .worldmodel.config import load_config  # noqa: PLC0415
-    from .worldmodel.data import (  # noqa: PLC0415
-        build_training_index,
-        records_from_files,
-        write_index,
-    )
-
-    settings = load_config(*config).data
-    corpus = read_manifest(manifest)
-    excluded: frozenset[str] = frozenset()
-    for path in benchmark or []:
-        report = contamination_report(corpus, read_manifest(path))
-        excluded |= report.excluded
-        typer.echo(f"{path.name}: {len(report.excluded)} contaminated clips removed")
-    if materialized is not None:
-        records = MaterializedIndex(materialized).records()
-    elif videos is not None and poses is not None:
-        records = records_from_files(corpus, videos, poses)
-    else:
-        raise ValueError("give --materialized, or --videos and --poses")
-    typer.echo(f"{len(records)} clips with video and pose")
-    table = build_training_index(
-        corpus,
-        records,
-        EmbeddingStore(embeddings).clip_rows(),
-        settings,
-        check_poses=check_poses,
-        excluded=excluded,
-        workers=workers,
-    )
-    write_index(table, output)
-    splits = table.column("split").value_counts().to_pylist()
-    typer.echo(
-        f"{output}: {table.num_rows} clips; "
-        + ", ".join(f"{entry['values']}={entry['counts']}" for entry in splits)
-    )
-
-
-@train_app.command("materialize")
-@reports_user_errors
-def materialize(
-    source: Annotated[str, typer.Argument(help="Dataset source, e.g. youtube_sl25.")],
-    output: Annotated[Path, typer.Option(file_okay=False, help="Root of the training clips.")],
-    config: Annotated[
-        Path, typer.Option("--config", "-c", exists=True, dir_okay=False, help="analysis.yaml")
-    ] = Path("configs/analysis.yaml"),
-    device: Annotated[str, typer.Option(help="Device of the detector and pose model.")] = "cuda",
-    shard: Annotated[int, typer.Option(min=0, help="Index of this shard.")] = 0,
-    num_shards: Annotated[int, typer.Option(min=1, help="Total number of shards.")] = 1,
-) -> None:
-    """Stage 0 on the whole corpus: crop, 64 frames, pose, for every captioned clip (§3.6).
-
-    The same pipeline as the test clips (``testdata build``), without the contiguous poses,
-    written under ``output``, never next to the downloaded data. Resumes: clips already in the
-    index are skipped; shards split the clips by a stable hash of their ID.
-    """
-    from .acquisition.sharding import Shard  # noqa: PLC0415
-    from .analysis_cli import _load, _manifest, _source  # noqa: PLC0415
-    from .corpus.materialize import ClipCut, ClipMaterializer, MaterializedIndex  # noqa: PLC0415
-    from .pose.estimator import WholebodyEstimator  # noqa: PLC0415
-
-    settings = _load(config)
-    dataset = _source(source, settings)
-    options = settings.test_data
-    part = Shard(shard, num_shards)
-    index = MaterializedIndex(output, part if num_shards > 1 else None)
-    done = {record.clip_id for record in index.records()}
-    columns = ["clip_id", "video_id", "start_s", "end_s", "video_available"]
-    rows = _manifest(dataset).select(columns).to_pylist()
-    cuts = [
-        ClipCut(row["clip_id"], row["video_id"], row["start_s"], row["end_s"])
-        for row in rows
-        if row["video_available"]
-        and part.owns(row["clip_id"])
-        and row["clip_id"] not in done
-        and options.min_duration_s <= row["end_s"] - row["start_s"] <= options.max_duration_s
-    ]
-    materializer = ClipMaterializer(
-        WholebodyEstimator(device=device),
-        options.size,
-        options.crop_margin,
-        options.detection_frames,
-        contiguous=False,
-    )
-    videos = dataset.layout.raw / "videos"
-    skipped, failed = 0, 0
-    for position, cut in enumerate(cuts, start=1):
-        try:
-            record = materializer.materialize(videos / f"{cut.video_id}.mp4", cut, output)
-        except Exception:  # one unreadable clip must not end a run of millions
-            logger.exception("%s: materialization failed", cut.clip_id)
-            failed += 1
-            continue
-        if record is None:
-            skipped += 1
-            continue
-        index.append(record)
-        if position % 500 == 0:
-            typer.echo(f"{position}/{len(cuts)} clips, {skipped} without a signer, {failed} failed")
-    typer.echo(
-        f"{source} {part.label}: {len(cuts)} clips; {skipped} without a signer, {failed} failed"
-    )
+# Stage 0 lives with the corpus commands; it is listed first, as it runs first.
+train_app.command("index")(index)
+train_app.command("materialize")(materialize)
 
 
 @train_app.command("run")
@@ -173,9 +22,9 @@ def run(
     output: Annotated[Path, typer.Option(file_okay=False, help="Run directory.")],
 ) -> None:
     """Train, or resume, one run; launch with torchrun for several GPUs."""
-    from .worldmodel.config import load_config  # noqa: PLC0415
-    from .worldmodel.distributed import Distributed  # noqa: PLC0415
-    from .worldmodel.run import run as start  # noqa: PLC0415
+    from signworld.experiment.train.config import load_config
+    from signworld.experiment.train.distributed import Distributed
+    from signworld.experiment.train.run import run as start
 
     collective = Distributed.from_environment()
     try:
@@ -204,24 +53,24 @@ def evaluate(  # noqa: PLR0913, PLR0917 (typer options)
     device: Annotated[str, typer.Option()] = "cuda",
 ) -> None:
     """Final evaluation of a checkpoint (§4.12.2-§4.12.4) on the clips of an index."""
-    import pyarrow as pa  # noqa: PLC0415
-    import pyarrow.compute as pc  # noqa: PLC0415
-    import torch  # noqa: PLC0415
-    from torch.utils.data import DataLoader  # noqa: PLC0415
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import torch
+    from torch.utils.data import DataLoader
 
-    from .text.embedding import EmbeddingStore  # noqa: PLC0415
-    from .worldmodel.checkpoint import CheckpointStore  # noqa: PLC0415
-    from .worldmodel.config import load_config  # noqa: PLC0415
-    from .worldmodel.curriculum import trainable_names  # noqa: PLC0415
-    from .worldmodel.data import (  # noqa: PLC0415
+    from signworld.data.loaders import (
         ClipDataset,
         Collate,
         read_index,
         validation_subset,
     )
-    from .worldmodel.evaluation import evaluate as measure  # noqa: PLC0415
-    from .worldmodel.model import build_worldsign  # noqa: PLC0415
-    from .worldmodel.run import STATISTICS, load_statistics  # noqa: PLC0415
+    from signworld.data.text import EmbeddingStore
+    from signworld.experiment.evaluation.worldsign import evaluate as measure
+    from signworld.experiment.train.checkpoint import CheckpointStore
+    from signworld.experiment.train.config import load_config
+    from signworld.experiment.train.curriculum import trainable_names
+    from signworld.experiment.train.run import STATISTICS, load_statistics
+    from signworld.models.worldsign.model import build_worldsign
 
     settings = load_config(*config)
     if settings.data.embeddings is None:
@@ -281,23 +130,23 @@ def overfit_command(
     device: Annotated[str, typer.Option()] = "cuda",
 ) -> None:
     """Collaudo «overfitting controllato» (§4.13.1): a few real clips, every loss on."""
-    import json  # noqa: PLC0415
-    from dataclasses import asdict  # noqa: PLC0415
+    import json
+    from dataclasses import asdict
 
-    import torch  # noqa: PLC0415
+    import torch
 
-    from .text.embedding import EmbeddingStore  # noqa: PLC0415
-    from .worldmodel.collaudo import overfit  # noqa: PLC0415
-    from .worldmodel.config import load_config  # noqa: PLC0415
-    from .worldmodel.data import (  # noqa: PLC0415
+    from signworld.data.loaders import (
         TRAIN,
         ClipDataset,
         Collate,
         read_index,
         validation_subset,
     )
-    from .worldmodel.model import build_worldsign  # noqa: PLC0415
-    from .worldmodel.run import fit_statistics  # noqa: PLC0415
+    from signworld.data.text import EmbeddingStore
+    from signworld.experiment.collaudo.worldsign import overfit
+    from signworld.experiment.train.config import load_config
+    from signworld.experiment.train.run import fit_statistics
+    from signworld.models.worldsign.model import build_worldsign
 
     settings = load_config(*config)
     if settings.data.index is None or settings.data.embeddings is None:
@@ -327,12 +176,12 @@ def benchmark(
     peak_tflops: Annotated[float, typer.Option(help="Peak bf16 TFLOP/s of one GPU.")] = 989.0,
 ) -> None:
     """Collaudo «efficienza di calcolo» (§4.13.1, PC7): loader, step time, MFU, memory."""
-    import json  # noqa: PLC0415
+    import json
 
-    from .worldmodel.collaudo import measure_efficiency  # noqa: PLC0415
-    from .worldmodel.config import load_config  # noqa: PLC0415
-    from .worldmodel.distributed import Distributed  # noqa: PLC0415
-    from .worldmodel.run import prepare  # noqa: PLC0415
+    from signworld.experiment.collaudo.worldsign import measure_efficiency
+    from signworld.experiment.train.config import load_config
+    from signworld.experiment.train.distributed import Distributed
+    from signworld.experiment.train.run import prepare
 
     collective = Distributed.from_environment()
     try:
@@ -355,7 +204,7 @@ def toyworld(
     seed: Annotated[int, typer.Option()] = 0,
 ) -> None:
     """Collaudo «mondo giocattolo» (§4.13.1): synthetic clips in the materialised format."""
-    from .worldmodel.toyworld import build  # noqa: PLC0415
+    from signworld.data.toyworld import build
 
     written = build(output, clips, shard=shard, shards=num_shards, seed=seed)
     typer.echo(f"{output}: {written} clips written by shard {shard}/{num_shards}")
@@ -368,12 +217,12 @@ def toyworld_embed(
     device: Annotated[str, typer.Option()] = "cuda",
 ) -> None:
     """EmbeddingGemma rows of the toy captions, with the pinned model and prompt (§4.4.4)."""
-    from .text.embedding import (  # noqa: PLC0415
+    from signworld.data.text import (
         EmbeddingSettings,
         SentenceTransformerEncoder,
         embed_manifest,
     )
-    from .worldmodel.toyworld import manifest_table  # noqa: PLC0415
+    from signworld.data.toyworld import manifest_table
 
     encoder = SentenceTransformerEncoder(EmbeddingSettings(), device=device)
     store = embed_manifest(manifest_table(output), encoder, encoder.identity, output / "text")

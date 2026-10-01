@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from signworld.acquisition.ledger import Ledger, read_ledgers
-from signworld.acquisition.outcome import Outcome, Status
-from signworld.acquisition.sharding import Shard
+from signworld.data.acquisition.ledger import Ledger, read_ledgers
+from signworld.data.acquisition.outcome import Outcome, Status
+from signworld.data.acquisition.sharding import Shard
 
 
 def test_latest_outcome_wins_and_attempts_accumulate(tmp_path: Path) -> None:

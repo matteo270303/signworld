@@ -19,12 +19,13 @@ from typing import Any, Final
 import numpy as np
 import torch
 
-from ..analysis import PoseTeacherSettings
-from ..metrics.geometry import centered, effective_rank, isoscore
-from ..metrics.probes import ProbeTask, video_split
-from ..models.pose_teachers import SJEPATeacher
-from ..pose.tokens import articulator_columns
-from ..pose.wholebody import Articulator
+from signworld.data.pose.tokens import articulator_columns
+from signworld.data.pose.wholebody import Articulator
+from signworld.experiment.collaudo.analysis import PoseTeacherSettings
+from signworld.metrics.geometry import centered, effective_rank, isoscore
+from signworld.metrics.probes import ProbeTask, video_split
+from signworld.models.encoders.pose_teachers import SJEPATeacher
+
 from .pose_teachers import (
     Features,
     LabelledClip,

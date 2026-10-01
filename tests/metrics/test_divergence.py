@@ -5,8 +5,8 @@ import math
 import pytest
 import torch
 
+from signworld.loss.sigreg import random_directions
 from signworld.metrics.divergence import gaussian_divergence, sliced_negentropy, spacing_entropy
-from signworld.metrics.sigreg import random_directions
 
 
 def _normal(rows: int, dimension: int, seed: int = 0) -> torch.Tensor:

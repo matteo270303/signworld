@@ -26,7 +26,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional
 
-from ..metrics.retrieval import bootstrap_recall, grouped_relevance, match_ranks
+from signworld.metrics.retrieval import bootstrap_recall, grouped_relevance, match_ranks
 
 KS = (1, 5, 10)
 EVERY_INTERVAL = tuple(f"{d}_r{k}" for d in ("t2v", "v2t") for k in KS)

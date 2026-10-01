@@ -15,10 +15,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import torch
 
-from ..text.embedding import EmbeddingStore
-from .checkpoint import TrainingState
-from .config import WorldSignConfig
-from .data import (
+from signworld.data.loaders import (
     TRAIN,
     ClipDataset,
     Collate,
@@ -27,8 +24,12 @@ from .data import (
     read_index,
     validation_subset,
 )
+from signworld.data.text import EmbeddingStore
+from signworld.models.worldsign.model import WorldSign, build_worldsign
+
+from .checkpoint import TrainingState
+from .config import WorldSignConfig
 from .distributed import Distributed
-from .model import WorldSign, build_worldsign
 from .preflight import enforce, run_preflight
 from .trainer import Trainer
 

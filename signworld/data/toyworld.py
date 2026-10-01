@@ -25,10 +25,10 @@ import cv2
 import numpy as np
 import pyarrow as pa
 
-from ..corpus.manifest import Clip, write_manifest
-from ..corpus.materialize import MaterializedIndex, MaterializedRecord
-from ..pose.frames import FRAMES_PER_CLIP, local_motion, select_frames
-from ..pose.wholebody import (
+from signworld.data.corpus.manifest import Clip, write_manifest
+from signworld.data.corpus.materialize import MaterializedIndex, MaterializedRecord
+from signworld.data.pose.frames import FRAMES_PER_CLIP, local_motion, select_frames
+from signworld.data.pose.wholebody import (
     ARTICULATOR_INDICES,
     LEFT_SHOULDER,
     RIGHT_SHOULDER,
@@ -217,7 +217,7 @@ def build(
     clips = toy_clips(count, seed)
     if shard == 0:
         write_manifest(toy_manifest(clips), root / "manifest" / "clips.parquet")
-    from ..acquisition.sharding import Shard  # noqa: PLC0415
+    from signworld.data.acquisition.sharding import Shard  # noqa: PLC0415
 
     part = Shard(shard, shards)
     index = MaterializedIndex(root, part if shards > 1 else None)
@@ -231,6 +231,6 @@ def build(
 
 
 def manifest_table(root: Path) -> pa.Table:
-    from ..corpus.manifest import read_manifest  # noqa: PLC0415
+    from signworld.data.corpus.manifest import read_manifest  # noqa: PLC0415
 
     return read_manifest(root / "manifest" / "clips.parquet")

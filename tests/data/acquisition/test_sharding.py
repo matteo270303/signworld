@@ -1,6 +1,6 @@
 import pytest
 
-from signworld.acquisition.sharding import Shard
+from signworld.data.acquisition.sharding import Shard
 
 KEYS = [f"video-{index}" for index in range(1000)]
 

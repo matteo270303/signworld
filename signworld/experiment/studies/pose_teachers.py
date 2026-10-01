@@ -25,14 +25,19 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ..analysis import PoseTeacherSettings
-from ..checks.unisign import Batch, PosedClip, encode
-from ..metrics.geometry import centered, effective_rank, isoscore
-from ..metrics.probes import ProbeTask, channel_split, label_accuracy, video_split
-from ..models.pose_teachers import MaskedMotionTeacher, PoseTeacher, SJEPATeacher, TeacherShape
-from ..models.unisign_pose import UniSignPoseEncoder
-from ..pose.tokens import STEPS, PoseSequence, articulator_columns
-from ..pose.wholebody import Articulator, PoseTrack
+from signworld.data.pose.tokens import STEPS, PoseSequence, articulator_columns
+from signworld.data.pose.wholebody import Articulator, PoseTrack
+from signworld.experiment.collaudo.analysis import PoseTeacherSettings
+from signworld.experiment.collaudo.unisign import Batch, PosedClip, encode
+from signworld.metrics.geometry import centered, effective_rank, isoscore
+from signworld.metrics.probes import ProbeTask, channel_split, label_accuracy, video_split
+from signworld.models.encoders.pose_teachers import (
+    MaskedMotionTeacher,
+    PoseTeacher,
+    SJEPATeacher,
+    TeacherShape,
+)
+from signworld.models.encoders.unisign_pose import UniSignPoseEncoder
 
 logger = logging.getLogger(__name__)
 

@@ -15,12 +15,11 @@ import torch.multiprocessing as mp
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel
 
-from signworld.worldmodel.config import LossSettings, SemanticSettings
-from signworld.worldmodel.distributed import SINGLE, Distributed
-from signworld.worldmodel.losses import Objective
-from signworld.worldmodel.trainer import Trainer
-
-from .conftest import needs_hub, slow, synthetic_corpus, tiny_teacher, tiny_training
+from signworld.experiment.train.config import LossSettings, SemanticSettings
+from signworld.experiment.train.distributed import SINGLE, Distributed
+from signworld.experiment.train.trainer import Trainer
+from signworld.loss.worldsign import Objective
+from tests.worldsign import needs_hub, slow, synthetic_corpus, tiny_teacher, tiny_training
 
 WORLD = 2
 BATCH = 16

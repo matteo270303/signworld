@@ -23,8 +23,9 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
+from signworld.experiment.train.config import LoRASettings
+
 from . import lora
-from .config import LoRASettings
 from .fusion import _Fusion
 from .masking import Mask, TokenGrid, TokenRoles
 from .readout import ArticulatorReadout, box_sum

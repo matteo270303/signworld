@@ -3,8 +3,8 @@
 import pytest
 import torch
 
-from signworld.worldmodel.config import TextSettings
-from signworld.worldmodel.text_branch import LanguageCentering, TextBranch
+from signworld.experiment.train.config import TextSettings
+from signworld.models.worldsign.text_branch import LanguageCentering, TextBranch
 
 
 def _captions() -> tuple[torch.Tensor, list[str]]:

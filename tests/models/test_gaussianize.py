@@ -2,7 +2,7 @@
 
 import torch
 
-from signworld.metrics.sigreg import SIGReg, random_directions
+from signworld.loss.sigreg import SIGReg, random_directions
 from signworld.models.gaussianize import (
     IterativeGaussianization,
     MarginalGaussianization,

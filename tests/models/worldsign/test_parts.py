@@ -5,11 +5,12 @@ import pytest
 import torch
 from torch import nn
 
-from signworld.models.video_encoders import box_pool
-from signworld.worldmodel.augmentation import ClipAugmenter, View
-from signworld.worldmodel.config import AugmentationSettings, MaskSpec, SamplingSettings
-from signworld.worldmodel.lora import LoRALinear, adapter_parameters, inject
-from signworld.worldmodel.masking import (
+from signworld.data.augmentation import ClipAugmenter, View
+from signworld.data.sampling import MotionGuidedSampler, UniformSampler
+from signworld.experiment.train.config import AugmentationSettings, MaskSpec, SamplingSettings
+from signworld.models.encoders.video_encoders import box_pool
+from signworld.models.worldsign.lora import LoRALinear, adapter_parameters, inject
+from signworld.models.worldsign.masking import (
     LambdaSchedule,
     Mask,
     MaskPolicy,
@@ -18,9 +19,8 @@ from signworld.worldmodel.masking import (
     context_weights,
     token_roles,
 )
-from signworld.worldmodel.readout import box_sum, membership, pool
-from signworld.worldmodel.rope import RoPE3D
-from signworld.worldmodel.sampling import MotionGuidedSampler, UniformSampler
+from signworld.models.worldsign.readout import box_sum, membership, pool
+from signworld.models.worldsign.rope import RoPE3D
 
 GRID = TokenGrid()
 

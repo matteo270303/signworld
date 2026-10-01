@@ -29,15 +29,16 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset, Sampler
 
-from ..corpus.materialize import MaterializedRecord
+from signworld.data.corpus.materialize import MaterializedRecord
+from signworld.data.pose.boxes import step_boxes
+from signworld.data.pose.tokens import PoseSequence
+from signworld.data.pose.wholebody import PoseTrack
+from signworld.data.video import ClipReader
+from signworld.experiment.train.config import AugmentationSettings, DataSettings
+from signworld.models.worldsign.model import WorldSignBatch
+
 from ..metrics.probes import channel_split, video_split
-from ..pose.boxes import step_boxes
-from ..pose.tokens import PoseSequence
-from ..pose.wholebody import PoseTrack
-from ..video import ClipReader
 from .augmentation import ClipAugmenter
-from .config import AugmentationSettings, DataSettings
-from .model import WorldSignBatch
 
 logger = logging.getLogger(__name__)
 

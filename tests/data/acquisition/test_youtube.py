@@ -6,9 +6,9 @@ from typing import Any
 import pytest
 import yt_dlp
 
-from signworld.acquisition.config import YouTubeConfig
-from signworld.acquisition.outcome import Status
-from signworld.acquisition.transfer.youtube import YouTubeDownloader, classify_error
+from signworld.data.acquisition.config import YouTubeConfig
+from signworld.data.acquisition.outcome import Status
+from signworld.data.acquisition.transfer.youtube import YouTubeDownloader, classify_error
 
 
 @pytest.mark.parametrize(

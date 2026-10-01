@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from signworld.pose.boxes import articulator_boxes
-from signworld.pose.frames import local_motion, select_frames, uniform_indices
-from signworld.pose.wholebody import (
+from signworld.data.pose.boxes import articulator_boxes
+from signworld.data.pose.frames import local_motion, select_frames, uniform_indices
+from signworld.data.pose.wholebody import (
     ARTICULATOR_INDICES,
     LEFT_SHOULDER,
     RIGHT_SHOULDER,

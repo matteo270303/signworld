@@ -18,11 +18,12 @@ from pathlib import Path
 import torch
 from torch import Tensor, nn
 
-from ..models.pose_teachers import TokenEmbedding, pool_articulators, transformer
-from ..pose.tokens import JOINT_ARTICULATOR
-from ..pose.wholebody import ARTICULATOR_INDICES, Articulator
+from signworld.data.pose.tokens import JOINT_ARTICULATOR
+from signworld.data.pose.wholebody import ARTICULATOR_INDICES, Articulator
+from signworld.experiment.train.config import PoseEncoderSettings
+from signworld.models.encoders.pose_teachers import TokenEmbedding, pool_articulators, transformer
+
 from . import lora
-from .config import PoseEncoderSettings
 
 PARTS = len(Articulator)
 

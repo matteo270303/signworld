@@ -9,7 +9,7 @@ import math
 import pytest
 import torch
 
-from signworld.metrics.sigreg import SIGReg, random_directions
+from signworld.loss.sigreg import SIGReg, random_directions
 
 DIMENSION = 128
 SAMPLES = 4096

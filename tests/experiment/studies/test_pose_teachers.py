@@ -6,12 +6,17 @@ import numpy as np
 import pytest
 import torch
 
-from signworld.analysis import PoseTeacherSettings
-from signworld.experiments import pose_teachers
-from signworld.experiments.pose_teachers import LabelledClip, PoseCorpus, kinematic_features, run
-from signworld.pose.frames import FRAMES_PER_CLIP
-from signworld.pose.tokens import STEPS
-from signworld.pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER, Articulator
+from signworld.data.pose.frames import FRAMES_PER_CLIP
+from signworld.data.pose.tokens import STEPS
+from signworld.data.pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER, Articulator
+from signworld.experiment.collaudo.analysis import PoseTeacherSettings
+from signworld.experiment.studies import pose_teachers
+from signworld.experiment.studies.pose_teachers import (
+    LabelledClip,
+    PoseCorpus,
+    kinematic_features,
+    run,
+)
 
 TINY = PoseTeacherSettings(
     width=16, depth=1, heads=2, predictor_depth=1, decoder_depth=1, epochs=1, batch_size=8

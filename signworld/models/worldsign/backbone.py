@@ -11,9 +11,10 @@ from typing import Any
 
 from torch import Tensor, nn
 
-from ..models.video_encoders import model_input
+from signworld.experiment.train.config import EncoderSettings
+from signworld.models.encoders.video_encoders import model_input
+
 from . import lora
-from .config import EncoderSettings
 
 
 class VideoBackbone(nn.Module):

@@ -12,7 +12,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional
 
-from .config import AugmentationSettings
+from signworld.experiment.train.config import AugmentationSettings
 
 
 @dataclass(frozen=True, slots=True)

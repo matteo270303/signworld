@@ -4,9 +4,9 @@ import pytest
 import torch
 from torch.nn import functional
 
-from signworld.metrics.sigreg import SIGReg, random_directions
-from signworld.worldmodel.config import LossSettings, SemanticSettings
-from signworld.worldmodel.losses import (
+from signworld.experiment.train.config import LossSettings, SemanticSettings
+from signworld.loss.sigreg import SIGReg, random_directions
+from signworld.loss.worldsign import (
     InfoNCE,
     Objective,
     free_energy,
@@ -14,7 +14,7 @@ from signworld.worldmodel.losses import (
     semantic_energy,
     uniformity,
 )
-from signworld.worldmodel.physical import PhysicalPrediction
+from signworld.models.worldsign.physical import PhysicalPrediction
 
 
 def _prediction(

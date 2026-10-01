@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from signworld.acquisition.config import AcquisitionConfig, HttpConfig, RefusalPolicy
+from signworld.data.acquisition.config import AcquisitionConfig, HttpConfig, RefusalPolicy
 
 # Small matrices run faster on a few threads than on every core of a shared login node.
 torch.set_num_threads(4)

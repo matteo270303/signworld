@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from signworld.corpus.languages import (
+from signworld.data.corpus.languages import (
     RELEASE_SIGN_LANGUAGES,
     WRITTEN_LANGUAGES,
     own_language_track,
     written_language,
 )
-from signworld.corpus.text import are_near_duplicates, normalize_caption
-from signworld.corpus.vtt import Cue, parse_timestamp, parse_vtt, track_language
+from signworld.data.corpus.text import are_near_duplicates, normalize_caption
+from signworld.data.corpus.vtt import Cue, parse_timestamp, parse_vtt, track_language
 
 YOUTUBE_VTT = """WEBVTT
 Kind: captions

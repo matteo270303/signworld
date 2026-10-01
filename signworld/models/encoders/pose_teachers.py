@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
-from ..pose.tokens import JOINT_ARTICULATOR, JOINTS, STEPS, TOKEN_CHANNELS
+from signworld.data.pose.tokens import JOINT_ARTICULATOR, JOINTS, STEPS, TOKEN_CHANNELS
 
 
 @dataclass(frozen=True, slots=True)

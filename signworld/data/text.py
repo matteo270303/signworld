@@ -19,7 +19,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pydantic import PositiveInt
 
-from ..acquisition.config import FrozenModel
+from signworld.data.acquisition.config import FrozenModel
 
 logger = logging.getLogger(__name__)
 

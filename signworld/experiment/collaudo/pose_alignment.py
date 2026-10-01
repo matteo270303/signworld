@@ -13,9 +13,14 @@ from typing import Final
 
 import numpy as np
 
-from ..pose.frames import local_motion, select_frames
-from ..pose.wholebody import ARTICULATOR_INDICES, CONFIDENCE_THRESHOLD, Articulator, PoseTrack
-from ..video import ClipReader
+from signworld.data.pose.frames import local_motion, select_frames
+from signworld.data.pose.wholebody import (
+    ARTICULATOR_INDICES,
+    CONFIDENCE_THRESHOLD,
+    Articulator,
+    PoseTrack,
+)
+from signworld.data.video import ClipReader
 
 MAX_HAND_ERROR: Final = 0.02
 """Pass threshold: mean hand-keypoint error below 2 % of the frame width (§4.13.1)."""

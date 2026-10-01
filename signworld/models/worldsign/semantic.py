@@ -13,7 +13,8 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from .config import SemanticSettings
+from signworld.experiment.train.config import SemanticSettings
+
 from .masking import TokenGrid
 from .rope import RoPE3D
 

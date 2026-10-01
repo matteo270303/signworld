@@ -16,10 +16,11 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
+from signworld.loss.sigreg import SIGReg, random_directions
+from signworld.models.worldsign import lora
+from signworld.models.worldsign.physical import PhysicalPrediction
+
 from ..metrics.geometry import centered, effective_rank, isoscore, mean_dimension_std
-from ..metrics.sigreg import SIGReg, random_directions
-from . import lora
-from .physical import PhysicalPrediction
 
 COVERAGE_BINS = (0.0, 0.25, 0.5, 0.75, 1.0001)
 """Bins of the mask coverage rho of a box, for the read-out R² per coverage."""

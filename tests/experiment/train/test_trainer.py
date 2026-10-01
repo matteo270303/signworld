@@ -9,14 +9,13 @@ from typing import Any
 import pytest
 import torch
 
-from signworld.worldmodel.checkpoint import CheckpointStore, TrainingState
-from signworld.worldmodel.data import Collate
-from signworld.worldmodel.model import StepRandomness, WorldSign
-from signworld.worldmodel.reporting import COLUMNS, RunReport
-from signworld.worldmodel.trainer import Progress, Trainer
-from signworld.worldmodel.validation import RetrievalScores
-
-from .conftest import needs_hub, slow, synthetic_corpus, tiny_training
+from signworld.data.loaders import Collate
+from signworld.experiment.train.checkpoint import CheckpointStore, TrainingState
+from signworld.experiment.train.reporting import COLUMNS, RunReport
+from signworld.experiment.train.trainer import Progress, Trainer
+from signworld.experiment.train.validation import RetrievalScores
+from signworld.models.worldsign.model import StepRandomness, WorldSign
+from tests.worldsign import needs_hub, slow, synthetic_corpus, tiny_training
 
 
 def _setup(directory: Path, teacher: Path | None = None) -> tuple[Any, ...]:

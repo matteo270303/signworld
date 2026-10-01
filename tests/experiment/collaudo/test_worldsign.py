@@ -3,11 +3,10 @@
 import math
 from pathlib import Path
 
-from signworld.worldmodel.collaudo import measure_efficiency, overfit
-from signworld.worldmodel.data import Collate
-from signworld.worldmodel.trainer import Trainer
-
-from .conftest import needs_hub, slow, synthetic_corpus, tiny_training
+from signworld.data.loaders import Collate
+from signworld.experiment.collaudo.worldsign import measure_efficiency, overfit
+from signworld.experiment.train.trainer import Trainer
+from tests.worldsign import needs_hub, slow, synthetic_corpus, tiny_training
 
 
 @slow

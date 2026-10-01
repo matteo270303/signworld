@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 from torch import nn
 
-from .lora import adapter_parameters
-from .model import WorldSign
-from .video_branch import VideoBranch
+from signworld.models.worldsign.lora import adapter_parameters
+from signworld.models.worldsign.model import WorldSign
+from signworld.models.worldsign.video_branch import VideoBranch
 
 
 def _count(parameters: list[nn.Parameter]) -> int:

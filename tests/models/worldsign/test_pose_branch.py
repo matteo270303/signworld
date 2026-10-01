@@ -6,10 +6,10 @@ import pytest
 import torch
 from torch import nn
 
-from signworld.pose.tokens import JOINT_ARTICULATOR, JOINTS
-from signworld.worldmodel.config import PoseEncoderSettings
-from signworld.worldmodel.lora import LoRAWeight, adapt_weight, adapter_parameters
-from signworld.worldmodel.pose_branch import (
+from signworld.data.pose.tokens import JOINT_ARTICULATOR, JOINTS
+from signworld.experiment.train.config import PoseEncoderSettings
+from signworld.models.worldsign.lora import LoRAWeight, adapt_weight, adapter_parameters
+from signworld.models.worldsign.pose_branch import (
     ArticulatorLinear,
     KeypointDecoders,
     PoseBranch,
@@ -18,8 +18,7 @@ from signworld.worldmodel.pose_branch import (
     articulator_confidence,
     keypoint_variance,
 )
-
-from .conftest import POSE_SHAPE, pose_tokens, tiny_teacher
+from tests.worldsign import POSE_SHAPE, pose_tokens, tiny_teacher
 
 
 def _settings(checkpoint: Path, **changes: object) -> PoseEncoderSettings:

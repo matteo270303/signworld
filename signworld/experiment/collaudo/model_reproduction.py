@@ -22,8 +22,13 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
-from ..models.predictor_fusion import fused_embedding
-from ..models.video_encoders import IMAGENET_MEAN, IMAGENET_STD, FrozenVideoEncoder, LoadReport
+from signworld.models.encoders.predictor_fusion import fused_embedding
+from signworld.models.encoders.video_encoders import (
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    FrozenVideoEncoder,
+    LoadReport,
+)
 
 MIN_TOKEN_COSINE: Final = 0.999
 MAX_ABS_DIFFERENCE: Final = 1e-3

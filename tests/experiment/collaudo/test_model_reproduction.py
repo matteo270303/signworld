@@ -5,15 +5,14 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from signworld.checks.model_reproduction import (
+from signworld.experiment.collaudo.model_reproduction import (
     Agreement,
     official_input,
     pose_reproduction,
     video_reproduction,
 )
-from signworld.models.video_encoders import model_input
-
-from ..models.test_video_encoders import tiny_encoder
+from signworld.models.encoders.video_encoders import model_input
+from tests.models.encoders.test_video_encoders import tiny_encoder
 
 
 def test_official_input_matches_ours() -> None:

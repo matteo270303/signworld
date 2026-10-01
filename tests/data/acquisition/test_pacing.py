@@ -2,9 +2,9 @@ import time
 
 import pytest
 
-from signworld.acquisition.config import RefusalPolicy
-from signworld.acquisition.outcome import Status
-from signworld.acquisition.pacing import DeadlineExceededError, RefusalBackoff, deadline
+from signworld.data.acquisition.config import RefusalPolicy
+from signworld.data.acquisition.outcome import Status
+from signworld.data.acquisition.pacing import DeadlineExceededError, RefusalBackoff, deadline
 
 
 def test_deadline_interrupts_a_stalled_block() -> None:

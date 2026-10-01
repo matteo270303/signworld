@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 import torch
 
-from signworld.worldmodel.data import Collate, caption_statistics
-from signworld.worldmodel.distributed import SINGLE
-from signworld.worldmodel.preflight import (
+from signworld.data.loaders import Collate, caption_statistics
+from signworld.experiment.train.distributed import SINGLE
+from signworld.experiment.train.preflight import (
     PreflightError,
     Status,
     enforce,
@@ -15,8 +15,7 @@ from signworld.worldmodel.preflight import (
     p16_batch,
     run_preflight,
 )
-
-from .conftest import needs_hub, slow, synthetic_corpus, tiny_training
+from tests.worldsign import needs_hub, slow, synthetic_corpus, tiny_training
 
 
 @pytest.fixture(scope="module")

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 
-from signworld.text.embedding import (
+from signworld.data.text import (
     EmbeddingIdentity,
     EmbeddingStore,
     embed_manifest,

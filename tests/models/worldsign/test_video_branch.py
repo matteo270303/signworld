@@ -6,14 +6,21 @@ import pytest
 import torch
 from torch import nn
 
-from signworld.worldmodel.budget import VideoBudget
-from signworld.worldmodel.config import FusionSettings, load_config
-from signworld.worldmodel.losses import Objective, physical_energy
-from signworld.worldmodel.masking import TokenGrid
-from signworld.worldmodel.physical import set_rope_grid
-from signworld.worldmodel.video_branch import assemble
-
-from .conftest import ABLATIONS, BASE, GRID, full_size_stubs, meta_modules, needs_hub, tiny_config
+from signworld.experiment.train.budget import VideoBudget
+from signworld.experiment.train.config import FusionSettings, load_config
+from signworld.loss.worldsign import Objective, physical_energy
+from signworld.models.worldsign.masking import TokenGrid
+from signworld.models.worldsign.physical import set_rope_grid
+from signworld.models.worldsign.video_branch import assemble
+from tests.worldsign import (
+    ABLATIONS,
+    BASE,
+    GRID,
+    full_size_stubs,
+    meta_modules,
+    needs_hub,
+    tiny_config,
+)
 
 
 def _batch(size: int = 2) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

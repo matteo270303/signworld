@@ -5,18 +5,17 @@ from pathlib import Path
 import pytest
 import torch
 
-from signworld.worldmodel.data import Collate
-from signworld.worldmodel.evaluation import evaluate, language_probe
-from signworld.worldmodel.model import WorldSignBatch
-from signworld.worldmodel.plausibility import (
+from signworld.data.loaders import Collate
+from signworld.experiment.evaluation.worldsign import evaluate, language_probe
+from signworld.models.worldsign.model import WorldSignBatch
+from signworld.models.worldsign.plausibility import (
     change_colour,
     freeze_steps,
     reverse_time,
     shift_pose,
     skip_steps,
 )
-
-from .conftest import needs_hub, synthetic_corpus, tiny_training
+from tests.worldsign import needs_hub, synthetic_corpus, tiny_training
 
 
 def _batch() -> WorldSignBatch:

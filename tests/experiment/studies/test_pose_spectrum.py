@@ -4,11 +4,11 @@ from pathlib import Path
 
 import numpy as np
 
-from signworld.experiments.pose_spectrum import PrincipalAxes, save_whitenings, spectrum
-from signworld.experiments.pose_teachers import PoseCorpus
+from signworld.data.pose.tokens import STEPS, articulator_columns
+from signworld.data.pose.wholebody import Articulator
+from signworld.experiment.studies.pose_spectrum import PrincipalAxes, save_whitenings, spectrum
+from signworld.experiment.studies.pose_teachers import PoseCorpus
 from signworld.metrics.probes import video_split
-from signworld.pose.tokens import STEPS, articulator_columns
-from signworld.pose.wholebody import Articulator
 
 from .test_pose_teachers import TINY, _clips
 

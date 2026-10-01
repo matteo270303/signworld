@@ -5,9 +5,9 @@ from typing import Any
 
 import yt_dlp
 
-from signworld.acquisition.config import YouTubeConfig
-from signworld.acquisition.outcome import Status
-from signworld.acquisition.probe import probe
+from signworld.data.acquisition.config import YouTubeConfig
+from signworld.data.acquisition.outcome import Status
+from signworld.data.acquisition.probe import probe
 
 
 class _Network:

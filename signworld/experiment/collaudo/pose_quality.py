@@ -14,9 +14,14 @@ from typing import Final
 
 import numpy as np
 
-from ..pose.boxes import articulator_boxes
-from ..pose.tokens import MIN_SCORE
-from ..pose.wholebody import ARTICULATOR_INDICES, Articulator, PoseTrack, shoulder_frame
+from signworld.data.pose.boxes import articulator_boxes
+from signworld.data.pose.tokens import MIN_SCORE
+from signworld.data.pose.wholebody import (
+    ARTICULATOR_INDICES,
+    Articulator,
+    PoseTrack,
+    shoulder_frame,
+)
 
 OUTSIDE_LIMITS: Final[Mapping[str, float | None]] = {
     "body": None,

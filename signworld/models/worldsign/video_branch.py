@@ -13,9 +13,10 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-from ..models.video_encoders import load_vjepa2_1
+from signworld.experiment.train.config import WorldSignConfig
+from signworld.models.encoders.video_encoders import load_vjepa2_1
+
 from .backbone import VideoBackbone
-from .config import WorldSignConfig
 from .fusion import build_fusion
 from .masking import LambdaSchedule, Mask, MaskPolicy, TokenGrid, token_roles
 from .physical import PhysicalPrediction, PhysicalPredictor

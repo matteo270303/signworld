@@ -13,28 +13,28 @@ import pytest
 import torch
 from torch import nn
 
-from signworld.corpus.manifest import SCHEMA as MANIFEST_SCHEMA
-from signworld.corpus.materialize import MaterializedRecord
-from signworld.models.pose_teachers import SJEPATeacher, TeacherShape
-from signworld.pose.frames import FRAMES_PER_CLIP as FRAMES
-from signworld.pose.tokens import JOINTS, STEPS
-from signworld.worldmodel.config import DataSettings, load_config
-from signworld.worldmodel.data import (
+from signworld.data.corpus.manifest import SCHEMA as MANIFEST_SCHEMA
+from signworld.data.corpus.materialize import MaterializedRecord
+from signworld.data.loaders import (
     TRAIN,
     VALIDATION_CHANNEL,
     ClipDataset,
     build_training_index,
     validation_subset,
 )
-from signworld.worldmodel.distributed import SINGLE, Distributed
-from signworld.worldmodel.masking import TokenGrid
-from signworld.worldmodel.model import WorldSign, assemble_worldsign
-from signworld.worldmodel.pose_branch import PoseBranch
-from signworld.worldmodel.run import fit_statistics
-from signworld.worldmodel.video_branch import assemble
+from signworld.data.pose.frames import FRAMES_PER_CLIP as FRAMES
+from signworld.data.pose.tokens import JOINTS, STEPS
+from signworld.experiment.train.config import DataSettings, load_config
+from signworld.experiment.train.distributed import SINGLE, Distributed
+from signworld.experiment.train.run import fit_statistics
+from signworld.models.encoders.pose_teachers import SJEPATeacher, TeacherShape
+from signworld.models.worldsign.masking import TokenGrid
+from signworld.models.worldsign.model import WorldSign, assemble_worldsign
+from signworld.models.worldsign.pose_branch import PoseBranch
+from signworld.models.worldsign.video_branch import assemble
 
 HUB = Path("/lustrehome/mvigone/cache/torch/hub/facebookresearch_vjepa2_main")
-BASE = Path(__file__).resolve().parents[2] / "configs" / "model" / "worldsign.yaml"
+BASE = Path(__file__).resolve().parents[1] / "configs" / "model" / "worldsign.yaml"
 ABLATIONS = BASE.parent / "ablations"
 GRID = TokenGrid(steps=2, rows=4, columns=4)
 """4 frames of 64² in tubelets of 2 and patches of 16."""

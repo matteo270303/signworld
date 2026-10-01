@@ -70,7 +70,7 @@ torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
 torchvision = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/signworld"]
+packages = ["signworld"]
 
 [tool.ruff]
 line-length = 100
@@ -84,14 +84,14 @@ max-args = 6
 
 [tool.ruff.lint.per-file-ignores]
 # Deferred imports keep torch and sentence-transformers out of the download jobs' start-up.
-"src/signworld/analysis_cli.py" = ["PLC0415"]
-"src/signworld/text/embedding.py" = ["PLC0415"]
+"signworld/cli/*.py" = ["PLC0415"]
+"signworld/data/text.py" = ["PLC0415"]
 "tests/**" = ["PLR0913", "PLR2004"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src"]
+files = ["signworld"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]

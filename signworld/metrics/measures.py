@@ -30,13 +30,16 @@ from torch import Tensor
 from torch.nn import functional
 from tqdm import tqdm  # type: ignore[import-untyped]
 
+from signworld.data.pose.tokens import JOINT_ARTICULATOR
+from signworld.experiment.train.config import WorldSignConfig
+from signworld.experiment.train.distributed import SINGLE, Distributed
+from signworld.experiment.train.validation import RetrievalScores, retrieval, similarity
+from signworld.loss.worldsign import uniformity
+from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
+from signworld.models.worldsign.readout import membership
+
 from ..metrics.geometry import centered, condition_number, effective_rank, isoscore
 from ..metrics.retrieval import hubness
-from ..pose.tokens import JOINT_ARTICULATOR
-from .config import WorldSignConfig
-from .distributed import SINGLE, Distributed
-from .losses import uniformity
-from .model import StepRandomness, WorldSign, WorldSignBatch
 from .readings import (
     Spread,
     attention_readings,
@@ -47,8 +50,6 @@ from .readings import (
     ridge_r2,
     sigreg_ratio,
 )
-from .readout import membership
-from .validation import RetrievalScores, retrieval, similarity
 
 PARTS = ("body", "left", "right", "face")
 

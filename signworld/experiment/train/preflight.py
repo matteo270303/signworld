@@ -26,18 +26,19 @@ import pyarrow as pa
 import torch
 from torch import Tensor
 
-from ..checks.contamination import contamination_report
-from ..corpus.manifest import read_manifest
-from ..models.video_encoders import PATCH, TUBELET
-from ..pose.tokens import JOINTS, STEPS, TOKEN_CHANNELS
-from ..pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER
-from .augmentation import ClipAugmenter
+from signworld.data.augmentation import ClipAugmenter
+from signworld.data.corpus.manifest import read_manifest
+from signworld.data.pose.tokens import JOINTS, STEPS, TOKEN_CHANNELS
+from signworld.data.pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER
+from signworld.experiment.collaudo.contamination import contamination_report
+from signworld.models.encoders.video_encoders import PATCH, TUBELET
+from signworld.models.worldsign.masking import MultiBlockMasks, TokenGrid
+from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
+
 from .budget import ModelBudget
 from .config import MaskSpec, WorldSignConfig
 from .curriculum import families
 from .distributed import SINGLE, Distributed
-from .masking import MultiBlockMasks, TokenGrid
-from .model import StepRandomness, WorldSign, WorldSignBatch
 
 logger = logging.getLogger(__name__)
 

@@ -5,10 +5,9 @@ from typing import Any
 
 import pytest
 
-from signworld.worldmodel.config import load_config
-from signworld.worldmodel.monitor import Monitor, RunStoppedError
-
-from .conftest import BASE
+from signworld.experiment.train.config import load_config
+from signworld.experiment.train.monitor import Monitor, RunStoppedError
+from tests.worldsign import BASE
 
 
 class _Log:

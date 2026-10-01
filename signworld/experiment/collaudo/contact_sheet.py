@@ -6,9 +6,9 @@ from typing import Final
 import numpy as np
 from PIL import Image, ImageDraw
 
-from ..pose.boxes import articulator_boxes
-from ..pose.wholebody import Articulator, PoseTrack
-from ..video import ClipReader
+from signworld.data.pose.boxes import articulator_boxes
+from signworld.data.pose.wholebody import Articulator, PoseTrack
+from signworld.data.video import ClipReader
 
 COLOURS: Final[dict[Articulator, tuple[int, int, int]]] = {
     Articulator.BODY: (160, 160, 160),

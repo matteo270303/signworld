@@ -23,7 +23,7 @@ Valgono per ogni run, concordata o no [Nostra scelta, §4.14 del progetto]:
 
 ```
 condor_submit -a 'run=<nome>' -a 'gpus=2' \
-  -a 'configs=configs/model/worldsign.yaml configs/model/ablations/arm_X.yaml configs/model/ablations/<ablation>.yaml' \
+  -a 'configs=parameters/model/worldsign.yaml parameters/ablation/arm_X.yaml parameters/ablation/<ablation>.yaml' \
   scripts/condor/train.sub
 ```
 

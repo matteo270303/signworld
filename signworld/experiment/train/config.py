@@ -1,8 +1,8 @@
 """Configuration of a WorldSign run, from one or more YAML files (§4.8-§4.10, §4.14).
 
-A run is described by ``configs/model/worldsign.yaml`` plus optional overlays applied in
+A run is described by ``parameters/model/worldsign.yaml`` plus optional overlays applied in
 order, each overriding only the keys it names: one per loss arm of ESP-1
-(``configs/model/ablations/arm_*.yaml``) and one per ablation on the best arm
+(``parameters/ablation/arm_*.yaml``) and one per ablation on the best arm
 (``esp2_*``, ``esp3_*``, ``esp4_*``). A file may also name a parent with ``inherits``.
 Every value that the project document leaves open is marked ``[Aperto]`` next to it.
 """

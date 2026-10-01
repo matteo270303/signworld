@@ -1,13 +1,13 @@
 # WorldSign, reference configuration (§4, project document). It is arm A of ESP-1.
 # A run = this file + overlays, applied in order, each overriding only what it names:
-#   uv run ... -c configs/model/worldsign.yaml -c configs/model/ablations/arm_B.yaml
+#   uv run ... -c parameters/model/worldsign.yaml -c parameters/ablation/arm_B.yaml
 # Values the document leaves open are marked [Aperto]; PC7 (dry run) calibrates them.
 name: worldsign-A
 
 encoder:                      # §4.4.1: V-JEPA 2.1 ViT-L distilled, frozen + LoRA (PC3, 29/9)
-  hub_repo: /lustrehome/mvigone/cache/torch/hub/facebookresearch_vjepa2_main
+  hub_repo: checkpoints/hub/facebookresearch_vjepa2_main
   entrypoint: vjepa2_1_vit_large_384
-  checkpoint: /lustrehome/mvigone/models/vjepa21/vjepa2_1_vitl_384.pt
+  checkpoint: checkpoints/vjepa21/vjepa2_1_vitl_384.pt
   checkpoint_sha256: b25d62511e1ee624d0b42390c524996900a79eca81806b378477db2c0644c6d8   # P5
   levels: [5, 11, 17, 23]     # blocks 6/12/18/24, the code's hierarchical_layers
   lora: {rank: 16, alpha: 16.0, targets: [qkv, proj, fc1, fc2]}   # alpha [Aperto]
@@ -70,7 +70,7 @@ augmentation:                 # §3.8: same geometry on video and keypoints; no 
   saturation: 0.2             # [Aperto]
 
 pose_encoder:                 # §4.4.3: S-JEPA of PC5, trainable lightly
-  checkpoint: /lustrehome/mvigone/data/datiTest/youtube_sl25/pose-teachers/sjepa.pt
+  checkpoint: data/datiTest/youtube_sl25/pose-teachers/sjepa.pt
   checkpoint_sha256: 12cf04b56be2287842b9e82b1c7b6656eff121dfa10f2c2b0c14a8b57c0dd7fa   # P5
   width: 256                  # shape of the checkpoint: 8 blocks, d = 256, 8 heads
   depth: 8

@@ -48,7 +48,7 @@ def reports_user_errors[**P, R](command: Callable[P, R]) -> Callable[P, R]:
 
 # --------------------------------------------------------------------------- analysis
 
-ANALYSIS_CONFIG: Final = Path("configs/analysis.yaml")
+ANALYSIS_CONFIG: Final = Path("parameters/analysis/default.yaml")
 
 AnalysisConfigOption = Annotated[
     Path,

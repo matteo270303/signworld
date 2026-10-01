@@ -33,9 +33,9 @@ from signworld.models.worldsign.model import WorldSign, assemble_worldsign
 from signworld.models.worldsign.pose_branch import PoseBranch
 from signworld.models.worldsign.video_branch import assemble
 
-HUB = Path("/lustrehome/mvigone/cache/torch/hub/facebookresearch_vjepa2_main")
-BASE = Path(__file__).resolve().parents[1] / "configs" / "model" / "worldsign.yaml"
-ABLATIONS = BASE.parent / "ablations"
+HUB = Path(__file__).resolve().parents[1] / "checkpoints" / "hub" / "facebookresearch_vjepa2_main"
+BASE = Path(__file__).resolve().parents[1] / "parameters" / "model" / "worldsign.yaml"
+ABLATIONS = BASE.parents[1] / "ablation"
 GRID = TokenGrid(steps=2, rows=4, columns=4)
 """4 frames of 64² in tubelets of 2 and patches of 16."""
 

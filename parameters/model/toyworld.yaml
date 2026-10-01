@@ -3,8 +3,8 @@
 #         signworld train toyworld-embed --output <root>
 #         signworld train index --manifest <root>/manifest/clips.parquet --materialized <root>
 #             --embeddings <root>/text/<fingerprint> --output <root>/index.parquet
-#             -c configs/model/worldsign.yaml -c configs/model/toyworld.yaml
-# Run:    worldsign.yaml + ablations/arm_A.yaml + toyworld.yaml, with data.index and
+#             -c parameters/model/worldsign.yaml -c parameters/model/toyworld.yaml
+# Run:    worldsign.yaml + ablation/arm_A.yaml + toyworld.yaml, with data.index and
 #         data.embeddings set below. Every combination of motions is a «channel»: the held-out
 #         channel split is made of combinations never seen in training.
 name: worldsign-toyworld

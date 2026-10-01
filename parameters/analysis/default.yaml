@@ -1,8 +1,8 @@
 # Manifests, data checks (§4.13.1) and caption embeddings (§4.4.4, PC1).
 # Dataset locations come from the acquisition settings; datasets stay separate.
 
-acquisition_config: configs/acquisition.yaml
-models_root: /lustrehome/mvigone/models
+acquisition_config: parameters/acquisition/default.yaml
+models_root: checkpoints
 
 # CPU threads for torch; all cores of a shared node make small computations slower.
 threads: 16
@@ -33,7 +33,7 @@ text_geometry:
 checkpoints:
   vjepa2_1_vitl_384:
     # Exported from torch.hub facebookresearch/vjepa2 (ema_encoder + predictor).
-    path: /lustrehome/mvigone/models/vjepa21/vjepa2_1_vitl_384.pt
+    path: checkpoints/vjepa21/vjepa2_1_vitl_384.pt
   vjepa2_1_vitb_384:
     # Released checkpoint of the ViT-B distilled from ViT-G, as torch.hub fetches it.
     url: https://dl.fbaipublicfiles.com/vjepa2/vjepa2_1_vitb_dist_vitG_384.pt
@@ -46,7 +46,7 @@ checkpoints:
 
 # Clips cut, cropped and posed for the collaudo, written apart from the datasets.
 test_data:
-  root: /lustrehome/mvigone/data/datiTest
+  root: data/datiTest
   clips: 20000          # enough training videos for the pose teachers (§4.4.3)
   min_duration_s: 1
   max_duration_s: 20    # p99 of YouTube-SL-25 captions is about 16 s
@@ -119,7 +119,7 @@ pose_isotropy:
 
 # Frozen video features and the controls that read them: PC2, PC3, PC4, frame collaudo (§4.12.1).
 video_probes:
-  hub_repo: /lustrehome/mvigone/cache/torch/hub/facebookresearch_vjepa2_main
+  hub_repo: checkpoints/hub/facebookresearch_vjepa2_main
   encoders:
     vjepa2_1_vitl:
       family: vjepa2_1

@@ -17,7 +17,7 @@ from signworld.data.acquisition.sources.base import DatasetSource
 from signworld.experiment.collaudo.report import write_report
 from signworld.experiment.collaudo.results import result_path
 
-DEFAULT_CONFIG = Path("configs/acquisition.yaml")
+DEFAULT_CONFIG = Path("parameters/acquisition/default.yaml")
 EXIT_INCOMPLETE = 3
 EXIT_REFUSED = 4
 

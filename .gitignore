@@ -11,10 +11,20 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
-# Runtime artefacts; datasets live under data_root, outside the repository
+# Datasets and weights: local folders, only their placeholder is tracked
+data/*
+checkpoints/*
+!data/.gitkeep
+!checkpoints/.gitkeep
+
+# Runtime artefacts
+runs/
+out/
 logs/
 *.part
 
-# Local secrets
+# Local secrets and third-party checkouts (YouTube cookies, PO-token server)
 .env
+.secrets/
+third_party/
 /collaudo/

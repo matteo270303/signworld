@@ -28,7 +28,7 @@ from signworld.experiment.collaudo.results import result_path
 from signworld.experiment.train.config import load_config
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-PARAMETERS = REPOSITORY / "configs"
+PARAMETERS = REPOSITORY / "parameters"
 MODEL = PARAMETERS / "model"
 EXIT_USER_ERROR = 2
 
@@ -194,13 +194,13 @@ def toy_world(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture
 def settings(tmp_path: Path) -> dict[str, str]:
     """The repository's settings, with every folder moved under ``tmp_path``."""
-    acquisition = yaml.safe_load((PARAMETERS / "acquisition.yaml").read_text("utf-8"))
+    acquisition = yaml.safe_load((PARAMETERS / "acquisition" / "default.yaml").read_text("utf-8"))
     acquisition["data_root"] = str(tmp_path / "data")
     acquisition["youtube"]["cookies_file"] = str(tmp_path / "cookies.txt")
     acquisition["youtube"]["pot_server_home"] = str(tmp_path / "pot")
     acquisition_path = tmp_path / "acquisition.yaml"
     acquisition_path.write_text(yaml.safe_dump(acquisition), "utf-8")
-    analysis = yaml.safe_load((PARAMETERS / "analysis.yaml").read_text("utf-8"))
+    analysis = yaml.safe_load((PARAMETERS / "analysis" / "default.yaml").read_text("utf-8"))
     analysis["acquisition_config"] = str(acquisition_path)
     analysis["models_root"] = str(tmp_path / "models")
     analysis["test_data"]["root"] = str(tmp_path / "test-data")

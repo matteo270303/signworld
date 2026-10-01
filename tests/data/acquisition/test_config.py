@@ -10,7 +10,7 @@ REPOSITORY = Path(__file__).resolve().parents[3]
 
 
 def test_repository_configuration_is_valid_for_every_source() -> None:
-    config = AcquisitionConfig.from_yaml(REPOSITORY / "configs" / "acquisition.yaml")
+    config = AcquisitionConfig.from_yaml(REPOSITORY / "parameters" / "acquisition" / "default.yaml")
 
     for name in SOURCES:
         assert build_source(name, config).name == name

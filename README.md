@@ -208,9 +208,3 @@ collaudo/      check reports (local, not tracked)
 runs/          training runs (local, not tracked)
 main.py        python main.py <command>, the same as signworld <command>
 ```
-
-## 🧑‍💻 Development
-
-```bash
-uv run ruff format && uv run ruff check && uv run mypy && uv run pytest
-```

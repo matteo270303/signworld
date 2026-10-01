@@ -24,3 +24,10 @@ file. Adjust them to the machine; nothing else was changed.
 | `tests/worldsign.py` | `HUB` (tests that need the V-JEPA 2.1 code) | `/lustrehome/mvigone/cache/torch/hub/facebookresearch_vjepa2_main` | `checkpoints/hub/facebookresearch_vjepa2_main` |
 
 The `.sub` files under `slurm/condor/` keep their absolute `initialdir`.
+
+**Before the next cluster job.** The jobs start in the repository, so `data/` is now the
+repository's own, empty folder: `fetch-media` would start downloading again and the analysis
+jobs would not find their inputs. On ReCaS the old roots differ (`data_root` was
+`/lustrehome/mvigone/data/signworld`, the other data paths were under `/lustrehome/mvigone/data`),
+so link each subfolder (`data/youtube_sl25`, `data/openasl`, …, `data/datiTest`, `data/openASL`,
+`data/training`) or set the values back, before submitting.

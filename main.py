@@ -1,4 +1,4 @@
-"""Run the command-line interface without installing the package: ``python main.py <command>``."""
+"""``python main.py <command>``, the same as ``signworld <command>`` (after ``uv sync``)."""
 
 from signworld.cli import app
 

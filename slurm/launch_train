@@ -16,5 +16,6 @@
 #SBATCH --mail-user=<EMAIL>
 
 # One WorldSign training run on the GPUs of one node, one process per GPU (§4.10).
+# --gres is a placeholder: the batch of 128 is split over the GPUs, so ask for 2-4.
 # Launch from the repository root (out/ must exist): sbatch slurm/launch_train -c parameters/model/worldsign.yaml -c parameters/ablation/arm_A.yaml --output runs/worldsign-A
 srun ./slurm/launch_train_exe "$@"

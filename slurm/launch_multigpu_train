@@ -1,0 +1,27 @@
+#!/bin/bash
+
+#SBATCH -A IscrC_IMCAI
+#SBATCH -p boost_usr_prod
+#SBATCH --qos normal
+#SBATCH --time=24:00:00
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --gres=gpu:2
+#SBATCH --mem=246000
+#SBATCH --job-name=train_mg
+#SBATCH --out=out/train_mg.log
+#SBATCH --err=out/train_mg.log
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-user=<EMAIL>
+
+# One WorldSign training run on 2 GPUs of one node, DDP, one process per GPU (§4.10).
+# The batch of 128 is global: 2 GPUs -> 64 clips each. P16 requires clips x GPUs = 128, so the
+# GPU count must divide 128 (1, 2, 4, 8). 64 clips per 64 GB A100 is NOT measured: if it runs
+# out of memory, use 4 GPUs with the line below, which gives 32 clips each.
+# CPUs and memory scale with the GPUs: 8 loader workers per GPU, 123000 MB per GPU.
+# Launch from the repository root (out/ must exist):
+#   sbatch slurm/launch_multigpu_train -c parameters/model/worldsign.yaml -c parameters/ablation/arm_A.yaml --output runs/worldsign-A
+# 4 GPUs:
+#   sbatch --gres=gpu:4 --cpus-per-task=32 --mem=492000 slurm/launch_multigpu_train ...
+srun ./slurm/launch_train_exe "$@"

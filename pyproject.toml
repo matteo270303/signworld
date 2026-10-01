@@ -58,16 +58,6 @@ override-dependencies = [
     "onnxruntime; sys_platform == 'never'",
 ]
 
-# CUDA 12.4 builds of torch for the ReCaS H100 nodes; everything else comes from PyPI.
-[[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
-explicit = true
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
-# timm needs torchvision, which must be the build that matches torch.
-torchvision = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
 
 [tool.hatch.build.targets.wheel]
 packages = ["signworld"]

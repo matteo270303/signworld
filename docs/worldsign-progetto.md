@@ -1218,7 +1218,7 @@ Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-
 
 **Soglia `X = 46,7` [Nostra scelta, fissata il 2026-09-21].** Era il secondo gate prima della riga ViT-L di ESP-1: 0,75 × 62,2 = 46,65, arrotondato per eccesso. Senza quella riga non c'è più un blocco di budget da proteggere, e `X` resta il criterio della fermata F3: la curva di R@1 estrapolata deve essere compatibile con `X`.
 
-**Come si legge [Nostra scelta].** La decisione usa la stima puntuale; accanto si riporta l'intervallo bootstrap sulle query (§4.12.3). Le soglie sono codificate in `signworld/evaluation/gate.py`, con test sui confini, così nessun risultato può spostarle dopo. Il gate è un criterio di sanità, non una claim: il confronto con C²RL non è a parità di dati né di architettura (ResNet-18 a 224²) [Lett. 87].
+**Come si legge [Nostra scelta].** La decisione usa la stima puntuale; accanto si riporta l'intervallo bootstrap sulle query (§4.12.3). Le soglie sono codificate in `signworld/experiment/evaluation/gate.py`, con test sui confini, così nessun risultato può spostarle dopo. Il gate è un criterio di sanità, non una claim: il confronto con C²RL non è a parità di dati né di architettura (ResNet-18 a 224²) [Lett. 87].
 
 #### 4.12.3 Protocollo finale
 

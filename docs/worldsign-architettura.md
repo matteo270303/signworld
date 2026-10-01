@@ -1,6 +1,6 @@
 # WorldSign — Architettura
 
-Descrizione completa del modello **com'è implementato** in `src/signworld/worldmodel/`, componente per componente e layer per layer, con le forme dei tensori e il numero di parametri. I conteggi sono misurati sul codice (moduli istanziati), non stimati.
+Descrizione completa del modello **com'è implementato** in `signworld/models/worldsign/`, componente per componente e layer per layer, con le forme dei tensori e il numero di parametri. I conteggi sono misurati sul codice (moduli istanziati), non stimati.
 
 Documenti collegati:
 - `worldsign-progetto.md`: motivazioni, letteratura, piano; i riferimenti [Lett. N] rimandano alla sua bibliografia;
@@ -60,7 +60,7 @@ Tre encoder, due predictor, due passaggi per passo di addestramento.
 | Passo | Dettaglio |
 |---|---|
 | Ritaglio | quadrato attorno al segnante (unione dei riquadri del rilevatore, +15 %), ridimensionato a **256×256**; nero fuori dal frame sorgente |
-| Frame | **64 frame** dall'intera frase: 32 guidati dal moto locale (densi dove le mani si muovono), 32 uniformi nel tempo (`pose/frames.py`) |
+| Frame | **64 frame** dall'intera frase: 32 guidati dal moto locale (densi dove le mani si muovono), 32 uniformi nel tempo (`data/pose/frames.py`) |
 | Aumentazione (solo addestramento) | jitter del riquadro: scala e spostamento fino al **±10 %** del lato, **la stessa trasformazione affine su frame, keypoint e riquadri** (P12); luminosità, contrasto e saturazione ±0,2, uguali per tutti i frame della clip **[Aperto]**; **nessun flip** orizzontale, che scambierebbe la mano dominante. La vista si estrae dal seme, dall'epoca e dalla clip: una run ripresa rivede le stesse viste |
 | Normalizzazione | `uint8 → float / 255`, poi media `(0,485; 0,456; 0,406)` e deviazione `(0,229; 0,224; 0,225)` di ImageNet, per canale |
 | Forma in ingresso | `(B, 3, 64, 256, 256)` |

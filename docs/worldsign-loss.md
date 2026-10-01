@@ -1,6 +1,6 @@
 # WorldSign — Energie, loss e regolarizzazioni
 
-Formalizzazione completa di **cosa minimizza** WorldSign: le due energie, ogni termine della loss, come si combinano nei bracci di ESP-1 e nelle ablation, e ogni regolarizzazione. Tutto corrisponde al codice in `src/signworld/worldmodel/` (`losses.py`, `model.py`, `metrics/sigreg.py`).
+Formalizzazione completa di **cosa minimizza** WorldSign: le due energie, ogni termine della loss, come si combinano nei bracci di ESP-1 e nelle ablation, e ogni regolarizzazione. Tutto corrisponde al codice in `signworld/` (`loss/worldsign.py`, `models/worldsign/model.py`, `loss/sigreg.py`).
 
 Documenti collegati:
 - `worldsign-progetto.md`: motivazioni, con i riferimenti [Lett. N] della sua bibliografia;

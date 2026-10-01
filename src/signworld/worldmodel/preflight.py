@@ -279,11 +279,12 @@ def p10_pose_normalised(batch: WorldSignBatch) -> Assertion:
 def p11_text_centred(model: WorldSign, captions: Tensor, languages: Sequence[str]) -> Assertion:
     """After the centring, the caption embeddings average 0 in every language."""
     centering = model.text.centering
-    centred = centering(captions, centering.index(languages).to(captions.device))
+    device = centering.means.device
+    centred = centering(captions.to(device), centering.index(languages).to(device))
     scale = centred.norm(dim=-1).mean().item()
     worst = 0.0
     for name in set(languages):
-        rows = torch.tensor([language == name for language in languages])
+        rows = torch.tensor([language == name for language in languages], device=device)
         worst = max(worst, centred[rows].mean(dim=0).norm().item() / scale)
     return _check("P11", worst < 1e-3, f"largest language mean / row norm {worst:.2e}")  # noqa: PLR2004
 
@@ -305,18 +306,29 @@ def p12_geometry(augmenter: ClipAugmenter, size: int = 64) -> Assertion:
 
 
 def p13_overfit(
-    model: WorldSign, batch: WorldSignBatch, steps: int, learning_rate: float = 1e-3
+    model: WorldSign,
+    batch: WorldSignBatch,
+    steps: int,
+    learning_rate: float = 1e-3,
+    *,
+    bf16: bool = False,
 ) -> Assertion:
-    """One batch, SIGReg off: the predictive loss must fall; the model is restored afterwards."""
+    """One batch, SIGReg off: the predictive loss must fall; the model is restored afterwards.
+
+    The forward runs under the training's autocast: in float32 the whole model on a GPU's
+    batch does not fit in memory.
+    """
     if steps == 0:
         return Assertion("P13", Status.SKIP, "done when the run began")
     trainable = [p for p in model.parameters() if p.requires_grad]
     saved = [p.detach().clone() for p in trainable]
     optimizer = torch.optim.AdamW(trainable, lr=learning_rate, weight_decay=0.0)
     losses = []
+    device = batch.frames.device
     try:
         for step in range(steps):
-            terms = model.loss(batch, step, steps, StepRandomness.at(0, 0)).parts
+            with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
+                terms = model.loss(batch, step, steps, StepRandomness.at(0, 0)).parts
             total = torch.stack([v for k, v in terms.items() if not k.startswith("sigreg")]).sum()
             optimizer.zero_grad(set_to_none=True)
             total.backward()  # type: ignore[no-untyped-call]
@@ -417,7 +429,7 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
             if config.augmentation.enabled
             else Assertion("P12", Status.SKIP, "augmentation off: frames and keypoints untouched")
         ),
-        lambda: p13_overfit(model, batch, overfit_steps),
+        lambda: p13_overfit(model, batch, overfit_steps, bf16=config.training.precision == "bf16"),
         lambda: p14_pose_isolated(model, batch, generator),
         lambda: p15_infonce(model),
         lambda: p16_batch(config, collective, len(batch.videos)),

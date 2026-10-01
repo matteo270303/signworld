@@ -16,6 +16,8 @@ Four cadences, in steps of 128 clips (the document's steps of 1,024 clips times 
 * **rare** (16,000): temporal order ω, the plausibility tests and the drift of the video
   encoder.
 
+With ``diagnostics.cadence = epoch`` the trainer calls the frequent, validation and rare
+readings at the end of each epoch instead, and judges there the stops due within it.
 Everything is read at step 0 too, as the reference. Every reading goes to the metrics log;
 the rules compare it with its threshold or with the step-0 reference and log an alarm. Only a
 leak or a non-finite loss stops a run by itself; the gate run also stops at a failed F1-F3.
@@ -205,6 +207,8 @@ class Monitor:
         self.streaks: dict[str, int] = defaultdict(int)
         self.rules = _rules(self.settings)
         self.alarms: list[Alarm] = []
+        self.last_validation: dict[str, float] = {}
+        """Every reading of the latest validation, for the run's tables."""
         self._loss_mean = 0.0
         self._loss_var = 0.0
         self._loss_count = 0
@@ -252,7 +256,11 @@ class Monitor:
     def frequent(
         self, step: int, batch: WorldSignBatch, stage: Stage, extra: dict[str, float] | None = None
     ) -> dict[str, float]:
-        """The frequent readings, on the first ``diagnostic_clips`` clips of the batch."""
+        """The frequent readings, on the first ``diagnostic_clips`` clips of the batch.
+
+        The extra pass runs under the training's autocast: in float32, with gradient, the whole
+        model on a GPU's batch does not fit in memory.
+        """
         model = self.model
         clips = batch.take(self.settings.diagnostic_clips)
         record: dict[str, Any] = {}
@@ -260,16 +268,18 @@ class Monitor:
         was_training = model.training
         model.train(False)
         readings: dict[str, float] = dict(extra or {})
+        bf16 = self.config.training.precision == "bf16"
         with torch.enable_grad():  # type: ignore[no-untyped-call]
-            terms = model.loss(
-                clips,
-                step,
-                self.total_steps,
-                randomness,
-                physical=stage.physical,
-                semantic=stage.semantic,
-                record=record,
-            )
+            with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=bf16):
+                terms = model.loss(
+                    clips,
+                    step,
+                    self.total_steps,
+                    randomness,
+                    physical=stage.physical,
+                    semantic=stage.semantic,
+                    record=record,
+                )
             readings |= self._gradient_readings(terms.parts, record)
         with torch.no_grad():
             readings |= self._level_readings(clips, record)
@@ -299,7 +309,15 @@ class Monitor:
         bf16 = self.config.training.precision == "bf16"
         seed = self.config.training.seed + 2
         cached = list(batches)
-        seen = collect(self.model, cached, self.device, self.collective, bf16=bf16, seed=seed)
+        seen = collect(
+            self.model,
+            cached,
+            self.device,
+            self.collective,
+            bf16=bf16,
+            seed=seed,
+            desc=f"[val] step {step}",
+        )
         scores, readings = split_measures(
             seen, languages, self.config, bootstrap=("t2v_r1",), physical_prefix="val_"
         )
@@ -317,6 +335,7 @@ class Monitor:
                 physical=False,
                 noise=False,
                 seed=seed,
+                desc=f"[val train subset] step {step}",
             ).tensors
             subset = retrieval(train["predicted"], train["texts"], train["rows"])
             for direction, value in (("t2v", subset.t2v[1]), ("v2t", subset.v2t[1])):
@@ -325,6 +344,7 @@ class Monitor:
         with torch.no_grad():
             readings |= self._probe_readings(step)
         self._record("validation", step, readings)
+        self.last_validation = readings
         return scores
 
     def rare(self, step: int, batches: Iterable[WorldSignBatch]) -> dict[str, float]:
@@ -396,8 +416,9 @@ class Monitor:
             and "sigreg_sem" in parts
             and predicted.requires_grad
         ):
-            a = torch.autograd.grad(parts[semantic_term], predicted, retain_graph=True)[0].flatten()
-            b = torch.autograd.grad(parts["sigreg_sem"], predicted, retain_graph=True)[0].flatten()
+            a = torch.autograd.grad(parts[semantic_term], predicted, retain_graph=True)[0]
+            b = torch.autograd.grad(parts["sigreg_sem"], predicted, retain_graph=True)[0]
+            a, b = a.flatten().float(), b.flatten().float()
             denominator = a.norm() * b.norm()
             out["y_cos_sem_sigreg"] = (
                 float(a @ b / denominator) if float(denominator) > 0 else float("nan")

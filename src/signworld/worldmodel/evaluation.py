@@ -136,7 +136,9 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     """
     languages = model.text.centering.languages
     physical = model.pose is not None
-    seen = collect(model, batches, device, bf16=device.type == "cuda", pose_target=physical)
+    seen = collect(
+        model, batches, device, bf16=device.type == "cuda", pose_target=physical, desc="[test]"
+    )
     scores, measures = split_measures(seen, languages, config, bootstrap=EVERY_INTERVAL)
     first = next(iter(batches), None)
     if first is not None:

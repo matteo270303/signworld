@@ -14,6 +14,8 @@ for file in "$@"; do configs+=(-c "${repo_dir}/${file}"); done
 export HF_HOME="${HF_HOME:-${HOME}/cache/hf}" HF_HUB_OFFLINE=1 TORCH_HOME="${HOME}/cache/torch"
 # Data-loader processes do the decoding; keep each process's own threads few.
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
+# Less fragmentation of the GPU memory: PyTorch's own advice when the trial ran out of it.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 echo "$(date -Is) host=$(hostname) gpus=${gpus} output=${output} configs=$*"
 nvidia-smi -L || true
 cd "${repo_dir}"

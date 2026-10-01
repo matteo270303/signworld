@@ -225,7 +225,8 @@ class TrainingSettings(FrozenModel):
     precision: Literal["bf16", "fp32"] = "bf16"
     seed: int = 0
     validation_every: PositiveInt = 4_000
-    """Steps between validations and checkpoints: ~500,000 clips at batch 128 (§4.10)."""
+    """Steps between validations and checkpoints: ~500,000 clips at batch 128 (§4.10). With the
+    diagnostics at the end of each epoch (``diagnostics.cadence``), between checkpoints only."""
     log_every: PositiveInt = 20
     find_unused_parameters: bool = False
     """DDP's search for parameters a step did not use; the curriculum freezes them instead."""
@@ -240,6 +241,13 @@ class DiagnosticsSettings(FrozenModel):
     become 800 / 4,000 / 16,000. Thresholds are starting points to calibrate in PC7.
     """
 
+    cadence: Literal["steps", "epoch"] = "steps"
+    """When the readings run. ``steps``: the frequent readings, the validation and the rare
+    readings every ``frequent_every``, ``validation_every`` and ``rare_every`` steps, and the
+    programmed stops at their steps. ``epoch``: all of them at the end of every epoch only, the
+    frequent readings on its last training batch and the stops due within the epoch judged on
+    those readings. Either way everything is read at step 0, the reference, and the end of the
+    constant phase is validated, since the cooldown starts from the best checkpoint."""
     frequent_every: PositiveInt = 800
     """Collapse, predictors, read-out, dynamics, keypoints, LoRA, queries, gradients."""
     rare_every: PositiveInt = 16_000

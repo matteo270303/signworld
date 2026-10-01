@@ -1,0 +1,82 @@
+[
+  {
+    "code": "P1",
+    "status": "skip",
+    "detail": "the benchmark's own splits, not ours by channel"
+  },
+  {
+    "code": "P2",
+    "status": "skip",
+    "detail": "no corpus or benchmark manifest configured"
+  },
+  {
+    "code": "P3",
+    "status": "pass",
+    "detail": "21,996,938 trainable, 21,996,938 in the budget, ceiling 22,000,000"
+  },
+  {
+    "code": "P4",
+    "status": "pass",
+    "detail": "frozen weights frozen"
+  },
+  {
+    "code": "P5",
+    "status": "pass",
+    "detail": "3 files verified"
+  },
+  {
+    "code": "P6",
+    "status": "pass",
+    "detail": "removed, disjoint, complete"
+  },
+  {
+    "code": "P7",
+    "status": "pass",
+    "detail": "8x0.15: 62.5% (V-JEPA 60.4%); 2x0.7: 81.4% (V-JEPA 81.1%)"
+  },
+  {
+    "code": "P8",
+    "status": "pass",
+    "detail": "0 mirrored views in 1000"
+  },
+  {
+    "code": "P9",
+    "status": "pass",
+    "detail": "tokens (32, 69, 6), presence binary: True"
+  },
+  {
+    "code": "P10",
+    "status": "pass",
+    "detail": "median |midpoint| 0.000, median shoulder distance 1.000"
+  },
+  {
+    "code": "P11",
+    "status": "pass",
+    "detail": "largest language mean / row norm 1.50e-08"
+  },
+  {
+    "code": "P12",
+    "status": "skip",
+    "detail": "augmentation off: frames and keypoints untouched"
+  },
+  {
+    "code": "P13",
+    "status": "pass",
+    "detail": "loss 4.8100 -> 0.1470 in 60 steps"
+  },
+  {
+    "code": "P14",
+    "status": "pass",
+    "detail": "the boxes only choose tokens"
+  },
+  {
+    "code": "P15",
+    "status": "skip",
+    "detail": "not arm C"
+  },
+  {
+    "code": "P16",
+    "status": "pass",
+    "detail": "32 clips x 4 GPUs = 128; SIGReg on 128 per modality, up to 128 x 32 per articulator"
+  }
+]

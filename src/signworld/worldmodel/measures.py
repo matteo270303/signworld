@@ -28,6 +28,7 @@ from typing import Any
 import torch
 from torch import Tensor
 from torch.nn import functional
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 from ..metrics.geometry import centered, condition_number, effective_rank, isoscore
 from ..metrics.retrieval import hubness
@@ -95,11 +96,13 @@ def collect(  # noqa: PLR0913 (the model, the clips, where, and what to keep)
     noise: bool = True,
     pose_target: bool = False,
     seed: int = 0,
+    desc: str | None = None,
 ) -> Collected:
     """One pass of the model over ``batches`` with the quantities the measures read.
 
     Every GPU must pass the same number of batches of the same sizes: the objective's
-    collectives (SIGReg, InfoNCE) run once per batch, as in training.
+    collectives (SIGReg, InfoNCE) run once per batch, as in training. ``desc``: a progress bar
+    on the first GPU, refreshed every 10 s, as worldSign's validation bar.
     """
     was_training = model.training
     model.eval()
@@ -114,7 +117,15 @@ def collect(  # noqa: PLR0913 (the model, the clips, where, and what to keep)
             sums[name] += value * weight
             counts[name] += weight
 
-    for number, batch in enumerate(batches):
+    shown = tqdm(
+        batches,
+        desc=desc,
+        disable=desc is None or not collective.is_main,
+        dynamic_ncols=True,
+        mininterval=10.0,
+        leave=False,
+    )
+    for number, batch in enumerate(shown):
         clips = batch.to(device).augmented()
         size = float(len(clips.videos))
         record: dict[str, Any] = {}

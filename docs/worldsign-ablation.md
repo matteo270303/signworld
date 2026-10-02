@@ -6,7 +6,7 @@ Documenti collegati:
 - `worldsign-progetto.md`: ipotesi H1–H7 (§5.1), previsioni (§5.3), piano (§4.14); i riferimenti [Lett. N] rimandano alla sua bibliografia;
 - `worldsign-architettura.md` e `worldsign-loss.md`: i componenti e i termini che le ablation cambiano.
 
-Stato: 30/9/2026.
+Stato: 2/10/2026.
 
 ---
 
@@ -71,13 +71,40 @@ Livello fisico, ancora e SIGReg sulla posa sono identici in tutti i bracci.
 
 ### 2.2 Ablation su θ\*
 
+In θ\* l'encoder di posa **non è pre-addestrato**: S-JEPA esiste solo come architettura e si addestra **da zero insieme al resto del modello** [Decisione del 2/10/2026].
+
 | Run | Esperimento | Differenza rispetto a θ\* | Domanda | File | Costo | Stato |
 |---|---|---|---|---|---|---|
 | 6 | **ESP-2** | nessun livello fisico: niente encoder di posa, predictor fisico, ancora e SIGReg sulla posa; solo il passaggio semantico | il livello fisico migliora il semantico? (H3) | `esp2_no_physical.yaml` | ≈ 0,85 L | Concordata |
-| 7 | **ESP-3** | encoder di posa S-JEPA **congelato**: niente LoRA e niente layer finale; SIGReg sulla posa solo diagnostica; l'ancora addestra solo le sue teste | serve un target di posa addestrabile e reso isotropo? (H2) | `esp3_pose_frozen.yaml` | ≈ 1 L | Concordata |
+| 7 | **ESP-6** | **senza encoder di posa: bi-encoder video–video** invece di video–posa. Il target del livello fisico è il **target encoder di V-JEPA 2.1** sulla clip intera; niente encoder di posa, ancora e SIGReg sulla posa | la posa come target del livello fisico serve, rispetto al target video di V-JEPA 2.1? | `esp6_video_target.yaml` (da creare; serve codice) | ≈ 1 L, più il forward del target encoder [da misurare in PC7] | Concordata |
 | 8 | **ESP-4** | `K = 4` ipotesi dalle 8 query, energia libera rilassata (ε = 0,05), a zero parametri aggiuntivi | l'ambiguità delle didascalie richiede una variabile latente? (H7) | `esp4_latent.yaml` | ≈ 1 L | Facoltativa |
 
-**Totale concordato: ≈ 6,85 L** (≈ 7,85 L con ESP-4), in due ondate: i cinque bracci in parallelo, poi le ablation su θ\*.
+**ESP-6: con e senza encoder di posa.** Sulla posa si confrontano solo due condizioni: **con** encoder di posa (θ\*, video–posa) e **senza** (ESP-6, video–video). Tutto il resto resta come in θ\*: encoder video con LoRA, fusione, predictor fisico, maschera, `E_fis` e livello semantico.
+
+Da decidere prima del codice **[Aperto]**:
+- **il target encoder:** quello rilasciato e congelato, oppure una copia EMA dell'encoder video con LoRA, come nel pre-training di V-JEPA 2.1;
+- **quale rete fa da target:** i ViT-L distillati sono addestrati sull'ultimo layer di un teacher più grande (`worldsign-progetto.md` §4.4.1);
+- **la lettura:** predizione per token, come V-JEPA 2.1, oppure media nei riquadri degli articolatori, come in θ\*.
+
+### 2.3 ESP-8 — Regolarizzazione su θ\*
+
+Con l'encoder di posa addestrato da zero, il regolarizzatore è ciò che impedisce al target di posa di collassare: la sola energia predittiva si minimizza con un target costante. ESP-8 confronta due famiglie di regolarizzatori, a parità di tutto il resto.
+
+| Run | Regolarizzatore | Forma | File | Costo | Stato |
+|---|---|---|---|---|---|
+| — | **SIGReg** (θ\*) | vincolo sull'intera distribuzione: gaussiana isotropa, test di Epps–Pulley su direzioni casuali [Lett. 35] | è θ\* | 0 | Concordata |
+| 9 | **VICReg** | vincolo sui momenti del secondo ordine: **varianza** (deviazione standard di ogni dimensione sopra una soglia γ) e **covarianza** (penalità sui termini fuori diagonale) [VICReg, Bardes, Ponce e LeCun, ICLR 2022, https://arxiv.org/abs/2105.04906] | `esp8_vicreg.yaml` (da creare; serve codice) | ≈ 1 L | Concordata |
+
+**Dove si applica.** VICReg prende il posto di SIGReg **sugli stessi tensori** di θ\*: le rappresentazioni di posa `s_{t,a}` per articolatore, al posto di `SIGReg_posa`, e `ŷ` ed `ẽ`, al posto di `SIGReg_sem`, se il braccio scelto come θ\* lo prevede. La variabile è una sola: la famiglia del regolarizzatore.
+
+**Domanda.** Quale dei due tiene informativo il target di posa addestrato da zero e disperso lo spazio semantico?
+
+Da decidere prima del codice **[Aperto]**:
+- **l'invarianza:** VICReg ha tre termini; qui il ruolo dell'invarianza lo può svolgere l'energia predittiva (`E_fis`, `E_sem`). Proposta: tenere solo varianza e covarianza;
+- **i pesi:** VICReg usa 25 / 25 / 1 per invarianza, varianza e covarianza; va fissato il peso dei suoi termini rispetto a quelli predittivi (per SIGReg è λ = 0,05);
+- **l'espansore:** VICReg applica i termini all'uscita di un MLP espansore; qui si può usarlo oppure vincolare direttamente `s_{t,a}`, `ŷ` ed `ẽ`, come fa SIGReg.
+
+**Totale concordato: ≈ 7,85 L** (≈ 8,85 L con ESP-4), più il forward del target encoder di ESP-6, in due ondate: i cinque bracci in parallelo, poi le ablation su θ\*.
 
 ---
 

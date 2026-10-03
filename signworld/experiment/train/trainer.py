@@ -1,18 +1,22 @@
-"""The training loop of a WorldSign run (§4.10).
+"""The training loop of a WorldSign run (§4.10, gerarchia §6).
 
-Every step: the stage of the curriculum decides the passes and what trains; the learning
-rate follows warm-up, constant phase and cooldown; the model runs under bf16 autocast inside
-DDP; AdamW steps; a non-finite loss on any GPU stops the run (§4.13.3).
+Every step: the stage of the curriculum (P, F0, F) decides the levels and what trains; every
+family's learning rate follows its own schedule (a warm-up from its entry, a cosine for the
+pose) times the cooldown; the model runs under bf16 autocast inside DDP; AdamW steps; a
+non-finite loss on any GPU stops the run (§4.13.3).
 
 The constant phase ends in one of two ways: early stopping (no gain of the decision metric on
-the held-out channel split for ``patience`` epochs) or the planned number of steps minus the
-cooldown. Either way the run goes back to the best checkpoint and cools down from there
-(V-JEPA 2: several cooldowns can start from checkpoints of the constant phase). Validation and
-a checkpoint come every ``validation_every`` steps and at every epoch end; a run killed at any
-point resumes from its last checkpoint, at the same place in the sampler's order. With
-``diagnostics.cadence = epoch`` every diagnostic runs at the end of each epoch instead, and
-``validation_every`` only spaces the checkpoints. Every
-``latest`` checkpoint also writes the energies of every training clip since the previous one
+the held-out channel split for ``patience`` epochs of the last stage, F: before it the encoder
+is not adapted yet) or the planned number of steps minus the cooldown. Either way the run goes
+back to the best checkpoint of stage F and cools down from there (V-JEPA 2: several cooldowns
+can start from checkpoints of the constant phase). The programmed stops fall on the stage
+boundaries: F1 at the end of P, F2 at the end of F0, F3 at the end of the first epoch of F.
+
+Validation and a checkpoint come every ``validation_every`` steps and at every epoch end; a run
+killed at any point resumes from its last checkpoint, at the same place in the sampler's
+order. With ``diagnostics.cadence = epoch`` every diagnostic runs at the end of each epoch
+instead, and ``validation_every`` only spaces the checkpoints. Every ``latest`` checkpoint
+also writes the energies of every training clip since the previous one
 (``checkpoints/energies``), for the audit of the high-energy tail (§4.13.4). What the run
 prints and tabulates (progress bars, a line per validation and checkpoint, ``metrics.csv``)
 is ``reporting``'s, set up as in the worldSign runs.
@@ -39,17 +43,11 @@ from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSig
 
 from .checkpoint import CheckpointStore, TrainingState
 from .config import WorldSignConfig
-from .curriculum import (
-    CosineSchedule,
-    Curriculum,
-    LearningRateSchedule,
-    Stage,
-    families,
-    trainable_names,
-)
+from .curriculum import SEMANTIC_NEW, Curriculum, Stage, families, trainable_names
 from .distributed import SINGLE, Distributed
 from .monitor import Monitor, RunStoppedError
 from .reporting import RunReport, finish_time
+from .schedules import Cooldown, group_schedules, parameter_groups
 from .validation import RetrievalScores
 
 
@@ -135,7 +133,7 @@ class Trainer:
         names = trainable_names(model)
         self.bf16 = training.precision == "bf16"
 
-        groups = model.parameter_groups(training)
+        groups = parameter_groups(model, config)
         for group in groups:
             group["base_lr"] = group["lr"]
         self.optimizer = torch.optim.AdamW(
@@ -168,17 +166,19 @@ class Trainer:
         if self.steps_per_epoch == 0:
             raise ValueError("fewer training clips than one batch")
         self.total_steps = training.epochs * self.steps_per_epoch
-        cooldown = max(1, round(training.cooldown_fraction * self.total_steps))
-        self.schedule = LearningRateSchedule(
-            max(1, round(training.warmup_fraction * self.total_steps)), cooldown
+        self.cooldown = Cooldown(max(1, round(training.cooldown_fraction * self.total_steps)))
+        self.constant_end = self.total_steps - self.cooldown.steps
+        self.curriculum = Curriculum(
+            training.stages, self.steps_per_epoch, model.has_physical_level
         )
-        self.constant_end = self.total_steps - cooldown
-        pose = config.pose_encoder
-        self.final_layer_schedule = CosineSchedule(
-            max(1, round(pose.final_layer_warmup * self.total_steps)),
-            round(pose.final_layer_decay_end * self.total_steps),
-        )
-        self.curriculum = Curriculum(training.stages, self.total_steps, model.has_physical_level)
+        if self.curriculum.last_start >= self.constant_end:
+            raise ValueError(
+                f"stage {self.curriculum.last.name} starts at step {self.curriculum.last_start}, "
+                f"after the constant phase ends at {self.constant_end}"
+            )
+        self.schedules = group_schedules(config, self.curriculum, self.total_steps)
+        self.rates: dict[str, float] = {}
+        """Every family's learning rate at the current step, for the logs."""
         self.checkpoints = CheckpointStore(output / "checkpoints", names, collective)
         self.log = MetricsLog(output / "metrics.jsonl", collective)
         self.output = output
@@ -215,16 +215,16 @@ class Trainer:
         return [collate([data[i] for i in mine[s : s + size]]) for s in range(0, len(mine), size)]
 
     def _stop_steps(self) -> dict[int, list[str]]:
-        """Where the programmed stops of §4.13.5 fall: F1 at the end of stage 1, F2 at 10 % of
-        stage 2, F3 at 30 % of the run."""
-        bounds = {stage.name: start for start, stage in self.curriculum.bounds}
-        stops: dict[int, list[str]] = {}
-        if self.model.has_physical_level and "2a" in bounds:
-            stops.setdefault(max(1, bounds["2a"]), []).append("F1")
-        start = bounds["2"]
-        second = start + max(1, round(0.1 * max(self.constant_end - start, 1)))
-        stops.setdefault(second, []).append("F2")
-        stops.setdefault(max(1, round(0.3 * self.total_steps)), []).append("F3")
+        """Where the programmed stops fall (gerarchia §7): F1 at the end of stage P, F2 at the
+        end of F0, F3 at the end of the first epoch of F. Without the physical level (ESP-2)
+        F1 and F3 fall at the same epochs, for runs to be compared at the same point."""
+        stages = self.config.training.stages
+        epoch = self.steps_per_epoch
+        stops: dict[int, list[str]] = {stages.pose_epochs * epoch: ["F1"]}
+        if self.model.has_physical_level:
+            stops[self.curriculum.last_start] = ["F2"]
+        third = min((stages.pose_epochs + stages.heads_epochs + 1) * epoch, self.constant_end)
+        stops.setdefault(third, []).append("F3")
         return stops
 
     def _loader(
@@ -260,7 +260,7 @@ class Trainer:
         self.report.say(
             f"[run] {self.total_steps} steps ({self.steps_per_epoch} per epoch, "
             f"{self.config.training.epochs} epochs), constant phase to {self.constant_end}, "
-            f"cooldown {self.schedule.cooldown_steps} steps"
+            f"cooldown {self.cooldown.steps} steps"
         )
         self.progress.advance(state.step, time.perf_counter())
         while not state.finished:
@@ -369,11 +369,7 @@ class Trainer:
             self._consider_best(state, self._validate(state, "end of constant phase"))
             self._start_cooldown(state, "planned steps")
             return True
-        end = (
-            None
-            if state.cooldown_start is None
-            else state.cooldown_start + self.schedule.cooldown_steps
-        )
+        end = None if state.cooldown_start is None else state.cooldown_start + self.cooldown.steps
         if end is not None and state.step >= end:
             state.finished = True
             return True
@@ -402,14 +398,17 @@ class Trainer:
             raise RunStoppedError(f"stop {name} failed at step {state.step}: {failed}")
 
     def _end_of_epoch(self, state: TrainingState) -> None:
-        improved = self._consider_best(state, self._validate(state, "epoch"))
+        """Validation; in stage F the best checkpoint and the patience; the due stops."""
+        scores = self._validate(state, "epoch")
+        counting = state.step > self.curriculum.last_start
+        improved = counting and self._consider_best(state, scores)
         if self.at_epoch_end:
             self._rare(state)
             for at, names in sorted(self.stops.items()):
                 if state.step - self.steps_per_epoch < at <= state.step:
                     for name in names:
                         self._stop_point(name, state, fresh=False)
-        if not improved:
+        if counting and not improved:
             state.bad_epochs += 1
         self._save("latest", state)
         if state.bad_epochs >= self.config.training.patience:
@@ -464,12 +463,7 @@ class Trainer:
         if stage != self.stage:
             self._enter(stage, state.step)
             self.log.write("stage", step=state.step, stage=stage.name)
-        start = self.constant_end if state.cooldown_start is None else state.cooldown_start
-        factor = self.schedule.factor(state.step, start)
-        final_factor = self.final_layer_schedule.factor(state.step)
-        for group in self.optimizer.param_groups:
-            own = final_factor if group["schedule"] == "final_layer" else factor
-            group["lr"] = group["base_lr"] * own
+        self._set_rates(state)
         began = time.perf_counter()
         batch = batch.to(self.device).augmented()
         frequent = self._frequent_due(state)
@@ -482,6 +476,7 @@ class Trainer:
                 state.step,
                 self.total_steps,
                 randomness,
+                pose=stage.pose,
                 physical=stage.physical,
                 semantic=stage.semantic,
             )
@@ -506,7 +501,17 @@ class Trainer:
         state.step += 1
         state.position += self.per_gpu
         if state.step % self.config.training.log_every == 0:
-            self._log_step(state, stage, total, terms.parts | terms.diagnostics, factor, began)
+            self._log_step(state, stage, total, terms.parts | terms.diagnostics, began)
+
+    def _set_rates(self, state: TrainingState) -> None:
+        """Every group's rate: its peak x its family's schedule x the cooldown."""
+        start = self.constant_end if state.cooldown_start is None else state.cooldown_start
+        cooling = self.cooldown.factor(state.step, start)
+        for group in self.optimizer.param_groups:
+            schedule = self.schedules.get(group["family"])
+            own = 0.0 if schedule is None else schedule.factor(state.step)
+            group["lr"] = group["base_lr"] * own * cooling
+            self.rates[group["family"]] = group["lr"]
 
     def _log_step(
         self,
@@ -514,7 +519,6 @@ class Trainer:
         stage: Stage,
         total: float,
         parts: dict[str, torch.Tensor],
-        factor: float,
         began: float,
     ) -> None:
         mean: Callable[[float], float] = self.collective.mean
@@ -533,12 +537,12 @@ class Trainer:
             step=state.step,
             epoch=state.epoch,
             stage=stage.name,
-            lr_factor=factor,
             seconds=seconds,
             clips_per_second=self.config.training.batch_size / max(seconds, 1e-9),
             memory_gib=memory,
             loss=loss,
             eta_seconds=eta,
+            **{f"lr_{family}": rate for family, rate in self.rates.items()},
             **values,
         )
 
@@ -554,7 +558,7 @@ class Trainer:
         """The last step: the planned one, or the end of the cooldown once it has begun."""
         if state.cooldown_start is None:
             return self.total_steps
-        return state.cooldown_start + self.schedule.cooldown_steps
+        return state.cooldown_start + self.cooldown.steps
 
     def _evaluations_left(self, state: TrainingState) -> tuple[int, int]:
         """Validations and rare readings still to come, if the run goes to its planned end."""
@@ -636,7 +640,7 @@ class Trainer:
             step=state.step,
             total_steps=self._end_step(state),
             stage=self.stage.name if self.stage is not None else "-",
-            lr=self.optimizer.param_groups[0]["lr"],
+            lr=self.rates.get(SEMANTIC_NEW, 0.0),
             train=self._train_means(),
             readings=self.monitor.last_validation,
             eta=self._eta(state),

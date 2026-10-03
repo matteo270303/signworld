@@ -1,7 +1,7 @@
 """Energies and regularisers of the objective (§4.5.3-§4.5.9), and their per-arm composition.
 
-``L = (1 - λ) · (E_fis + L_anchor + L_pred_sem) + λ · (SIGReg_posa + SIGReg_sem)``, λ = 0.05,
-with ``L_pred_sem`` and ``SIGReg_sem`` set by the arm of ESP-1:
+``L = (1 - λ) · (L_inv + L_anchor + E_fis + L_pred_sem) + λ · (SIGReg_posa + SIGReg_sem)``,
+λ = 0.05, with ``L_pred_sem`` and ``SIGReg_sem`` set by the arm of ESP-1:
 
     A₀   E_sem                —
     A    E_sem                ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
@@ -10,9 +10,12 @@ with ``L_pred_sem`` and ``SIGReg_sem`` set by the arm of ESP-1:
     C    InfoNCE              ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
 
 SIGReg is applied to each modality apart, as LeJEPA applies it to each view, with the same
-random directions for both; on the pose it is applied to each articulator apart
-(``SIGReg_posa``, §4.5.6). ``L_anchor`` comes from the pose branch. With the physical level off
-(ESP-2) every physical term is absent.
+random directions for both; on the pose to the clean sequence and to its view
+(``SIGReg_posa``, posa §4.2). ``L_inv`` and ``SIGReg_posa`` train the pose encoder with
+``L_anchor``, which comes from the pose branch. The hierarchy is trained level by level
+(gerarchia §3): ``E_fis`` reads the pose target with its gradient stopped, so each term reaches
+only its own level and λ matters only between the terms of one level. With the physical level
+off (ESP-2) every pose and physical term is absent.
 """
 
 from collections.abc import Sequence
@@ -27,6 +30,19 @@ from signworld.experiment.train.distributed import SINGLE, Distributed
 from signworld.loss.sigreg import SIGReg, random_directions
 from signworld.models.worldsign.physical import PhysicalPrediction
 
+POSE_TERMS = ("inv_posa", "anchor", "sigreg_posa")
+"""The terms of level 0, the pose (posa §4.2)."""
+
+
+def step_errors(prediction: PhysicalPrediction, target: Tensor) -> Tensor:
+    """(batch, steps) L1 error of ŝ_t against ``LN(s_t)``, averaged over the channels.
+
+    As in V-JEPA 2.1 the target is layer-normalised over its channels (no affine parameters)
+    and the error is the L1 averaged over the channels (``loss_exp = 1``).
+    """
+    normalized = functional.layer_norm(target.float(), (target.shape[-1],))
+    return (prediction.state.float() - normalized).abs().mean(dim=-1)
+
 
 def physical_energy(
     predictions: Sequence[PhysicalPrediction],
@@ -34,32 +50,19 @@ def physical_energy(
     confidence: Tensor,
     context_lambda: float,
 ) -> Tensor:
-    """E_fis: V-JEPA 2.1's ``L_pred + λ · L_ctx`` read per articulator box, averaged over masks.
+    """E_fis: the step errors weighted as V-JEPA 2.1 weighs its tokens, averaged over masks.
 
-    As in V-JEPA 2.1, the target is layer-normalised over its channels (no affine parameters)
-    and the error is the L1 averaged over the channels (``loss_exp = 1``). Each box enters with
-    its confidence ``c̄`` and with the tokens behind its read-out:
+    A step weighs ``c_t · (n^m_t + λ · w^v_t)``: every masked token in its boxes counts once
+    (``L_pred``), every visible one ``λ`` times its weight (``L_ctx``; the weight is 1 in
+    V-JEPA 2.1's cooldown, which we follow, ``1 / √d`` in its pre-training) (gerarchia §4).
 
-    * ``L_pred``: the box read from its masked tokens, weighted by how many they are, so that
-      every masked token counts once, as in V-JEPA's mean over the masked tokens;
-    * ``L_ctx``: the box read from its visible tokens, weighted by the sum of their weights and
-      divided by their number: V-JEPA's mean over the visible tokens of the weighted error.
-      The weight is 1 in V-JEPA 2.1's cooldown, which we follow, and ``1 / √d`` in its
-      pre-training.
-
-    ``target`` (batch, steps, parts, C); ``confidence`` (batch, steps, parts).
+    ``target`` (batch, steps, C), detached by the caller; ``confidence`` (batch, steps).
     """
-    normalized = functional.layer_norm(target.float(), (target.shape[-1],))
     energies = []
     for prediction in predictions:
-        masked_error = (prediction.masked.float() - normalized).abs().mean(dim=-1)
-        visible_error = (prediction.visible.float() - normalized).abs().mean(dim=-1)
-        masked = confidence * prediction.masked_count
-        l_pred = (masked * masked_error).sum() / masked.sum().clamp_min(1e-12)
-        visible = confidence * prediction.visible_count
-        weighted = confidence * prediction.visible_weight
-        l_ctx = (weighted * visible_error).sum() / visible.sum().clamp_min(1e-12)
-        energies.append(l_pred + context_lambda * l_ctx)
+        weights = prediction.weights(confidence, context_lambda)
+        error = step_errors(prediction, target)
+        energies.append((weights * error).sum() / weights.sum().clamp_min(1e-12))
     return torch.stack(energies).mean()
 
 
@@ -70,18 +73,22 @@ def physical_energy_per_clip(
     context_lambda: float,
 ) -> Tensor:
     """(batch,) E_fis of every clip on its own, averaged over the masks: plausibility (§4.5.3)."""
-    normalized = functional.layer_norm(target.float(), (target.shape[-1],))
     energies = []
     for prediction in predictions:
-        masked_error = (prediction.masked.float() - normalized).abs().mean(dim=-1)
-        visible_error = (prediction.visible.float() - normalized).abs().mean(dim=-1)
-        masked = confidence * prediction.masked_count
-        l_pred = (masked * masked_error).sum((1, 2)) / masked.sum((1, 2)).clamp_min(1e-12)
-        visible = confidence * prediction.visible_count
-        weighted = confidence * prediction.visible_weight
-        l_ctx = (weighted * visible_error).sum((1, 2)) / visible.sum((1, 2)).clamp_min(1e-12)
-        energies.append(l_pred + context_lambda * l_ctx)
+        weights = prediction.weights(confidence, context_lambda)
+        error = step_errors(prediction, target)
+        energies.append((weights * error).sum(1) / weights.sum(1).clamp_min(1e-12))
     return torch.stack(energies).mean(dim=0)
+
+
+def invariance(clean: Tensor, view: Tensor, present: Tensor) -> Tensor:
+    """``L_inv``: mean over the present steps of ``‖s_t - s̃_t‖² / C`` (posa §4.2).
+
+    ``clean`` and ``view`` (batch, steps, C); ``present`` (batch, steps) bool.
+    """
+    squared = (clean.float() - view.float()).pow(2).mean(dim=-1)
+    weights = present.float()
+    return (squared * weights).sum() / weights.sum().clamp_min(1.0)
 
 
 def semantic_energy(predicted: Tensor, target: Tensor) -> Tensor:
@@ -162,7 +169,7 @@ class LossTerms:
     total: Tensor
     parts: dict[str, Tensor] = field(default_factory=dict)
     diagnostics: dict[str, Tensor] = field(default_factory=dict)
-    """Values measured without entering the total (SIGReg on a frozen pose, ESP-3)."""
+    """Values measured without entering the total."""
     samples: dict[str, Tensor] = field(default_factory=dict)
     """(batch,) energies of every clip, without gradient: ``e_sem`` and ``e_fis``."""
 
@@ -220,17 +227,18 @@ class Objective(nn.Module):
             terms["sigreg_sem"] = self.sigreg([predicted.flatten(0, 1), text], generator)
         return terms
 
-    def pose_sigreg(self, latent: Tensor, present: Tensor, generator: torch.Generator) -> Tensor:
-        """``SIGReg_posa = ¼ Σ_a SIGReg({s_{t,a}})`` over the steps where ``a`` is present.
+    def pose_sigreg(
+        self, latents: Sequence[Tensor], present: Tensor, generator: torch.Generator
+    ) -> Tensor:
+        """``SIGReg_posa = ½ [SIGReg({s_t}) + SIGReg({s̃_t})]`` over the present steps.
 
-        ``latent`` (batch, steps, 4, C); ``present`` (batch, steps, 4) bool. An articulator with
-        fewer than two present steps in the whole batch is left out, on every GPU alike.
+        ``latents`` are the views, each (batch, steps, C); ``present`` (batch, steps) bool.
+        With fewer than two present steps in the whole batch, on every GPU alike, it is 0.
         """
-        counts = self.collective.all_sum(present.sum(dim=(0, 1)).float())
-        parts = [part for part in range(latent.shape[2]) if counts[part] > 1]
-        if not parts:
-            return latent.new_zeros(())
-        return self.sigreg([latent[:, :, part][present[:, :, part]] for part in parts], generator)
+        count = self.collective.all_sum(present.sum().float())
+        if float(count) < 2:  # noqa: PLR2004 (a distribution needs two samples)
+            return latents[0].new_zeros(())
+        return self.sigreg([latent[present] for latent in latents], generator)
 
     def combine(self, terms: dict[str, Tensor]) -> LossTerms:
         """``(1 - λ)·(predictive) + λ·(SIGReg)`` over whichever terms are present."""

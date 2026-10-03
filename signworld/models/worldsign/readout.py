@@ -1,10 +1,11 @@
-"""Per-step, per-articulator read-out of a grid of tokens (§4.5.2).
+"""Per-step read-out of a grid of tokens (gerarchia §4).
 
 The physical level predicts a token for every position of the grid; its target is one vector
-per step and articulator. ``membership`` turns the articulator boxes (frame fractions, from the
-keypoints) into which patches each box touches, and ``pool`` averages the tokens inside, in
-one tensor operation for a whole batch. A box covers every patch it touches, as in the probes
-of the collaudo (``models.video_encoders.box_pool``).
+per step. ``membership`` turns the articulator boxes (frame fractions, from the keypoints) into
+which patches each box touches, ``pool`` averages the tokens inside each box, in one tensor
+operation for a whole batch, and ``StepReadout`` concatenates the four boxes of a step and
+projects them to the target, as the pose encoder concatenates its four parts. A box covers
+every patch it touches, as in the probes of the collaudo (``models.video_encoders.box_pool``).
 """
 
 import torch
@@ -46,13 +47,26 @@ def box_sum(values: Tensor, members: Tensor) -> Tensor:
     return total
 
 
-class ArticulatorReadout(nn.Module):
-    """``ŝ_{t,a} = head(mean of the predicted tokens in a's box at step t)``."""
+class StepReadout(nn.Module):
+    """``ŝ_t = head([mean of the predicted tokens in each articulator's box at step t])``.
 
-    def __init__(self, width: int, target_dim: int) -> None:
+    The four box means are concatenated in the order of ``Articulator``; an empty box gives
+    zeros in its slot.
+    """
+
+    def __init__(self, width: int, parts: int, target_dim: int) -> None:
         super().__init__()
-        self.head = nn.Linear(width, target_dim)
+        self.parts = parts
+        self.head = nn.Linear(parts * width, target_dim)
+
+    @property
+    def target_dim(self) -> int:
+        return self.head.out_features
 
     def forward(self, tokens: Tensor, members: Tensor) -> Tensor:
-        latent: Tensor = self.head(pool(tokens, members))
+        """``tokens`` (batch, steps, rows, columns, width), ``members`` (batch, steps, parts,
+        rows, columns) to (batch, steps, target_dim)."""
+        if members.shape[2] != self.parts:
+            raise ValueError(f"expected {self.parts} boxes per step, got {members.shape[2]}")
+        latent: Tensor = self.head(pool(tokens, members).flatten(-2))
         return latent

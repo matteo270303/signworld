@@ -8,15 +8,16 @@ what the measures read. ``split_measures`` derives from it:
   caption length, the chance level, bootstrap intervals where asked;
 * the **loss** of the objective and each of its terms, over the clips (``loss_*``);
 * **E_sem by caption language**;
-* the **physical read-outs** (gamma, R² overall, per articulator and per mask coverage, the
-  dynamics against its baseline) and the **keypoint errors** against interpolation and
-  constant velocity, averaged over the batches;
+* the **physical read-outs** per step (gamma, R² overall, on mostly hidden and mostly visible
+  steps and per mask coverage, the dynamics against its baseline) and the **keypoint errors**
+  against interpolation and constant velocity, averaged over the batches;
 * **alignment and uniformity** of Wang and Isola [Lett. 40] on the unit sphere;
 * the **geometry of ŷ and ẽ**: effective rank, IsoScore, condition number, SIGReg;
 * the **noise test**, **hubness**, the **modality gap** and the **2x2 energy table**.
 
 ``model_measures`` adds the leak test and the attention of the queries on the first clips;
-``pose_target_measures`` the isotropy and kinematic content of the pose target.
+``pose_target_measures`` the isotropy of the pose target and how much of each articulator's
+kinematics it holds.
 """
 
 import math
@@ -78,10 +79,9 @@ def _physical(model: WorldSign, clips: WorldSignBatch, record: dict[str, Any]) -
         return {}
     latent, confidence = record["latent"].float(), record["confidence"].float()
     predictions = record["physical"].predictions
-    groups = torch.as_tensor(JOINT_ARTICULATOR, device=latent.device)
     found = physical_readings(predictions, latent, confidence)
     return found | keypoint_errors(
-        predictions, latent, pose.decoders, clips.keypoints, clips.keypoint_weights, groups
+        predictions, latent, pose.decoder, clips.keypoints, clips.keypoint_weights
     )
 
 
@@ -156,7 +156,7 @@ def collect(  # noqa: PLR0913 (the model, the clips, where, and what to keep)
             for name, reading in _physical(model, clips, record).items():
                 add(name, reading, size)
         if pose_target and model.pose is not None:
-            parts["latents"].append(model.pose.targets(clips.pose_tokens).float().cpu())
+            parts["latents"].append(model.pose.target(clips.pose_tokens).float().cpu())
             parts["keypoints"].append(clips.keypoints.float().cpu())
             parts["weights"].append(clips.keypoint_weights.float().cpu())
     model.train(was_training)
@@ -308,39 +308,42 @@ def model_measures(
     return out
 
 
-def pose_target_measures(
-    latent: Tensor, keypoints: Tensor, weights: Tensor
-) -> dict[str, dict[str, float]]:
-    """Per articulator: IsoScore, effective rank and SIGReg of the pose target ``s``, and the R²
-    of a ridge from ``s`` to the keypoint positions and velocities (fit on the first half of
-    the clips, read on the second).
+def pose_target_measures(latent: Tensor, keypoints: Tensor, weights: Tensor) -> dict[str, float]:
+    """The pose target ``s`` on a set of clips (posa §6).
 
-    ``latent`` (clips, steps, 4, C), ``keypoints`` (clips, steps, 69, 2), ``weights``
-    (clips, steps, 69). Keyed by measure, then by articulator name.
+    IsoScore, effective rank and SIGReg of ``s`` over the steps with some joint present, and
+    for every articulator the R² of a ridge from ``s`` to its joints' positions and velocities
+    (fit on the first half of the clips, read on the second): ``r2_position_{part}``,
+    ``r2_velocity_{part}``.
+
+    ``latent`` (clips, steps, C), ``keypoints`` (clips, steps, 69, 2), ``weights``
+    (clips, steps, 69).
     """
     groups = torch.as_tensor(JOINT_ARTICULATOR)
     clips, steps = latent.shape[:2]
     fit = torch.arange(clips) < clips // 2
     velocity = keypoints[:, 1:] - keypoints[:, :-1]
     moving = weights[:, 1:] * weights[:, :-1]
-    out: dict[str, dict[str, float]] = defaultdict(dict)
+    present = weights.mean(-1).flatten() > 0
+    rows = latent.flatten(0, 1)
+    spread = Spread.of(rows[present])
+    out = {
+        "isoscore": spread.isoscore,
+        "rank": spread.effective_rank,
+        "sigreg": sigreg_ratio(rows[present]),
+    }
     for index, name in enumerate(PARTS):
-        rows = latent[:, :, index].flatten(0, 1)
-        spread = Spread.of(rows)
-        out["isoscore"][name] = spread.isoscore
-        out["rank"][name] = spread.effective_rank
-        out["sigreg"][name] = sigreg_ratio(rows)
         joints = groups == index
-        out["r2_position"][name] = ridge_r2(
+        out[f"r2_position_{name}"] = ridge_r2(
             rows,
             keypoints[:, :, joints].flatten(0, 1).flatten(1),
             weights[:, :, joints].mean(-1).flatten(),
             fit[:, None].expand(clips, steps).flatten(),
         )
-        out["r2_velocity"][name] = ridge_r2(
-            latent[:, 1:, index].flatten(0, 1),
+        out[f"r2_velocity_{name}"] = ridge_r2(
+            latent[:, 1:].flatten(0, 1),
             velocity[:, :, joints].flatten(0, 1).flatten(1),
             moving[:, :, joints].mean(-1).flatten(),
             fit[:, None].expand(clips, steps - 1).flatten(),
         )
-    return dict(out)
+    return out

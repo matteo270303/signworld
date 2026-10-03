@@ -1,10 +1,12 @@
-"""The video side of WorldSign: one adapted encoder, two predictors (§4.2, §4.5.1).
+"""The video side of WorldSign: one adapted encoder, two predictors (§4.2, gerarchia §2).
 
 ``VideoBranch.physical`` runs the physical pass of one training step: every mask kind of the
 policy, the encoder on the visible tokens only, the multi-level fusion, the predictor and the
-per-articulator read-out. ``VideoBranch.semantic`` runs the semantic pass on the whole clip.
-Both passes share the encoder and its LoRA; nothing is stopped or averaged (no EMA).
-``build_video_branch`` assembles it from a ``WorldSignConfig``.
+per-step read-out. ``VideoBranch.semantic`` runs the semantic pass on the whole clip. The
+hierarchy is trained level by level: the semantic pass reads the encoder without gradient,
+``sg(Enc(x))``, so only the physical level changes the LoRA; ``encoder_gradient`` lets it
+through instead (the «global» ablation). ``build_video_branch`` assembles the branch from a
+``WorldSignConfig``.
 """
 
 from dataclasses import dataclass
@@ -13,6 +15,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
+from signworld.data.pose.wholebody import Articulator
 from signworld.experiment.train.config import WorldSignConfig
 from signworld.models.encoders.video_encoders import load_vjepa2_1
 
@@ -20,7 +23,7 @@ from .backbone import VideoBackbone
 from .fusion import build_fusion
 from .masking import LambdaSchedule, Mask, MaskPolicy, TokenGrid, token_roles
 from .physical import PhysicalPrediction, PhysicalPredictor
-from .readout import ArticulatorReadout, membership
+from .readout import StepReadout, membership
 from .semantic import SemanticPredictor
 
 
@@ -44,6 +47,7 @@ class VideoBranch(nn.Module):
         grid: TokenGrid,
         *,
         weight_distance: bool = False,
+        encoder_gradient: bool = False,
     ) -> None:
         super().__init__()
         self.backbone = backbone
@@ -53,6 +57,8 @@ class VideoBranch(nn.Module):
         self.schedule = schedule
         self.grid = grid
         self.weight_distance = weight_distance
+        self.encoder_gradient = encoder_gradient
+        """True: E_sem reaches the encoder (the «global» ablation); False: level by level."""
 
     @property
     def has_physical_level(self) -> bool:
@@ -89,10 +95,13 @@ class VideoBranch(nn.Module):
     def semantic(self, frames: Tensor, record: dict[str, Tensor] | None = None) -> Tensor:
         """(batch, K, d) predicted caption embeddings ŷ from the whole clip.
 
-        ``record``, if given, receives the encoder's mean token and every query's output, for
-        the collapse and query diagnostics (§4.13.3).
+        The encoder runs without gradient unless ``encoder_gradient``: its tokens are then
+        ``sg(Enc(x))`` and the pass keeps none of its activations. ``record``, if given,
+        receives the encoder's mean token and every query's output, for the collapse and query
+        diagnostics (§4.13.3).
         """
-        tokens = self.backbone.tokens(frames)
+        with torch.set_grad_enabled(self.encoder_gradient and torch.is_grad_enabled()):
+            tokens = self.backbone.tokens(frames)
         queries = self.semantic_predictor.query_outputs(tokens)
         if record is not None:
             record["encoder_mean"] = tokens.detach().mean(dim=1)
@@ -120,7 +129,10 @@ def assemble(
     encoder: nn.Module, predictor: Any, config: WorldSignConfig, grid: TokenGrid
 ) -> VideoBranch:
     """The branch around already-built Meta modules (also used by the tests, with tiny ones)."""
-    backbone = VideoBackbone(encoder, config.encoder)
+    # The physical level adapts the encoder; with neither it nor the global ablation, no level
+    # trains it and it stays as released (ESP-2).
+    adapted = config.physical.enabled or config.semantic.trains_encoder
+    backbone = VideoBackbone(encoder, config.encoder, adapted=adapted)
     physical = None
     if config.physical.enabled:
         released = predictor.predictor_embed
@@ -129,7 +141,7 @@ def assemble(
         physical = PhysicalPredictor(
             predictor,
             fusion,
-            ArticulatorReadout(width, config.physical.target_dim),
+            StepReadout(width, len(Articulator), config.physical.target_dim),
             config.physical.lora,
             grid,
             mask_index=config.physical.mask_index,
@@ -150,4 +162,5 @@ def assemble(
         schedule,
         grid,
         weight_distance=settings.weight_distance,
+        encoder_gradient=config.semantic.trains_encoder,
     )

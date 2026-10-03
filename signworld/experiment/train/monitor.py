@@ -3,16 +3,16 @@
 Four cadences, in steps of 128 clips (the document's steps of 1,024 clips times 8):
 
 * **every step**: energies, loss spikes over ``spike_sigma`` from the running mean;
-* **frequent** (800): an extra pass on a few clips of the current batch reads collapse (``s``
-  per articulator, ŷ, the encoder's mean token), both predictors, the read-out per
-  articulator and per mask coverage, the dynamics, keypoint errors against interpolation and
-  constant velocity, localisation, the queries, the text head, the LoRA and the gradient of
-  every term (shares and conflicts);
+* **frequent** (800): an extra pass on a few clips of the current batch reads collapse (the
+  pose target ``s``, ŷ, the encoder's mean token), both predictors, the read-out per step and
+  per mask coverage, the dynamics, keypoint errors against interpolation and constant
+  velocity, localisation, the queries, the text head, the LoRA and the gradient of every term
+  on its level (shares and conflicts);
 * **validation** (4,000): every measure of the validation clips that the test also reads
   (``measures``: retrieval, losses, physical read-outs, keypoint errors, geometry, alignment
   and uniformity, noise test, hubness, modality gap, 2x2 table, leak test, attention), R@1
   on as many training clips with the gap, and on a fixed probe batch the pose target's
-  isotropy, content and speed (CKA);
+  isotropy, kinematic content per articulator and speed (CKA);
 * **rare** (16,000): temporal order ω, the plausibility tests and the drift of the video
   encoder.
 
@@ -21,11 +21,13 @@ readings at the end of each epoch instead, and judges there the stops due within
 Everything is read at step 0 too, as the reference. Every reading goes to the metrics log;
 the rules compare it with its threshold or with the step-0 reference and log an alarm. Only a
 leak or a non-finite loss stops a run by itself; the gate run also stops at a failed F1-F3.
+The readings of a level start with the stage it enters (gerarchia §7): the pose and semantic
+readings from stage P, the physical ones from F0, the LoRA's from F.
 """
 
 import math
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,7 +35,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional
 
-from signworld.data.pose.tokens import JOINT_ARTICULATOR
+from signworld.loss.worldsign import POSE_TERMS
 from signworld.metrics.measures import collect, model_measures, pose_target_measures, split_measures
 from signworld.metrics.readings import (
     Spread,
@@ -57,7 +59,7 @@ from signworld.models.worldsign.plausibility import as_measures, plausibility_te
 from signworld.models.worldsign.readout import membership
 
 from .config import DiagnosticsSettings, WorldSignConfig
-from .curriculum import Stage, families
+from .curriculum import POSE, VIDEO_LORA, Stage, families
 from .distributed import SINGLE, Distributed
 from .validation import RetrievalScores, retrieval
 
@@ -115,8 +117,8 @@ def _rules(s: DiagnosticsSettings) -> list[_Rule]:
             "masked content changes the predictions: leak",
             stop=True,
         ),
-        _Rule("s_rank_*", "below_ratio", s.collapse_ratio, "the pose target collapses"),
-        _Rule("s_std_*", "below_ratio", s.collapse_ratio, "the pose target shrinks"),
+        _Rule("s_rank", "below_ratio", s.collapse_ratio, "the pose target collapses"),
+        _Rule("s_std", "below_ratio", s.collapse_ratio, "the pose target shrinks"),
         _Rule("y_rank", "below_ratio", s.collapse_ratio, "ŷ collapses"),
         _Rule(
             "encoder_rank", "below_ratio", s.collapse_ratio, "the video encoder's output collapses"
@@ -144,10 +146,10 @@ def _rules(s: DiagnosticsSettings) -> list[_Rule]:
             s.conflict_readings,
         ),
         _Rule(
-            "pose_cos_e_fis_sigreg_posa",
+            "pose_cos_anchor_sigreg_posa",
             "below",
             s.conflict_cosine,
-            "SIGReg per articulator fights E_fis",
+            "SIGReg fights the anchor on the pose target",
             s.conflict_readings,
         ),
         _Rule(
@@ -163,9 +165,7 @@ def _rules(s: DiagnosticsSettings) -> list[_Rule]:
         _Rule("modality_gap", "above", s.modality_gap_max, "ŷ and ẽ live in separate spaces"),
         _Rule("hubness", "above_ratio", s.hubness_growth_max, "predictions pulled to the centre"),
         _Rule("noise_drop", "below", s.noise_drop_min, "the model does not look at the video"),
-        _Rule(
-            "s_sigreg_*", "above_ratio", s.sigreg_growth_max, "an articulator drifts from N(0, I)"
-        ),
+        _Rule("s_sigreg", "above_ratio", s.sigreg_growth_max, "the pose target leaves N(0, I)"),
         _Rule("pose_r2_drop_*", "above", s.pose_r2_drop_max, "the pose target loses kinematics"),
         _Rule("excluded_part1", "above", s.excluded_hands_max, "the left hand is mostly excluded"),
         _Rule("excluded_part2", "above", s.excluded_hands_max, "the right hand is mostly excluded"),
@@ -214,7 +214,6 @@ class Monitor:
         self._loss_var = 0.0
         self._loss_count = 0
         self._spikes: list[int] = []
-        self.groups = torch.as_tensor(JOINT_ARTICULATOR)
 
     # ------------------------------------------------------------ cadences
 
@@ -277,6 +276,7 @@ class Monitor:
                     step,
                     self.total_steps,
                     randomness,
+                    pose=stage.pose,
                     physical=stage.physical,
                     semantic=stage.semantic,
                     record=record,
@@ -386,27 +386,31 @@ class Monitor:
     def _gradient_readings(
         self, parts: dict[str, Tensor], record: dict[str, Any]
     ) -> dict[str, float]:
+        """Shares and cosines of every term's gradient on the weights of its level: the video
+        LoRA (the physical level, and the semantic one in the «global» ablation) and the pose
+        encoder; the conflict between alignment and SIGReg on ŷ."""
         weight = self.config.losses.sigreg_weight
         weights = {k: (weight if k.startswith("sigreg") else 1 - weight) for k in parts}
         found = families(self.model)
-        video = [p for p in found["video_lora"] if p.requires_grad]
-        pose = [p for p in found["pose_target"] + found["pose_final"] if p.requires_grad]
+        video = [p for p in found[VIDEO_LORA] if p.requires_grad]
+        pose = [p for p in found[POSE] if p.requires_grad]
         out: dict[str, float] = {}
-        if video:
-            grads = term_gradients(parts, weights, video)
+        video_terms = {k: v for k, v in parts.items() if k not in POSE_TERMS}
+        if video and video_terms:
+            grads = term_gradients(video_terms, weights, video)
             if grads:
                 out |= shares_and_cosines(grads, "video")
                 shares = [v for k, v in out.items() if k.startswith("video_share_")]
                 out["video_share_max"] = max(shares)
-                physical = [grads[k] for k in ("e_fis", "anchor", "sigreg_posa") if k in grads]
-                semantic = [grads[k] for k in grads if k not in ("e_fis", "anchor", "sigreg_posa")]
+                physical = [grads[k] for k in ("e_fis",) if k in grads]
+                semantic = [grads[k] for k in grads if k != "e_fis"]
                 if physical and semantic:
                     a, b = torch.stack(physical).sum(0), torch.stack(semantic).sum(0)
                     denominator = a.norm() * b.norm()
                     out["video_cos_physical_semantic"] = (
                         float(a @ b / denominator) if float(denominator) > 0 else float("nan")
                     )
-        pose_terms = {k: v for k, v in parts.items() if k in ("e_fis", "sigreg_posa", "anchor")}
+        pose_terms = {k: v for k, v in parts.items() if k in POSE_TERMS}
         if pose and pose_terms:
             out |= shares_and_cosines(term_gradients(pose_terms, weights, pose), "pose")
         predicted = record.get("predicted")
@@ -427,21 +431,23 @@ class Monitor:
         return out
 
     def _level_readings(self, clips: WorldSignBatch, record: dict[str, Any]) -> dict[str, float]:
+        """Collapse of the pose target; the physical read-outs and keypoint errors once the
+        physical level runs; the semantic level's readings."""
         out: dict[str, float] = {}
         if "latent" in record:
             latent, confidence = record["latent"].detach(), record["confidence"]
-            predictions = record["physical"].predictions
-            out |= physical_readings(predictions, latent, confidence)
-            out["dynamics_margin"] = out["dynamics_r2"] - out["dynamics_baseline_r2"]
+            rows = latent[confidence > 0]
+            spread = Spread.of(rows)
+            out["s_rank"], out["s_std"] = spread.effective_rank, spread.std
+            out["s_isoscore"] = spread.isoscore
+            out["s_sigreg"] = sigreg_ratio(rows)
             pose = self.model.pose
-            if pose is not None:
+            if "physical" in record and pose is not None:
+                predictions = record["physical"].predictions
+                out |= physical_readings(predictions, latent, confidence)
+                out["dynamics_margin"] = out["dynamics_r2"] - out["dynamics_baseline_r2"]
                 errors = keypoint_errors(
-                    predictions,
-                    latent,
-                    pose.decoders,
-                    clips.keypoints,
-                    clips.keypoint_weights,
-                    self.groups.to(latent.device),
+                    predictions, latent, pose.decoder, clips.keypoints, clips.keypoint_weights
                 )
                 out |= errors
                 baselines = [
@@ -451,13 +457,6 @@ class Monitor:
                 ]
                 if baselines and not math.isnan(errors["keypoint_error_model"]):
                     out["keypoint_margin"] = min(baselines) - errors["keypoint_error_model"]
-            present = confidence > 0
-            for index, name in enumerate(PARTS):
-                rows = latent[:, :, index][present[:, :, index]]
-                spread = Spread.of(rows)
-                out[f"s_rank_{name}"], out[f"s_std_{name}"] = spread.effective_rank, spread.std
-                out[f"s_isoscore_{name}"] = spread.isoscore
-                out[f"s_sigreg_{name}"] = sigreg_ratio(rows)
         if "predicted" in record:
             predicted, target = record["predicted"].detach(), record["target"].detach()
             names = list(self.model.text.centering.languages)
@@ -495,12 +494,12 @@ class Monitor:
             1 - members
         )
         target = functional.layer_norm(
-            pose.targets(clips.pose_tokens).float(), (physical.readout.head.out_features,)
+            pose.target(clips.pose_tokens).float(), (physical.readout.target_dim,)
         )
         errors = []
         for boxes in (members * masked, shifted * masked):
             reading = physical.readout(tokens, boxes).float()
-            weight = boxes.sum((-1, -2)) > 0
+            weight = boxes.sum((-1, -2, -3)) > 0
             errors.append((reading - target).abs().mean(-1)[weight].mean())
         both = (
             bool(torch.isfinite(errors[0]))
@@ -516,7 +515,7 @@ class Monitor:
         latents, keypoints, weights, features = [], [], [], []
         for batch in self.probe:
             clips = batch.to(self.device)
-            latents.append(pose.targets(clips.pose_tokens).float().cpu())
+            latents.append(pose.target(clips.pose_tokens).float().cpu())
             keypoints.append(clips.keypoints.float().cpu())
             weights.append(clips.keypoint_weights.float().cpu())
             tokens = self.model.video.backbone.tokens(clips.frames).float()
@@ -527,44 +526,42 @@ class Monitor:
         return torch.cat(latents), torch.cat(keypoints), torch.cat(weights), torch.cat(features)
 
     def _probe_readings(self, step: int) -> dict[str, float]:
-        """Isotropy, content and speed of the pose target on the fixed probe batch."""
+        """Isotropy, kinematic content per articulator and speed of the pose target on the fixed
+        probe batch. The R² of each articulator is compared with its best so far: a target
+        trained from scratch must gain kinematics, and must not lose what it has gained."""
         found = self._probe_latent()
         if found is None:
             return {}
         latent, keypoints, weights, features = found
         out: dict[str, float] = {}
-        first = self.references.latent is None
-        if first:
+        if self.references.latent is None:
             self.references.latent = latent
             self.references.features = features
-            pose_rows = latent.flatten(2).flatten(0, 1)
+            pose_rows = keypoints.flatten(2).flatten(0, 1)
             feature_rows = features.flatten(0, 1)
             everything = torch.ones(len(pose_rows), dtype=torch.bool)
             explained = self._ridge_predict(pose_rows, feature_rows, everything)
             self.references.residual = feature_rows - explained
         reference = self.references.latent
         target = pose_target_measures(latent, keypoints, weights)
-        for index, name in enumerate(PARTS):
-            out[f"probe_isoscore_{name}"] = target["isoscore"][name]
-            out[f"probe_rank_{name}"] = target["rank"][name]
-            out[f"probe_sigreg_{name}"] = target["sigreg"][name]
-            if reference is not None:
-                rows = latent[:, :, index].flatten(0, 1)
-                out[f"cka_{name}"] = linear_cka(rows, reference[:, :, index].flatten(0, 1))
-            out[f"pose_r2_position_{name}"] = target["r2_position"][name]
-            out[f"pose_r2_velocity_{name}"] = target["r2_velocity"][name]
+        out["probe_isoscore"] = target["isoscore"]
+        out["probe_rank"] = target["rank"]
+        out["probe_sigreg"] = target["sigreg"]
+        out["cka_s"] = linear_cka(latent.flatten(0, 1), reference.flatten(0, 1))
+        for name in PARTS:
             for kind in ("position", "velocity"):
                 key = f"pose_r2_{kind}_{name}"
-                start = self.references.values.get(key)
-                if start is None:
-                    self.references.values[key] = out[key]
-                else:
-                    out[f"pose_r2_drop_{kind}_{name}"] = start - out[key]
+                value = out[key] = target[f"r2_{kind}_{name}"]
+                best = self.references.values.get(f"best_{key}")
+                if best is not None:
+                    out[f"pose_r2_drop_{kind}_{name}"] = best - value
+                if not math.isnan(value) and (best is None or value > best):
+                    self.references.values[f"best_{key}"] = value
         return out
 
     def _encoder_drift(self) -> float | None:
-        """R² with which the adapted encoder predicts the part of its original features the pose
-        does not explain (§4.13.3). < 0.5: the encoder is flattening onto the pose."""
+        """R² with which the adapted encoder predicts the part of its original features the
+        keypoints do not explain (§4.13.3). < 0.5: the encoder is flattening onto the pose."""
         found = self._probe_latent()
         residual = self.references.residual
         if found is None or residual is None:
@@ -652,8 +649,81 @@ class Monitor:
         quarter = max(1, len(values) // 4)
         return sum(values[-quarter:]) / quarter < sum(values[:quarter]) / quarter
 
+    def _pose_criteria(self, add: Callable[[str, bool, str], None]) -> None:
+        """F1, the pose: the target learnt, spread and kinematic (posa §6)."""
+        s = self.settings
+        add("L_anchor falling", self._falling("term_anchor"), "first against last quarter")
+        add("SIGReg_posa falling", self._falling("term_sigreg_posa"), "first against last quarter")
+        rank, start = self._latest("s_rank"), self.references.values.get("s_rank", math.nan)
+        add(
+            "rank of s > 0.5 x step 0", rank > s.collapse_ratio * start, f"{rank:.1f} / {start:.1f}"
+        )
+        iso = self._latest("probe_isoscore")
+        add(f"IsoScore of s >= {s.isoscore_min}", iso >= s.isoscore_min, f"{iso:.3f}")
+        for part in ("left", "right"):
+            r2 = self._latest(f"pose_r2_position_{part}")
+            add(
+                f"position R² of the {part} hand from s >= {s.pose_r2_min}",
+                r2 >= s.pose_r2_min,
+                f"{r2:.3f}",
+            )
+
+    def _semantic_criteria(self, add: Callable[[str, bool, str], None]) -> None:
+        """F1, the semantic level on the encoder as released."""
+        s = self.settings
+        gamma = self._latest("gamma_sem")
+        add("gamma_sem > 0.3", gamma > s.gamma_min, f"{gamma:.3f}")
+        add(
+            "SIGReg_sem falling",
+            self._falling("term_sigreg_sem") or "term_sigreg_sem" not in self.history,
+            "",
+        )
+        decision, chance = self._latest("decision"), self._latest("chance")
+        add(
+            "R@1 held-out > 5 x chance",
+            decision > s.chance_multiple * chance,
+            f"{decision:.4f} vs chance {chance:.4f}",
+        )
+        drop = self._latest("noise_drop")
+        add("noise test passed", drop >= s.noise_drop_min, f"R@1 drop {drop:.2f}")
+        cosine = self._latest("query_cosine")
+        add("queries not collapsed", not cosine > s.query_cosine_max, f"{cosine:.3f}")
+
+    def _progress_criteria(
+        self, add: Callable[[str, bool, str], None], extrapolated_r1: float | None
+    ) -> None:
+        """F3, after the LoRA entered: retrieval on track, order, hubness, no conflict."""
+        s = self.settings
+        decision = self._latest("decision")
+        if s.ridge_baseline_r1 is not None:
+            add(
+                "R@1 > ridge baseline",
+                decision > s.ridge_baseline_r1,
+                f"{decision:.4f} vs {s.ridge_baseline_r1:.4f}",
+            )
+        order = self._latest("order_cosine")
+        add("omega < 0.95", not order > s.order_max, f"{order:.3f}")
+        hub, start = (
+            self._latest("hubness"),
+            self.references.values.get("hubness", float("nan")),
+        )
+        add("hubness stable", not hub > s.hubness_growth_max * start, f"{hub:.2f} vs {start:.2f}")
+        conflict = any(
+            self.streaks[k] >= s.conflict_readings
+            for k in ("video_cos_physical_semantic", "y_cos_sem_sigreg")
+        )
+        add("no stable gradient conflict", not conflict, "")
+        if extrapolated_r1 is not None:
+            from ..evaluation.gate import GatePolicy  # noqa: PLC0415
+
+            add(
+                "extrapolated R@1 compatible with X",
+                GatePolicy().on_track(100 * extrapolated_r1),
+                f"{100 * extrapolated_r1:.1f} (held-out channel, proxy of OpenASL)",
+            )
+
     def stop_point(self, name: str, step: int, extrapolated_r1: float | None = None) -> StopReport:
-        """The criteria of F1, F2 or F3 (§4.13.5) on the latest readings."""
+        """The criteria of F1, F2 or F3 (gerarchia §7) on the latest readings."""
         s = self.settings
         criteria: dict[str, tuple[bool, str]] = {}
 
@@ -661,88 +731,29 @@ class Monitor:
             criteria[label] = (bool(ok), detail)
 
         if name == "F1":
-            add(
-                "E_fis falling",
-                self._falling("term_e_fis"),
-                "first against last quarter of the stage",
-            )
+            if self.model.pose is not None:
+                self._pose_criteria(add)
+            self._semantic_criteria(add)
+        elif name == "F2":
+            add("E_fis falling", self._falling("term_e_fis"), "first against last quarter")
             r2 = self._latest("r2_visible")
-            add("visible read-out R² > 0.9", r2 > s.visible_r2_min, f"{r2:.3f}")
+            add("R² of mostly visible steps > 0.9", r2 > s.visible_r2_min, f"{r2:.3f}")
             margin = self._latest("dynamics_margin")
             add("dynamics beats the baseline", margin > 0, f"margin {margin:.3f}")
-            for part in PARTS:
-                rank, start = (
-                    self._latest(f"s_rank_{part}"),
-                    self.references.values.get(f"s_rank_{part}", float("nan")),
-                )
-                add(
-                    f"rank of s ({part}) > 0.5 x step 0",
-                    rank > s.collapse_ratio * start,
-                    f"{rank:.1f} / {start:.1f}",
-                )
-                iso = self._latest(f"probe_isoscore_{part}")
-                add(
-                    f"IsoScore of s ({part}) >= {s.isoscore_min}",
-                    iso >= s.isoscore_min,
-                    f"{iso:.3f}",
-                )
-                for kind in ("position", "velocity"):
-                    drop = self._latest(f"pose_r2_drop_{kind}_{part}")
-                    add(
-                        f"{kind} R² of s ({part}) within {s.pose_r2_drop_max}",
-                        not drop > s.pose_r2_drop_max,
-                        f"drop {drop:.3f}",
-                    )
-        elif name == "F2":
-            gamma = self._latest("gamma_sem")
-            add("gamma_sem > 0.3", gamma > s.gamma_min, f"{gamma:.3f}")
-            add(
-                "SIGReg_sem falling",
-                self._falling("term_sigreg_sem") or "term_sigreg_sem" not in self.history,
-                "",
-            )
-            decision, chance = self._latest("decision"), self._latest("chance")
-            add(
-                "R@1 held-out > 5 x chance",
-                decision > s.chance_multiple * chance,
-                f"{decision:.4f} vs chance {chance:.4f}",
-            )
-            drop = self._latest("noise_drop")
-            add("noise test passed", drop >= s.noise_drop_min, f"R@1 drop {drop:.2f}")
-            cosine = self._latest("query_cosine")
-            add("queries not collapsed", not cosine > s.query_cosine_max, f"{cosine:.3f}")
-            conflict = any(
-                self.streaks[k] >= s.conflict_readings
-                for k in ("video_cos_physical_semantic", "y_cos_sem_sigreg")
-            )
-            add("no stable gradient conflict", not conflict, "")
+            leak = self._latest("leak_change")
+            add("no leak", not leak > s.leak_tolerance, f"{leak:.2e}")
         elif name == "F3":
-            decision = self._latest("decision")
-            if s.ridge_baseline_r1 is not None:
+            if self.model.pose is not None:
+                add("E_fis falling", self._falling("term_e_fis"), "first against last quarter")
+                lora = self._latest("lora_ratio_max")
                 add(
-                    "R@1 > ridge baseline",
-                    decision > s.ridge_baseline_r1,
-                    f"{decision:.4f} vs {s.ridge_baseline_r1:.4f}",
+                    f"no LoRA moves its layer by more than {s.lora_ratio_max:.0%}",
+                    not lora > s.lora_ratio_max,
+                    f"{lora:.3f}",
                 )
-            order = self._latest("order_cosine")
-            add("omega < 0.95", not order > s.order_max, f"{order:.3f}")
-            hub, start = (
-                self._latest("hubness"),
-                self.references.values.get("hubness", float("nan")),
-            )
-            add(
-                "hubness stable",
-                not hub > s.hubness_growth_max * start,
-                f"{hub:.2f} vs {start:.2f}",
-            )
-            if extrapolated_r1 is not None:
-                from ..evaluation.gate import GatePolicy  # noqa: PLC0415
-
-                add(
-                    "extrapolated R@1 compatible with X",
-                    GatePolicy().on_track(100 * extrapolated_r1),
-                    f"{100 * extrapolated_r1:.1f} (held-out channel, proxy of OpenASL)",
-                )
+                drift = self._latest("encoder_drift_r2")
+                add(f"encoder drift R² >= {s.drift_min}", not drift < s.drift_min, f"{drift:.3f}")
+            self._progress_criteria(add, extrapolated_r1)
         report = StopReport(name, step, criteria)
         self.log.write(
             "stop",

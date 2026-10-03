@@ -1,103 +1,60 @@
-"""The learning-rate schedule and the curriculum of stages (§4.10).
+"""The curriculum of stages: which levels run and which parameters train (gerarchia §6.1).
 
-``LearningRateSchedule`` is V-JEPA 2's: linear warm-up, constant phase, linear cooldown to 0.
-The cooldown starts where the constant phase ends: at the end of the planned steps, or earlier
-from the best checkpoint when early stopping ends the constant phase. ``CosineSchedule`` is the
-pose encoder's final layer's own: linear warm-up, then a cosine to 0 well before the end, after
-which the layer is fixed (FreezeOut's per-layer annealing; DINO's warm-up and cosine).
+The trainable parameters fall in five families; a stage runs some levels and trains some
+families. Stages follow the epochs:
 
-``Curriculum`` decides at every step which passes run and which parameters train:
+    P    epochs 1 .. pose_epochs      pose + semantic        pose, semantic_new
+    F0   the next heads_epochs        + physical             + physical_new (fusion, read-out)
+    F    to the end                   every level            + physical_lora, video_lora
 
-    1a   physical pass    new physical modules only (fusion, head, D_pose, the pose encoder's
-                          final layer); every LoRA frozen
-    1    physical pass    the whole physical level: E_fis + L_anchor + SIGReg_posa
-    2a   semantic pass    new semantic modules only (semantic predictor, text head)
-    2    both passes      everything
-
-Without the physical level (ESP-2) stages 1a and 1 do not exist and 2a starts at step 0.
-Freezing is done with ``requires_grad``, so a frozen part costs no backward at all: in 2a the
-backward stops before the video encoder.
+Without the physical level (ESP-2) there is one stage, S, where only the semantic level runs
+and trains: the encoder then has no LoRA, since only the physical level changes it, unless the
+«global» ablation lets the semantic level train it. Freezing is
+done with ``requires_grad``, so a frozen part costs no backward. ``entries`` says where each
+family enters training, which is where its learning rate starts its warm-up (``schedules``).
 """
 
-import math
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Final
 
 from torch import nn
 
 from signworld.models.worldsign.lora import adapter_parameters
 from signworld.models.worldsign.model import WorldSign
 
+from .config import StageSettings
 
-@dataclass(frozen=True, slots=True)
-class LearningRateSchedule:
-    warmup_steps: int
-    cooldown_steps: int
-
-    def factor(self, step: int, cooldown_start: int) -> float:
-        """Multiplier of every group's learning rate at ``step`` (0-based)."""
-        if step >= cooldown_start:
-            done = step - cooldown_start + 1
-            return max(0.0, 1.0 - done / max(self.cooldown_steps, 1))
-        if step < self.warmup_steps:
-            return (step + 1) / self.warmup_steps
-        return 1.0
-
-
-@dataclass(frozen=True, slots=True)
-class CosineSchedule:
-    warmup_steps: int
-    end_step: int
-    """The step where the factor reaches 0 and stays."""
-
-    def factor(self, step: int) -> float:
-        if step < self.warmup_steps:
-            return (step + 1) / self.warmup_steps
-        if step >= self.end_step:
-            return 0.0
-        progress = (step - self.warmup_steps) / max(self.end_step - self.warmup_steps, 1)
-        return 0.5 * (1.0 + math.cos(math.pi * progress))
-
-
-FAMILIES = (
-    "video_lora",
-    "physical_lora",
-    "physical_new",
-    "pose_target",
-    "pose_final",
-    "pose_decoders",
-    "semantic_new",
-)
+POSE: Final = "pose"
+SEMANTIC_NEW: Final = "semantic_new"
+PHYSICAL_NEW: Final = "physical_new"
+PHYSICAL_LORA: Final = "physical_lora"
+VIDEO_LORA: Final = "video_lora"
+FAMILIES: Final = (POSE, SEMANTIC_NEW, PHYSICAL_NEW, PHYSICAL_LORA, VIDEO_LORA)
 
 
 def families(model: WorldSign) -> dict[str, list[nn.Parameter]]:
     """The model's trainable parameters, by the part of the curriculum they belong to."""
     video = model.video
-    backbone = video.backbone
-    lora = adapter_parameters(backbone.encoder)
+    encoder = video.backbone.encoder
+    lora = adapter_parameters(encoder)
     lora_ids = {id(p) for p in lora}
     norms = [
         p
-        for m in backbone.encoder.modules()
+        for m in encoder.modules()
         if isinstance(m, nn.LayerNorm)
         for p in m.parameters()
         if p.requires_grad and id(p) not in lora_ids
     ]
     found: dict[str, list[nn.Parameter]] = {name: [] for name in FAMILIES}
-    found["video_lora"] = lora + norms
+    found[VIDEO_LORA] = lora + norms
     physical = video.physical_predictor
     if physical is not None:
-        found["physical_lora"] = adapter_parameters(physical.predictor)
-        found["physical_new"] = [*physical.fusion.parameters(), *physical.readout.parameters()]
+        found[PHYSICAL_LORA] = adapter_parameters(physical.predictor)
+        found[PHYSICAL_NEW] = [*physical.fusion.parameters(), *physical.readout.parameters()]
     if model.pose is not None:
-        final = model.pose.encoder.final
-        final_ids = set() if final is None else {id(p) for p in final.parameters()}
-        found["pose_target"] = [
-            p for p in model.pose.encoder.parameters() if id(p) not in final_ids
-        ]
-        found["pose_final"] = [] if final is None else list(final.parameters())
-        found["pose_decoders"] = list(model.pose.decoders.parameters())
-    found["semantic_new"] = [
+        found[POSE] = list(model.pose.parameters())
+    found[SEMANTIC_NEW] = [
         *video.semantic_predictor.parameters(),
         *model.text.parameters(),
         *model.objective.parameters(),
@@ -108,49 +65,58 @@ def families(model: WorldSign) -> dict[str, list[nn.Parameter]]:
 @dataclass(frozen=True, slots=True)
 class Stage:
     name: str
+    pose: bool
     physical: bool
     semantic: bool
     trains: frozenset[str]
 
 
-STAGES = {
-    "1a": Stage("1a", True, False, frozenset({"physical_new", "pose_final", "pose_decoders"})),
-    "1": Stage(
-        "1",
-        True,
-        False,
-        frozenset(
-            {
-                "video_lora",
-                "physical_lora",
-                "physical_new",
-                "pose_target",
-                "pose_final",
-                "pose_decoders",
-            }
-        ),
+STAGES: Final = {
+    "P": Stage(
+        "P", pose=True, physical=False, semantic=True, trains=frozenset({POSE, SEMANTIC_NEW})
     ),
-    "2a": Stage("2a", False, True, frozenset({"semantic_new"})),
-    "2": Stage("2", True, True, frozenset(FAMILIES)),
+    "F0": Stage(
+        "F0",
+        pose=True,
+        physical=True,
+        semantic=True,
+        trains=frozenset({POSE, SEMANTIC_NEW, PHYSICAL_NEW}),
+    ),
+    "F": Stage("F", pose=True, physical=True, semantic=True, trains=frozenset(FAMILIES)),
+    "S": Stage(
+        "S", pose=False, physical=False, semantic=True, trains=frozenset({SEMANTIC_NEW, VIDEO_LORA})
+    ),
 }
 
 
 class Curriculum:
-    """Stage boundaries from the fractions of the run, and the switch between stages."""
+    """Stage boundaries from the epochs, and the switch between stages."""
 
-    def __init__(self, fractions: dict[str, float], total_steps: int, physical_level: bool) -> None:
-        order = ["1a", "1", "2a"] if physical_level else ["2a"]
-        self.bounds: list[tuple[int, Stage]] = []
-        start = 0.0
-        for name in order:
-            self.bounds.append((round(start * total_steps), STAGES[name]))
-            start += fractions[name]
-        self.bounds.append((round(start * total_steps), STAGES["2"]))
+    def __init__(self, settings: StageSettings, steps_per_epoch: int, physical_level: bool) -> None:
+        if steps_per_epoch < 1:
+            raise ValueError("an epoch needs at least one step")
+        self.steps_per_epoch = steps_per_epoch
+        if physical_level:
+            heads = settings.pose_epochs * steps_per_epoch
+            full = heads + settings.heads_epochs * steps_per_epoch
+            self.bounds = [(0, STAGES["P"]), (heads, STAGES["F0"]), (full, STAGES["F"])]
+        else:
+            self.bounds = [(0, STAGES["S"])]
 
     @property
     def last(self) -> Stage:
-        """Stage 2: everything trains. The cooldown always runs in it."""
+        """The stage that lasts to the end: F, or S without the physical level."""
         return self.bounds[-1][1]
+
+    @property
+    def last_start(self) -> int:
+        """The step where the last stage begins: the best checkpoint and the patience count
+        from there."""
+        return self.bounds[-1][0]
+
+    def start_of(self, name: str) -> int | None:
+        """The step where stage ``name`` begins; None when the run has no such stage."""
+        return next((start for start, stage in self.bounds if stage.name == name), None)
 
     def stage_at(self, step: int) -> Stage:
         current = self.bounds[0][1]
@@ -158,6 +124,15 @@ class Curriculum:
             if step >= start:
                 current = stage
         return current
+
+    @property
+    def entries(self) -> dict[str, int]:
+        """The step where every family some stage trains enters training."""
+        found: dict[str, int] = {}
+        for start, stage in self.bounds:
+            for name in sorted(stage.trains):
+                found.setdefault(name, start)
+        return found
 
     @staticmethod
     def apply(stage: Stage, trainable: dict[str, list[nn.Parameter]]) -> None:

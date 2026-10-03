@@ -155,9 +155,9 @@ def run(config: WorldSignConfig, output: Path, collective: Distributed) -> Train
 
 
 def _checksum_files(config: WorldSignConfig) -> dict[str, Path]:
+    """The pre-trained files a run reads: V-JEPA 2.1 and the caption embeddings (the pose
+    encoder is trained from scratch)."""
     files = {"encoder": config.encoder.checkpoint}
-    if config.physical.enabled and config.pose_encoder.checkpoint is not None:
-        files["pose_encoder"] = config.pose_encoder.checkpoint
     if config.data.embeddings is not None:
         files["embeddings"] = config.data.embeddings / "embeddings.npy"
     return files

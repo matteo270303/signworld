@@ -1,14 +1,14 @@
 """The physical predictor: V-JEPA 2.1's released predictor, reused (§4.4.5, §4.5.2).
 
 From the visible tokens of a masked clip it predicts a token for every visible and masked
-position (``predict_all``). The read-out averages them per step and articulator box and maps
-them to the pose latent twice, as V-JEPA 2.1 keeps its two losses apart: once over the masked
-tokens in the box (``L_pred``), once over the visible ones (``L_ctx``). Changes to the released
-module:
+position (``predict_all``). The read-out averages the predicted tokens, visible and masked,
+inside each articulator box of a step and maps the four boxes together to the pose target
+``ŝ_t`` (gerarchia §4); the counts of masked and visible tokens in the boxes weigh the step in
+``E_fis`` as V-JEPA 2.1 weighs its two losses. Changes to the released module:
 
 * ``predictor_embed`` gives way to the multi-level fusion (``fusion``);
 * ``predictor_proj`` and ``predictor_proj_context``, which project to the ViT-G teacher's
-  1,664 dimensions, give way to the read-out head towards the pose latent;
+  1,664 dimensions, give way to the read-out head towards the pose target;
 * LoRA on the 12 blocks; the rest stays frozen;
 * the RoPE grid is set to the clip's: the released module fixes it at construction (24 x 24
   patches for 384²) and does not interpolate, so at 256² every token would be decoded to the
@@ -28,23 +28,33 @@ from signworld.experiment.train.config import LoRASettings
 from . import lora
 from .fusion import _Fusion
 from .masking import Mask, TokenGrid, TokenRoles
-from .readout import ArticulatorReadout, box_sum
+from .readout import StepReadout, box_sum
 
 
 @dataclass(frozen=True, slots=True)
 class PhysicalPrediction:
-    """What one mask gives the physical energy, per step and articulator box."""
+    """What one mask gives the physical energy, per step."""
 
-    masked: Tensor
-    """(batch, steps, parts, C) ŝ read from the predicted masked tokens in the box."""
-    visible: Tensor
-    """(batch, steps, parts, C) ŝ read from the predicted visible tokens in the box."""
+    state: Tensor
+    """(batch, steps, C) ŝ read from every predicted token in the step's boxes."""
     masked_count: Tensor
-    """(batch, steps, parts) masked tokens in the box."""
+    """(batch, steps) masked tokens in the step's boxes, summed over the boxes."""
     visible_count: Tensor
-    """(batch, steps, parts) visible tokens in the box."""
+    """(batch, steps) visible tokens in the step's boxes, summed over the boxes."""
     visible_weight: Tensor
-    """(batch, steps, parts) sum of the visible tokens' weights in the box (1, or ``1 / √d``)."""
+    """(batch, steps) sum of those visible tokens' weights (1, or ``1 / √d``)."""
+    box_tokens: Tensor
+    """(batch, steps, parts) tokens in each box; 0 where the articulator is not visible."""
+
+    @property
+    def coverage(self) -> Tensor:
+        """(batch, steps) share of the boxes' tokens that the mask hides."""
+        total = self.masked_count + self.visible_count
+        return self.masked_count / total.clamp_min(1.0)
+
+    def weights(self, confidence: Tensor, context_lambda: float) -> Tensor:
+        """(batch, steps) ``c_t · (n^m_t + λ · w^v_t)``: the step's weight in ``E_fis``."""
+        return confidence * (self.masked_count + context_lambda * self.visible_weight)
 
 
 class PhysicalPredictor(nn.Module):
@@ -52,7 +62,7 @@ class PhysicalPredictor(nn.Module):
         self,
         predictor: Any,
         fusion: _Fusion,
-        readout: ArticulatorReadout,
+        readout: StepReadout,
         adapters: LoRASettings,
         grid: TokenGrid,
         *,
@@ -104,12 +114,13 @@ class PhysicalPredictor(nn.Module):
             role.view(-1, g.steps, g.rows, g.columns)
             for role in (roles.masked, roles.visible, roles.distance)
         )
+        predicted = members * (masked + visible)[:, :, None]  # tokens in either list
         return PhysicalPrediction(
-            masked=self.readout(tokens, members * masked[:, :, None]),
-            visible=self.readout(tokens, members * visible[:, :, None]),
-            masked_count=box_sum(masked, members),
-            visible_count=box_sum(visible, members),
-            visible_weight=box_sum(distance, members),
+            state=self.readout(tokens, predicted),
+            masked_count=box_sum(masked, members).sum(dim=-1),
+            visible_count=box_sum(visible, members).sum(dim=-1),
+            visible_weight=box_sum(distance, members).sum(dim=-1),
+            box_tokens=predicted.sum(dim=(-1, -2)),
         )
 
 

@@ -1,4 +1,4 @@
-"""Trainable parameters per component, against the budget of §4.8 (22 M, assertion P3)."""
+"""Trainable parameters per component, against the budget of §4.8 (30 M, assertion P3)."""
 
 from dataclasses import dataclass
 
@@ -60,9 +60,10 @@ class ModelBudget:
     """The whole model: the video branch plus the pose and text branches and the objective."""
 
     video: VideoBudget
-    pose_lora: int
-    pose_final_layer: int
-    keypoint_decoders: int
+    pose_encoder: int
+    """The pose encoder, trained from scratch (posa §3)."""
+    keypoint_decoder: int
+    """The anchor's decoder."""
     text_head: int
     objective: int
     """InfoNCE's temperature in arm C, else 0."""
@@ -71,9 +72,8 @@ class ModelBudget:
     def total(self) -> int:
         return (
             self.video.total
-            + self.pose_lora
-            + self.pose_final_layer
-            + self.keypoint_decoders
+            + self.pose_encoder
+            + self.keypoint_decoder
             + self.text_head
             + self.objective
         )
@@ -81,12 +81,10 @@ class ModelBudget:
     @classmethod
     def of(cls, model: WorldSign) -> "ModelBudget":
         pose = model.pose
-        final = pose.encoder.final if pose is not None else None
         return cls(
             video=VideoBudget.of(model.video),
-            pose_lora=_count(adapter_parameters(pose.encoder)) if pose else 0,
-            pose_final_layer=_count(list(final.parameters())) if final is not None else 0,
-            keypoint_decoders=_count(list(pose.decoders.parameters())) if pose else 0,
+            pose_encoder=_count(list(pose.encoder.parameters())) if pose else 0,
+            keypoint_decoder=_count(list(pose.decoder.parameters())) if pose else 0,
             text_head=_count(list(model.text.parameters())),
             objective=_count(list(model.objective.parameters())),
         )

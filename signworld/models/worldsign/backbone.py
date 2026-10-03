@@ -3,7 +3,8 @@
 It serves both passes. The physical pass encodes only the visible tokens of a mask and needs
 the raw outputs of the hierarchical blocks (6/12/18/24), read with forward hooks so Meta's
 forward runs unchanged. The semantic pass encodes the whole clip and needs the last block's
-normalised output, which is what the encoder returns.
+normalised output, which is what the encoder returns. An encoder that no level trains (ESP-2,
+where the semantic level reads it without gradient) gets no LoRA and keeps its norms frozen.
 """
 
 from collections.abc import Sequence
@@ -18,7 +19,9 @@ from . import lora
 
 
 class VideoBackbone(nn.Module):
-    def __init__(self, encoder: nn.Module, settings: EncoderSettings) -> None:
+    def __init__(
+        self, encoder: nn.Module, settings: EncoderSettings, *, adapted: bool = True
+    ) -> None:
         super().__init__()
         # Meta's module is untyped and carries plain attributes (blocks, norms_block, ...).
         released: Any = encoder.requires_grad_(False)
@@ -30,6 +33,10 @@ class VideoBackbone(nn.Module):
         if levels != hierarchical:
             raise ValueError(f"levels {levels} differ from the encoder's own {hierarchical}")
         self.levels = levels
+        self.adapted = adapted
+        self.adapters: list[Any] = []
+        if not adapted:
+            return
         self.adapters = lora.inject(
             self._blocks(), settings.lora.targets, settings.lora.rank, settings.lora.alpha
         )

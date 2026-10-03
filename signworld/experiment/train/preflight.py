@@ -8,7 +8,7 @@ the trainable state and restores it.
 P7 compares the masks with V-JEPA's own generator (``src/masks/multiseq_multiblock3d``) on the
 same grid: on 32 x 16 x 16 it hides 61 % of the tokens with the short masks and 81 % with the
 long ones (30/9). The project document's "≈ 90 %" is V-JEPA's paper figure, which its code
-does not produce.
+does not produce. P17 checks that the levels are trained apart (gerarchia §3).
 """
 
 import hashlib
@@ -31,19 +31,20 @@ from signworld.data.corpus.manifest import read_manifest
 from signworld.data.pose.tokens import JOINTS, STEPS, TOKEN_CHANNELS
 from signworld.data.pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER
 from signworld.experiment.collaudo.contamination import contamination_report
+from signworld.loss.worldsign import POSE_TERMS
 from signworld.models.encoders.video_encoders import PATCH, TUBELET
 from signworld.models.worldsign.masking import MultiBlockMasks, TokenGrid
 from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
 
 from .budget import ModelBudget
 from .config import MaskSpec, WorldSignConfig
-from .curriculum import families
+from .curriculum import POSE, VIDEO_LORA, families
 from .distributed import SINGLE, Distributed
 
 logger = logging.getLogger(__name__)
 
-TRAINABLE_CEILING: Final = 22_000_000
-"""§3.4: the ceiling of trainable parameters."""
+TRAINABLE_CEILING: Final = 30_000_000
+"""§3.4 and posa §3: the ceiling of trainable parameters, raised to 30 M for the pose encoder."""
 EFFECTIVE_BATCH: Final = 128
 """§4.14: the one effective batch of every run."""
 V_JEPA_SPECS: Final = (
@@ -124,7 +125,7 @@ def p2_contamination(
 
 
 def p3_budget(model: WorldSign) -> Assertion:
-    """Every trainable parameter is in the budget of §4.8, and the total is under 22 M."""
+    """Every trainable parameter is in the budget of §4.8, and the total is under 30 M."""
     counted = ModelBudget.of(model).total
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     ok = counted == trainable and trainable <= TRAINABLE_CEILING
@@ -249,7 +250,7 @@ def p8_no_flip(augmenter: ClipAugmenter, draws: int = 1000) -> Assertion:
 
 
 def p9_pose_format(batch: WorldSignBatch) -> Assertion:
-    """S-JEPA's input: 32 steps of two frames, 69 joints, x, y and presence per frame."""
+    """The pose encoder's input: 32 steps of two frames, 69 joints, x, y and presence."""
     shape = tuple(batch.pose_tokens.shape[1:])
     presence = batch.pose_tokens[..., 2::3]
     ok = shape == (STEPS, len(JOINTS), TOKEN_CHANNELS) and bool(
@@ -353,7 +354,7 @@ def p14_pose_isolated(
         return Assertion("P14", Status.SKIP, "no physical level (ESP-2)")
     boxes = batch.boxes.clone().requires_grad_(True)
     output = model.video.physical(batch.frames, boxes, batch.box_visible, 0, 1, generator)
-    total = sum(p.masked.float().sum() + p.visible.float().sum() for p in output.predictions)
+    total = sum(p.state.float().sum() for p in output.predictions)
     (gradient,) = torch.autograd.grad(total, boxes, allow_unused=True)  # type: ignore[arg-type]
     leak = gradient is not None and bool(gradient.abs().sum() > 0)
     return _check(
@@ -386,8 +387,42 @@ def p16_batch(config: WorldSignConfig, collective: Distributed, per_gpu: int) ->
         "P16",
         ok,
         f"{per_gpu} clips x {collective.world_size} GPUs = {total}; SIGReg on {total} per "
-        f"modality, up to {total} x 32 per articulator",
+        f"modality, up to {total} x 32 steps per view of the pose",
     )
+
+
+def _reaches(terms: Sequence[Tensor], parameters: Sequence[torch.nn.Parameter]) -> bool:
+    """Whether the sum of ``terms`` has a non-zero gradient on any of ``parameters``."""
+    wanted = [term for term in terms if term.requires_grad]
+    if not wanted or not parameters:
+        return False
+    gradients = torch.autograd.grad(
+        torch.stack(wanted).sum(), list(parameters), retain_graph=True, allow_unused=True
+    )
+    return any(g is not None and bool(g.abs().sum() > 0) for g in gradients)
+
+
+def p17_levels(model: WorldSign, batch: WorldSignBatch, *, bf16: bool = False) -> Assertion:
+    """The levels are trained apart (gerarchia §3): ``E_fis`` gives the pose encoder no
+    gradient, the pose terms give the video branch none, and the semantic terms give the video
+    LoRA none unless the «global» ablation lets them."""
+    clips = batch.take(2)
+    device = clips.frames.device
+    with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
+        terms = model.loss(clips, 0, 1, StepRandomness.at(0, 0)).parts
+    found = families(model)
+    video = [p for p in model.video.parameters() if p.requires_grad]
+    semantic = [v for k, v in terms.items() if k != "e_fis" and k not in POSE_TERMS]
+    problems = []
+    if "e_fis" in terms and _reaches([terms["e_fis"]], found[POSE]):
+        problems.append("E_fis reaches the pose encoder")
+    if _reaches([terms[k] for k in POSE_TERMS if k in terms], video):
+        problems.append("the pose terms reach the video branch")
+    if not model.video.encoder_gradient and _reaches(semantic, found[VIDEO_LORA]):
+        problems.append("the semantic terms reach the video LoRA")
+    for parameter in model.parameters():
+        parameter.grad = None
+    return _check("P17", not problems, "; ".join(problems) or "each level trains its own weights")
 
 
 def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
@@ -409,10 +444,7 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
     generator = torch.Generator().manual_seed(0)
     clip_ids = {c for table in splits.values() for c in table.column("clip_id").to_pylist()}
     files = checksum_files or {}
-    expected = {
-        "encoder": config.encoder.checkpoint_sha256,
-        "pose_encoder": config.pose_encoder.checkpoint_sha256,
-    }
+    expected = {"encoder": config.encoder.checkpoint_sha256}
     checks: list[Callable[[], Assertion]] = [
         lambda: p1_channels(train, held_out, config.data.split_source == "manifest"),
         lambda: p2_contamination(clip_ids, config.data.manifest, config.data.benchmarks),
@@ -434,6 +466,7 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
         lambda: p14_pose_isolated(model, batch, generator),
         lambda: p15_infonce(model),
         lambda: p16_batch(config, collective, len(batch.videos)),
+        lambda: p17_levels(model, batch, bf16=config.training.precision == "bf16"),
     ]
     assertions = []
     for check in checks:

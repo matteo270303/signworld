@@ -22,7 +22,7 @@ from signworld.experiment.train.distributed import SINGLE, Distributed
 from signworld.loss.worldsign import physical_energy_per_clip
 
 from .model import StepRandomness, WorldSign, WorldSignBatch
-from .pose_branch import articulator_confidence
+from .pose_branch import step_confidence
 
 Manipulation = Callable[[WorldSignBatch], WorldSignBatch]
 
@@ -97,8 +97,8 @@ def plausibility(model: WorldSign, batch: WorldSignBatch, masks: int) -> Tensor:
     pose = model.pose
     if pose is None:
         raise RuntimeError("no physical level")
-    latent = pose.targets(batch.pose_tokens)
-    confidence = articulator_confidence(batch.keypoint_weights)
+    latent = pose.target(batch.pose_tokens)
+    confidence = step_confidence(batch.keypoint_weights)
     energies = []
     for draw in range(masks):
         randomness = StepRandomness.at(1234, draw)  # the same masks for intact and manipulated

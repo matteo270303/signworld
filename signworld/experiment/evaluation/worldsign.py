@@ -93,9 +93,7 @@ def _features(
     for batch in batches:
         clips = batch.to(device)
         if model.pose is not None:
-            out["pose"].append(
-                model.pose.targets(clips.pose_tokens).float().mean(1).flatten(1).cpu()
-            )
+            out["pose"].append(model.pose.target(clips.pose_tokens).float().mean(1).cpu())
         tokens = model.video.backbone.tokens(clips.frames).float()
         out["encoder"].append(tokens.mean(1).cpu())
         out["semantic"].append(model.video.semantic_predictor(tokens).float().mean(1).cpu())
@@ -147,11 +145,7 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     if physical:
         t = seen.tensors
         target = pose_target_measures(t["latents"], t["keypoints"], t["weights"])
-        measures |= {
-            f"pose_{kind}_{name}": value
-            for kind, values in target.items()
-            for name, value in values.items()
-        }
+        measures |= {f"pose_{name}": value for name, value in target.items()}
     measures["order_cosine"] = order_cosine(model, batches, device)
     decision = None
     if gate:

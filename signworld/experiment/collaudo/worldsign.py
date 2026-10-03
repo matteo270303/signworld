@@ -43,7 +43,7 @@ def overfit(
     model: WorldSign, batch: WorldSignBatch, steps: int, learning_rate: float = 1e-3
 ) -> OverfitResult:
     """Train every trainable part on ``batch`` alone, with every loss, and read what it learnt."""
-    Curriculum.apply(STAGES["2"], families(model))
+    Curriculum.apply(STAGES["F"], families(model))
     trainable = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable, lr=learning_rate, weight_decay=0.0)
     model.train()

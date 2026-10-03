@@ -1,127 +1,73 @@
-"""The pose side of WorldSign: S-JEPA as the target of the physical level, and the anchor.
+"""The pose side of WorldSign: level 0, the target of the physical level (posa §3-§4).
 
-``PoseEncoder`` is the EMA encoder of the S-JEPA teacher pre-trained in PC5 (§4.4.3): token
-embedding, 8 blocks at d = 256 and the final LayerNorm, pooled per articulator into
-``s_{t,a}`` (C = 256, one per tubelet step). In the reference configuration it stays frozen
-with LoRA r = 4 on every block (q, k and v apart, the attention output, both MLP layers) and
-ends in a trainable linear map per articulator, initialised to the identity: at step 0 the
-target is exactly S-JEPA's. Everything trainable in it runs at the learning rate x0.05. In
-ESP-3 it is frozen and has neither.
+``PoseBranch`` holds the pose encoder ``G_ω``, trained from scratch with the rest of the
+model, the keypoint decoder of the anchor and the views of the invariance term:
 
-``KeypointDecoders`` are the heads ``D_pose^a``, one linear map per articulator from
-``s_{t,a}`` to the (x, y) of its joints; ``anchor_loss`` is ``L_anchor`` (§4.5.3), divided by
-the keypoint variance so that predicting each joint's mean is worth 1 (§4.5.7).
+* ``target`` gives ``s``, (batch, 32, C), one vector per step; the physical level reads it
+  with the gradient stopped;
+* ``view`` gives the second view of ``L_inv``: an in-plane rotation and keypoint noise, the
+  nuisances only (``PoseViews``);
+* ``anchor`` is ``L_anchor``: one linear decoder from ``s_t`` to the (x, y) of the 69 joints,
+  divided by the keypoint variance so that predicting each joint's mean is worth 1.
+
+The invariance and SIGReg terms are the objective's (``loss.worldsign``).
 """
 
-from pathlib import Path
+import math
 
 import torch
 from torch import Tensor, nn
 
-from signworld.data.pose.tokens import JOINT_ARTICULATOR
-from signworld.data.pose.wholebody import ARTICULATOR_INDICES, Articulator
-from signworld.experiment.train.config import PoseEncoderSettings
-from signworld.models.encoders.pose_teachers import TokenEmbedding, pool_articulators, transformer
+from signworld.data.pose.tokens import FRAMES_PER_STEP, JOINTS, STEPS
+from signworld.experiment.train.config import PoseEncoderSettings, PoseViewSettings
 
-from . import lora
+from .pose_encoder import PoseEncoder
 
-PARTS = len(Articulator)
+_VALUES_PER_FRAME = 3
 
 
-class ArticulatorLinear(nn.Module):
-    """One ``C -> C`` linear map per articulator, initialised to the identity."""
+class PoseViews:
+    """A second view of the same signing: in-plane rotation and noise on the present joints.
 
-    def __init__(self, width: int, parts: int = PARTS) -> None:
-        super().__init__()
-        self.weight = nn.Parameter(torch.eye(width).repeat(parts, 1, 1))
-        self.bias = nn.Parameter(torch.zeros(parts, width))
+    The rotation turns about the origin between the shoulders, uniform in
+    ``±rotation_degrees`` per clip; the noise is Gaussian with ``noise`` standard deviation in
+    shoulder units. Missing joints stay missing. Draws come from ``generator`` (on the CPU),
+    so a step's views are reproducible.
+    """
 
-    def forward(self, x: Tensor) -> Tensor:
-        """(..., parts, C) to (..., parts, C)."""
-        mapped: Tensor = torch.einsum("...ac,adc->...ad", x, self.weight) + self.bias
-        return mapped
-
-
-def adapt_blocks(encoder: nn.TransformerEncoder, rank: int, alpha: float) -> list[lora.LoRAWeight]:
-    """LoRA on every block of a PyTorch transformer: q, k, v, attention output, MLP."""
-    adapters: list[lora.LoRAWeight] = []
-    for block in encoder.layers:
-        attention: nn.MultiheadAttention = block.self_attn
-        adapters += [
-            lora.adapt_weight(attention, "in_proj_weight", rank, alpha, splits=3),
-            lora.adapt_weight(attention.out_proj, "weight", rank, alpha),
-            lora.adapt_weight(block.linear1, "weight", rank, alpha),
-            lora.adapt_weight(block.linear2, "weight", rank, alpha),
-        ]
-    return adapters
-
-
-def _load(module: nn.Module, state: dict[str, Tensor], prefix: str) -> None:
-    part = {k.removeprefix(prefix): v for k, v in state.items() if k.startswith(prefix)}
-    module.load_state_dict(part, strict=True)
-
-
-class PoseEncoder(nn.Module):
-    """S-JEPA's EMA encoder, pooled per articulator; adapted unless frozen (ESP-3)."""
-
-    def __init__(
-        self, embed: TokenEmbedding, encoder: nn.TransformerEncoder, settings: PoseEncoderSettings
-    ) -> None:
-        super().__init__()
-        self.embed = embed.requires_grad_(False)
-        self.encoder = encoder.requires_grad_(False)
+    def __init__(self, settings: PoseViewSettings) -> None:
         self.settings = settings
-        self.adapters: list[lora.LoRAWeight] = []
-        self.final: ArticulatorLinear | None = None
-        if settings.trainable:
-            self.adapters = adapt_blocks(encoder, settings.lora_rank, settings.lora_alpha)
-            if settings.final_layer:
-                self.final = ArticulatorLinear(settings.width)
 
-    @classmethod
-    def from_checkpoint(cls, settings: PoseEncoderSettings) -> "PoseEncoder":
-        """The EMA encoder (``target_embed``, ``target_encoder``) of a saved ``SJEPATeacher``."""
-        if settings.checkpoint is None:
-            raise ValueError("pose_encoder.checkpoint is not set")
-        state = torch.load(Path(settings.checkpoint), map_location="cpu", weights_only=True)
-        embed = TokenEmbedding(settings.width)
-        encoder = transformer(settings.width, settings.depth, settings.heads)
-        _load(embed, state, "target_embed.")
-        _load(encoder, state, "target_encoder.")
-        return cls(embed, encoder, settings)
-
-    @property
-    def trainable(self) -> bool:
-        return self.settings.trainable
-
-    def forward(self, tokens: Tensor) -> Tensor:
-        """(batch, 32, 69, 6) pose tokens to ``s``: (batch, 32, 4, C)."""
-        latent: Tensor = pool_articulators(self.encoder(self.embed(tokens)))
-        return latent if self.final is None else self.final(latent)
+    def __call__(self, tokens: Tensor, generator: torch.Generator) -> Tensor:
+        """(batch, steps, joints, 6) tokens to tokens of the same shape."""
+        frames = tokens.reshape(*tokens.shape[:-1], FRAMES_PER_STEP, _VALUES_PER_FRAME)
+        position, present = frames[..., :2], frames[..., 2:]
+        half = math.radians(self.settings.rotation_degrees)
+        angle = (torch.rand(len(tokens), generator=generator) * 2 - 1) * half
+        cos, sin = angle.cos(), angle.sin()
+        rotation = torch.stack([torch.stack([cos, -sin], -1), torch.stack([sin, cos], -1)], -2)
+        rotation = rotation.to(tokens.device, tokens.dtype)
+        noise = torch.randn(position.shape, generator=generator) * self.settings.noise
+        moved = torch.einsum("bij,bsnfj->bsnfi", rotation, position) + noise.to(position)
+        return torch.cat([moved * present, present], dim=-1).reshape(tokens.shape)
 
 
-class KeypointDecoders(nn.Module):
-    """``D_pose^a``: one linear map per articulator from ``s_{t,a}`` to its joints' (x, y)."""
+class KeypointDecoder(nn.Module):
+    """``D``: one linear map from ``s_t`` to the (x, y) of the 69 joints of the step."""
 
     def __init__(self, width: int) -> None:
         super().__init__()
-        self.heads = nn.ModuleList(
-            nn.Linear(width, 2 * len(ARTICULATOR_INDICES[part])) for part in Articulator
-        )
+        self.head = nn.Linear(width, 2 * len(JOINTS))
 
     def forward(self, latent: Tensor) -> Tensor:
-        """(batch, steps, 4, C) to (batch, steps, 69, 2), joints in ``JOINTS`` order."""
-        joints = [
-            head(latent[..., part, :]).unflatten(-1, (-1, 2))
-            for part, head in enumerate(self.heads)
-        ]
-        return torch.cat(joints, dim=-2)
+        """(..., C) to (..., 69, 2), joints in ``JOINTS`` order."""
+        decoded: Tensor = self.head(latent)
+        return decoded.reshape(*decoded.shape[:-1], len(JOINTS), 2)
 
 
-def articulator_confidence(weights: Tensor) -> Tensor:
-    """(batch, steps, 4) ``c̄_{t,a}``: mean joint weight of each articulator at each step."""
-    groups = torch.as_tensor(JOINT_ARTICULATOR, device=weights.device)
-    return torch.stack([weights[..., groups == part].mean(dim=-1) for part in range(PARTS)], -1)
+def step_confidence(weights: Tensor) -> Tensor:
+    """(batch, steps) ``c_t``: the mean presence of the 69 joints at each step."""
+    return weights.float().mean(dim=-1)
 
 
 def keypoint_variance(keypoints: Tensor, weights: Tensor) -> Tensor:
@@ -144,34 +90,39 @@ def anchor_loss(predicted: Tensor, keypoints: Tensor, weights: Tensor, variance:
 
 
 class PoseBranch(nn.Module):
-    """The pose encoder with the anchor's decoders and keypoint scale."""
+    """The pose encoder with the anchor's decoder and keypoint scale, and the views."""
 
     keypoint_variance: Tensor
 
-    def __init__(self, encoder: PoseEncoder, decoders: KeypointDecoders) -> None:
+    def __init__(self, encoder: PoseEncoder, decoder: KeypointDecoder, views: PoseViews) -> None:
         super().__init__()
         self.encoder = encoder
-        self.decoders = decoders
+        self.decoder = decoder
+        self.views = views
         self.register_buffer("keypoint_variance", torch.tensor(float("nan")))
 
     @classmethod
-    def from_settings(cls, settings: PoseEncoderSettings) -> "PoseBranch":
-        return cls(PoseEncoder.from_checkpoint(settings), KeypointDecoders(settings.width))
-
-    @property
-    def trainable(self) -> bool:
-        return self.encoder.trainable
+    def from_settings(cls, settings: PoseEncoderSettings, steps: int = STEPS) -> "PoseBranch":
+        return cls(
+            PoseEncoder(settings, steps),
+            KeypointDecoder(settings.output_dim),
+            PoseViews(settings.views),
+        )
 
     def fit(self, keypoints: Tensor, weights: Tensor) -> None:
         """Set the scale of L_anchor from the training clips (§4.6: nothing from validation)."""
         self.keypoint_variance.copy_(keypoint_variance(keypoints, weights))
 
-    def targets(self, tokens: Tensor) -> Tensor:
-        """(batch, 32, 4, C) ``s_{t,a}``, the target of the physical level."""
+    def target(self, tokens: Tensor) -> Tensor:
+        """(batch, steps, C) ``s``: the clean sequence encoded, the physical level's target."""
         latent: Tensor = self.encoder(tokens)
         return latent
+
+    def view(self, tokens: Tensor, generator: torch.Generator) -> Tensor:
+        """The second view's tokens for ``L_inv``."""
+        return self.views(tokens, generator)
 
     def anchor(self, latent: Tensor, keypoints: Tensor, weights: Tensor) -> Tensor:
         if bool(torch.isnan(self.keypoint_variance)):
             raise RuntimeError("fit the keypoint variance on the training clips first")
-        return anchor_loss(self.decoders(latent), keypoints, weights, self.keypoint_variance)
+        return anchor_loss(self.decoder(latent), keypoints, weights, self.keypoint_variance)

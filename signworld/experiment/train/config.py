@@ -3,8 +3,10 @@
 A run is described by ``parameters/model/worldsign.yaml`` plus optional overlays applied in
 order, each overriding only the keys it names: one per loss arm of ESP-1
 (``parameters/ablation/arm_*.yaml``) and one per ablation on the best arm
-(``esp2_*``, ``esp3_*``, ``esp4_*``). A file may also name a parent with ``inherits``.
-Every value that the project document leaves open is marked ``[Aperto]`` next to it.
+(``esp2_*``, ``esp4_*``, ...). A file may also name a parent with ``inherits``.
+Every value that the project document leaves open is marked ``[Aperto]`` next to it. The pose
+encoder is described in ``docs/worldsign-posa.md``, the stages and learning rates in
+``docs/worldsign-gerarchia.md``.
 """
 
 from pathlib import Path
@@ -80,7 +82,7 @@ class PhysicalSettings(FrozenModel):
     """False for ESP-2: no pose encoder, physical predictor, anchor or pose SIGReg."""
     lora: LoRASettings = Field(default_factory=LoRASettings)
     target_dim: PositiveInt = 256
-    """C, the width of the pose latent s_{t,a} (S-JEPA, PC5)."""
+    """C, the width of the pose target s_t (``pose_encoder.output_dim``)."""
     mask_index: int = 0
     """Only the first mask token of the released predictor is trained (PC6)."""
     context_lambda: float = 0.5
@@ -117,6 +119,9 @@ class SemanticSettings(FrozenModel):
     """[Aperto: PC7] stochastic depth, §4.11."""
     layer_scale: float = 1e-4
     """[Aperto: PC7] initial LayerScale of the residual branches, §4.11."""
+    trains_encoder: bool = False
+    """False: the hierarchy trained level by level, the semantic level reads the video encoder
+    without changing it (``sg(Enc(x))``). True: the «global» ablation, E_sem reaches the LoRA."""
 
     @model_validator(mode="after")
     def _groups(self) -> Self:
@@ -162,35 +167,44 @@ class AugmentationSettings(FrozenModel):
     saturation: float = 0.2
 
 
-class PoseEncoderSettings(FrozenModel):
-    """S-JEPA, pre-trained by us in PC5, as the target of the physical level (§4.4.3)."""
+class PoseViewSettings(FrozenModel):
+    """The second view of the pose's invariance term: nuisances only (posa §4.1)."""
 
-    checkpoint: Path | None = None
-    """The S-JEPA teacher of PC5 (``pose-teachers/sjepa.pt``); its EMA encoder is the target."""
-    checkpoint_sha256: str | None = None
-    """Expected SHA-256 of ``checkpoint`` (P5); None: recorded at the first launch."""
-    width: PositiveInt = 256
-    depth: PositiveInt = 8
+    rotation_degrees: float = Field(default=10.0, ge=0.0)
+    """Half-width of the uniform in-plane rotation about the origin between the shoulders."""
+    noise: float = Field(default=0.01, ge=0.0)
+    """Standard deviation of the Gaussian noise on the present joints, in shoulder units."""
+
+
+class PoseEncoderSettings(FrozenModel):
+    """The pose encoder, trained from scratch with the rest of the model (posa §3-§4).
+
+    worldSign's part-based encoder on the V-JEPA tubelet: one spatial transformer per
+    articulator, their tokens concatenated, a temporal transformer at ``4 x part_width`` and a
+    final LayerNorm and projection to ``output_dim``.
+    """
+
+    part_width: PositiveInt = 128
+    part_depth: PositiveInt = 2
+    """Blocks of each articulator's spatial transformer."""
+    depth: PositiveInt = 2
+    """Blocks of the temporal transformer, at the width of the four parts concatenated (512)."""
     heads: PositiveInt = 8
-    """Shape of the checkpoint's encoder: 8 blocks, d = 256, 8 heads (PC5)."""
-    trainable: bool = True
-    """False for ESP-3: frozen, with neither LoRA nor final layer; SIGReg on the pose is then
-    a diagnostic and the anchor trains only its decoders."""
-    lora_rank: PositiveInt = 4
-    lora_alpha: PositiveFloat = 4.0
-    """alpha / r = 1, as in the video LoRA [Aperto]."""
-    final_layer: bool = True
-    """A trainable linear map per articulator on s_{t,a}, initialised to the identity."""
-    learning_rate_multiplier: float = 0.05
-    """On S-JEPA's LoRA: the encoder of the target moves slowly (VL-JEPA's x0.05)."""
-    final_layer_learning_rate_multiplier: float = 0.5
-    """Peak learning rate of the final layer, relative to the base [Aperto]."""
-    final_layer_warmup: float = 0.10
-    """Linear warm-up of the final layer over this fraction of the run."""
-    final_layer_decay_end: float = 0.5
-    """Cosine decay of the final layer from the end of its warm-up to 0 at this fraction of the
-    run, after which it no longer moves: the target settles, as FreezeOut anneals each layer to
-    zero on its own schedule [Aperto]."""
+    mlp_ratio: PositiveFloat = 4.0
+    dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
+    output_dim: PositiveInt = 256
+    """C, the width of the target s_t, after the final projection."""
+    learning_rate: PositiveFloat = 3e-4
+    """Peak learning rate of the pose family (worldSign's value)."""
+    warmup_fraction: float = Field(default=0.2, gt=0.0, lt=1.0)
+    """Linear warm-up over this share of the run, then a cosine to 0 at its planned end."""
+    views: PoseViewSettings = Field(default_factory=PoseViewSettings)
+
+    @model_validator(mode="after")
+    def _heads(self) -> Self:
+        if self.part_width % self.heads:
+            raise ValueError(f"{self.heads} heads do not split a part width of {self.part_width}")
+        return self
 
 
 class TextSettings(FrozenModel):
@@ -204,12 +218,22 @@ class TextSettings(FrozenModel):
     """Between the two layers of the head: «dropout nelle teste» of §4.11 [Aperto: PC7]."""
 
 
+class StageSettings(FrozenModel):
+    """Epochs of the stages before F, which lasts to the end (gerarchia §6.1)."""
+
+    pose_epochs: PositiveInt = 1
+    """Stage P: the pose and semantic levels alone."""
+    heads_epochs: PositiveInt = 1
+    """Stage F0: plus the new modules of the physical level, every LoRA still frozen."""
+
+
 class TrainingSettings(FrozenModel):
     """Starting values of §4.10, to be calibrated in the dry run (PC7)."""
 
     batch_size: PositiveInt = 128
-    epochs: PositiveInt = 6
-    patience: PositiveInt = 2
+    epochs: PositiveInt = 15
+    patience: PositiveInt = 3
+    """Epochs without a better decision metric before the cooldown, counted in stage F only."""
     learning_rate: PositiveFloat = 2e-4
     """[Aperto: PC7] searched in {1e-4, 2e-4, 5e-4}."""
     betas: tuple[float, float] = (0.9, 0.999)
@@ -218,10 +242,11 @@ class TrainingSettings(FrozenModel):
     """V-JEPA 2.1's value, held constant (its ``final_weight_decay`` equals it)."""
     gradient_clip: PositiveFloat | None = None
     """None: V-JEPA 2.1 does not clip gradients."""
-    warmup_fraction: float = 0.05
-    cooldown_fraction: float = 0.05
-    stages: dict[str, float] = Field(default_factory=lambda: {"1a": 0.01, "1": 0.05, "2a": 0.01})
-    """Curriculum stages as fractions of the steps [Aperto: PC7]."""
+    activation_warmup_epochs: PositiveFloat = 2.0
+    """Linear warm-up of every family but the pose from the step it enters training."""
+    cooldown_fraction: float = Field(default=0.05, gt=0.0, lt=1.0)
+    """V-JEPA 2's cooldown: the learning rate falls linearly to 0 over this share of the run."""
+    stages: StageSettings = Field(default_factory=StageSettings)
     precision: Literal["bf16", "fp32"] = "bf16"
     seed: int = 0
     validation_every: PositiveInt = 4_000
@@ -232,6 +257,15 @@ class TrainingSettings(FrozenModel):
     """DDP's search for parameters a step did not use; the curriculum freezes them instead."""
     preflight_overfit_steps: PositiveInt = 30
     """P13: steps of the single-batch overfit, with SIGReg off, before a run starts."""
+
+    @model_validator(mode="after")
+    def _stages_fit(self) -> Self:
+        before = self.stages.pose_epochs + self.stages.heads_epochs
+        if before >= self.epochs:
+            raise ValueError(
+                f"stages P and F0 take {before} of {self.epochs} epochs: stage F never starts"
+            )
+        return self
 
 
 class DiagnosticsSettings(FrozenModel):
@@ -284,6 +318,9 @@ class DiagnosticsSettings(FrozenModel):
     hubness_growth_max: float = 1.5
     sigreg_growth_max: float = 1.5
     pose_r2_drop_max: float = 0.02
+    """Largest fall of the probe R² of the keypoints from s below its best so far."""
+    pose_r2_min: float = 0.9
+    """Stop F1: position R² of both hands from s on the probe batch [Aperto: PC7]."""
     isoscore_min: float = 0.8
     visible_r2_min: float = 0.9
     excluded_hands_max: float = 0.5
@@ -353,10 +390,10 @@ class WorldSignConfig(FrozenModel):
                 f"the text head gives {self.text.output_dim} dimensions and the semantic "
                 f"predictor {self.semantic.output_dim}: E_sem compares them"
             )
-        if self.physical.enabled and self.physical.target_dim != self.pose_encoder.width:
+        if self.physical.enabled and self.physical.target_dim != self.pose_encoder.output_dim:
             raise ValueError(
                 f"the physical head predicts {self.physical.target_dim} channels and the pose "
-                f"encoder gives {self.pose_encoder.width}"
+                f"encoder gives {self.pose_encoder.output_dim}"
             )
         return self
 

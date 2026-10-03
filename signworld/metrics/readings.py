@@ -133,88 +133,62 @@ class Spread:
 # ------------------------------------------------------------------ physical level
 
 
-def _boxes(prediction: PhysicalPrediction, confidence: Tensor) -> dict[str, Tensor]:
-    """Per box (batch, steps, parts): the two read-outs, their weights and the coverage rho."""
-    tokens = prediction.masked_count + prediction.visible_count
-    return {
-        "masked": prediction.masked,
-        "visible": prediction.visible,
-        "masked_weight": confidence * prediction.masked_count,
-        "visible_weight": confidence * prediction.visible_count,
-        "coverage": prediction.masked_count / tokens.clamp_min(1.0),
-    }
-
-
 def physical_readings(
     predictions: Sequence[PhysicalPrediction], latent: Tensor, confidence: Tensor
 ) -> dict[str, float]:
-    """gamma, R² and correlation of the read-outs against LN(s); R² per articulator and coverage.
+    """The per-step read-outs ŝ_t against LN(s_t): gamma, R² and correlation (gerarchia §4).
 
-    Also the dynamics test: on boxes mostly masked, the prediction against the baseline «mean of
-    ``s_{t,a}`` over the steps where ``a`` is mostly visible» in the same clip.
+    Steps are told apart by the share of their boxes' tokens the mask hides (the coverage):
+    overall, mostly hidden (coverage ≥ 0.5, ``*_masked``), mostly visible (``r2_visible``) and
+    by coverage bin. The dynamics test reads the mostly hidden steps against the baseline «mean
+    of LN(s_t) over the mostly visible steps of the same clip». ``excluded_part{a}``: the share
+    of steps whose articulator ``a`` has no visible box.
+
+    ``latent`` (batch, steps, C), the pose target; ``confidence`` (batch, steps).
     """
-    target = functional.layer_norm(latent.float(), (latent.shape[-1],))
+    target = functional.layer_norm(latent.float(), (latent.shape[-1],)).flatten(0, 1)
     out: dict[str, float] = {}
-    rows: dict[str, list[Tensor]] = {k: [] for k in ("pm", "tm", "wm", "pv", "tv", "wv")}
-    per_part: dict[str, list[float]] = {}
+    rows: dict[str, list[Tensor]] = {"p": [], "t": [], "w": [], "hidden": [], "seen": []}
     per_coverage: dict[int, list[float]] = {}
     dynamics, baseline = [], []
     for prediction in predictions:
-        box = _boxes(prediction, confidence)
-        rows["pm"].append(box["masked"].flatten(0, 2))
-        rows["tm"].append(target.flatten(0, 2))
-        rows["wm"].append(box["masked_weight"].flatten())
-        rows["pv"].append(box["visible"].flatten(0, 2))
-        rows["tv"].append(target.flatten(0, 2))
-        rows["wv"].append(box["visible_weight"].flatten())
-        for part in range(latent.shape[2]):
-            per_part.setdefault(f"visible_r2_part{part}", []).append(
-                weighted_r2(
-                    box["visible"][:, :, part].flatten(0, 1),
-                    target[:, :, part].flatten(0, 1),
-                    box["visible_weight"][:, :, part].flatten(),
-                )
-            )
-            per_part.setdefault(f"masked_r2_part{part}", []).append(
-                weighted_r2(
-                    box["masked"][:, :, part].flatten(0, 1),
-                    target[:, :, part].flatten(0, 1),
-                    box["masked_weight"][:, :, part].flatten(),
-                )
-            )
+        coverage = prediction.coverage
+        occupied = (prediction.box_tokens.sum(-1) > 0).float() * confidence
+        hidden = (coverage >= 0.5).float() * occupied  # noqa: PLR2004 (mostly hidden)
+        seen = (coverage < 0.5).float() * occupied  # noqa: PLR2004
+        state = prediction.state.float().flatten(0, 1)
+        for name, value in (
+            ("p", state),
+            ("t", target),
+            ("w", occupied.flatten()),
+            ("hidden", hidden.flatten()),
+            ("seen", seen.flatten()),
+        ):
+            rows[name].append(value)
         for index, (low, high) in enumerate(pairwise(COVERAGE_BINS)):
-            inside = ((box["coverage"] >= low) & (box["coverage"] < high)).float()
-            per_coverage.setdefault(index, []).append(
-                weighted_r2(
-                    box["masked"].flatten(0, 2),
-                    target.flatten(0, 2),
-                    (box["masked_weight"] * inside).flatten(),
-                )
-            )
-        seen = (box["coverage"] < 0.5).float() * confidence  # noqa: PLR2004
-        hidden = (box["coverage"] >= 0.5).float() * box["masked_weight"]  # noqa: PLR2004
-        mean_seen = (seen[..., None] * target).sum(1, keepdim=True) / seen.sum(1, keepdim=True)[
+            inside = ((coverage >= low) & (coverage < high)).float() * occupied
+            per_coverage.setdefault(index, []).append(weighted_r2(state, target, inside.flatten()))
+        normalized = target.view_as(prediction.state)
+        mean_seen = (seen[..., None] * normalized).sum(1, keepdim=True) / seen.sum(1, keepdim=True)[
             ..., None
         ].clamp_min(1e-6)
         has_seen = (seen.sum(1, keepdim=True) > 0).float()
         weight = (hidden * has_seen).flatten()
-        dynamics.append(weighted_r2(box["masked"].flatten(0, 2), target.flatten(0, 2), weight))
-        baseline.append(
-            weighted_r2(mean_seen.expand_as(target).flatten(0, 2), target.flatten(0, 2), weight)
-        )
+        dynamics.append(weighted_r2(state, target, weight))
+        baseline.append(weighted_r2(mean_seen.expand_as(normalized).flatten(0, 1), target, weight))
+        for part in range(prediction.box_tokens.shape[-1]):
+            excluded = (prediction.box_tokens[..., part] == 0).float().mean()
+            out.setdefault(f"excluded_part{part}", float(excluded))
     joined = {k: torch.cat(v) for k, v in rows.items()}
-    out["gamma_masked"] = variance_ratio(joined["pm"], joined["tm"], joined["wm"])
-    out["r2_masked"] = weighted_r2(joined["pm"], joined["tm"], joined["wm"])
-    out["r2_visible"] = weighted_r2(joined["pv"], joined["tv"], joined["wv"])
-    out["correlation_masked"] = correlation(
-        joined["pm"][joined["wm"] > 0], joined["tm"][joined["wm"] > 0]
-    )
-    out |= {name: _mean(values) for name, values in per_part.items()}
+    out["gamma_masked"] = variance_ratio(joined["p"], joined["t"], joined["hidden"])
+    out["r2"] = weighted_r2(joined["p"], joined["t"], joined["w"])
+    out["r2_masked"] = weighted_r2(joined["p"], joined["t"], joined["hidden"])
+    out["r2_visible"] = weighted_r2(joined["p"], joined["t"], joined["seen"])
+    hidden_rows = joined["hidden"] > 0
+    out["correlation_masked"] = correlation(joined["p"][hidden_rows], joined["t"][hidden_rows])
     out |= {f"masked_r2_coverage{i}": _mean(values) for i, values in per_coverage.items()}
     out["dynamics_r2"] = _mean(dynamics)
     out["dynamics_baseline_r2"] = _mean(baseline)
-    for part in range(latent.shape[2]):
-        out[f"excluded_part{part}"] = float((confidence[:, :, part] == 0).float().mean())
     return out
 
 
@@ -229,29 +203,29 @@ def keypoint_errors(
     decode: nn.Module,
     keypoints: Tensor,
     weights: Tensor,
-    groups: Tensor,
 ) -> dict[str, float]:
-    """Keypoints decoded from the masked read-outs against interpolation and constant velocity.
+    """Keypoints decoded from the read-outs of mostly hidden steps, against interpolation and
+    constant velocity from the mostly visible steps.
 
     The read-out predicts LN(s); it is brought back to the scale of ``s`` with ``s``'s own mean
-    and spread before ``D_pose``. Errors are mean distances in shoulder units over joints of
-    mostly-masked boxes; the baselines use only the steps where the articulator is mostly
-    visible (§4.13.3, «Errore in keypoint»).
+    and spread before the anchor's decoder. Errors are mean distances in shoulder units over
+    the present joints of the mostly hidden steps (§4.13.3, «Errore in keypoint»).
+
+    ``latent`` (batch, steps, C); ``keypoints`` (batch, steps, 69, 2); ``weights``
+    (batch, steps, 69).
     """
     mean = latent.float().mean(-1, keepdim=True)
     std = latent.float().var(-1, keepdim=True, unbiased=False).add(1e-5).sqrt()
     truth = keypoints.float()
+    present = weights > 0
     errors: dict[str, list[float]] = {"model": [], "interpolation": [], "constant_velocity": []}
     for prediction in predictions:
-        restored = prediction.masked.float() * std + mean
+        restored = prediction.state.float() * std + mean
         with torch.no_grad():
             decoded = decode(restored).float()
-        coverage = prediction.masked_count / (
-            prediction.masked_count + prediction.visible_count
-        ).clamp_min(1.0)
-        hidden_part = coverage >= 0.5  # noqa: PLR2004 (batch, steps, parts)
-        hidden = hidden_part[..., groups] & (weights > 0)  # (batch, steps, joints)
-        seen = ~hidden_part[..., groups] & (weights > 0)
+        hidden_step = prediction.coverage >= 0.5  # noqa: PLR2004 (batch, steps)
+        hidden = hidden_step[..., None] & present
+        seen = ~hidden_step[..., None] & present
         interpolated, extrapolated = _temporal_baselines(truth, seen)
         for name, estimate in (
             ("model", decoded),

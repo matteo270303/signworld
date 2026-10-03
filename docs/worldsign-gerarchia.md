@@ -28,7 +28,7 @@ Stato: 3/10/2026. Decisioni della revisione del 2–3/10 **[Nostra scelta]**.
 
 ## 2. I livelli
 
-**La fonte.** LeCun, *A Path Towards Autonomous Machine Intelligence*, §4.6 (H-JEPA): *«JEPA-2 takes the representations extracted by JEPA-1 as inputs […] Training can be performed level-wise or globally, using any non-contrastive method for JEPA»* [Lett. 26]. La frase non dice come; la traduzione operativa qui sotto è nostra.
+**La fonte.** LeCun, *A Path Towards Autonomous Machine Intelligence*, §4.6 (H-JEPA): *«JEPA-2 takes the representations extracted by JEPA-1 as inputs […] Training can be performed level-wise or globally, using any non-contrastive method for JEPA»* [Lett. 27]. La frase non dice come; la traduzione operativa qui sotto è nostra.
 
 **Notazione:**
 - x è la clip intera (32 × 16 × 16 = 8.192 token); (C, T) sono i token visibili e nascosti di una maschera;

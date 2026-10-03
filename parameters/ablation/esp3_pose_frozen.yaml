@@ -1,3 +1,0 @@
-# ESP-3, on θ*: S-JEPA frozen, no LoRA and no final layer; SIGReg on the pose only as a
-# diagnostic, and the anchor trains only its decoders.
-pose_encoder: {trainable: false}

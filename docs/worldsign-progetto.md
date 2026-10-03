@@ -1,6 +1,6 @@
 # Un world model a energia per il retrieval multilingua della lingua dei segni
 
-**Documento di progetto** · proposta pre-implementazione · settembre 2026 · piano sperimentale rivisto il 29/9 per CVPR 2027 (§4.14)
+**Documento di progetto** · proposta pre-implementazione · settembre 2026 · piano sperimentale rivisto il 29/9 per CVPR 2027 (§4.14) · metodologia della posa e della gerarchia rivista il 3/10
 
 > **Come leggere le etichette**
 > - **[Lett. n]** — affermazione sostenuta dal riferimento *n* (elenco in fondo al documento).
@@ -11,6 +11,8 @@
 > - **[Aperto]** — punto non ancora deciso; indichiamo l'esperimento preliminare che lo chiuderà.
 >
 > Teoremi matematici standard e nozioni generali di deep learning compaiono senza etichetta.
+
+> **Revisione del 3/10/2026.** L'encoder di posa **non è pre-addestrato**: si addestra da zero insieme al resto del modello, con invarianza fra viste, SIGReg e ancora (`worldsign-posa.md`). La gerarchia è un **H-JEPA addestrato per livello**: il livello fisico legge la posa con lo stop-gradient ed è l'unico ad adattare l'encoder video; il semantico legge l'encoder senza modificarlo. Gli stadi sono P, F₀ e F, a confini di epoca (`worldsign-gerarchia.md`). Le sezioni che descrivevano l'S-JEPA pre-addestrato, il bersaglio per articolatore e gli stadi 1a/1/2a/2 sono aggiornate; in caso di dubbio valgono i due documenti.
 
 ---
 
@@ -48,7 +50,7 @@ Tre ingredienti:
 2. **Predire a due livelli di astrazione, con un solo encoder video condiviso.**
    - **Livello fisico:** dal video in gran parte mascherato, il modello predice lo **stato del corpo** (le rappresentazioni della posa) anche nelle parti nascoste. La ricetta di mascheramento e di loss è quella di V-JEPA 2.1 [Lett. 30, 32]; cambia solo il bersaglio.
    - **Livello semantico:** dal video intero, il modello predice l'**embedding della didascalia**, come in VL-JEPA [Lett. 34].
-   - Entrambi i predictor adattano lo stesso encoder video: la gerarchia sta nell'adattamento condiviso, nello spirito di H-JEPA [Lett. 27].
+   - Il livello semantico legge l'encoder video adattato dal livello fisico, senza modificarlo: la gerarchia è un H-JEPA addestrato per livello [Lett. 27] (`worldsign-gerarchia.md`).
 3. **Nessun negativo contrastivo.** L'allineamento testo–video si impara senza confronti con esempi negativi. La dispersione dello spazio (*uniformity*) che serve al retrieval la impone un regolarizzatore distribuzionale, **SIGReg** [Lett. 35], che spinge gli embedding verso una distribuzione gaussiana isotropa.
 
 Il tutto è formulato come **energy-based model** [Lett. 28]: l'energia è l'errore di predizione; il retrieval è la ricerca dell'energia minima; una sequenza plausibile è una sequenza a energia bassa. Una **variabile latente** viene provata solo in un'ablation facoltativa (§4.5.9, §4.14).
@@ -56,7 +58,7 @@ Il tutto è formulato come **energy-based model** [Lett. 28]: l'energia è l'err
 ### 1.4 Contributi attesi
 
 - **Una verifica controllata** del fatto che, nel retrieval cross-modale, l'uniformity possa venire da un vincolo sulla distribuzione degli embedding invece che da negativi contrastivi, a parità di dati visti **[Nostra ipotesi, §5.1 H1]**.
-- **Un world model a due livelli di astrazione** (fisico e semantico) per la lingua dei segni continua: tre encoder, due predictor, circa 21,6 M di parametri addestrabili **[Nostra proposta]**.
+- **Un world model a due livelli di astrazione** (fisico e semantico) per la lingua dei segni continua: tre encoder, due predictor, circa 29,9 M di parametri addestrabili **[Nostra proposta]**.
 - **Una batteria di diagnostiche e di test di plausibilità basati sull'energia**, costruibili senza annotazione **[Nostra proposta]**.
 - **Un'analisi della condivisione fra lingue dei segni** nelle diverse rappresentazioni del modello (ipotesi «a clessidra») **[Nostra ipotesi, §5.1 H5]**.
 
@@ -237,9 +239,7 @@ La capacità di `z` va limitata — rendendola discreta, sparsa, stocastica o a 
 3. **SIGReg su ciascuna modalità penalizza il modality gap [Nostra osservazione].** Se `ŷ` ed `ẽ` sono entrambe ≈ `N(0, I)`, hanno la stessa distribuzione marginale: le medie coincidono in 0 e nessun classificatore le distingue. Il gap non si chiude da solo nell'addestramento contrastivo [Lett. 41].
 4. **Legame con gli EBM [Nostra connessione].** A covarianza fissata, la gaussiana massimizza l'entropia. SIGReg massimizza quindi il contenuto informativo degli embedding a varianza fissata, cioè riduce il volume a bassa energia per punto dati: è il ramo regolarizzato della tassonomia di §2.1.5.
 
-**SIGReg sul target di posa: l'encoder resta addestrabile [Nostra scelta, §4.4.3].** L'encoder di posa è S-JEPA, pre-addestrato da noi (§4.4.3), e nella configurazione di riferimento resta **addestrabile**. Nell'ablation ESP-3 (§4.14) è invece **congelato**: un target fermo non può collassare, SIGReg su `s_{t,a}` diventa solo diagnostica, e il target resta anisotropo (IsoScore ≈ 0,03) **[Nostra argomentazione]**. Il resto del paragrafo vale per la configurazione di riferimento.
-
-**Perché SIGReg anche sul target di posa, e niente EMA, se l'encoder è addestrabile [Nostra argomentazione].** In quel caso il bersaglio del livello fisico si muove durante l'addestramento. La soluzione classica contro un target che si muove è una copia EMA dell'encoder [Lett. 30, 32], che però funziona quando contesto e target sono **copie dello stesso encoder**: da noi sono due reti di modalità diverse (video e posa). Esiste un precedente più semplice: VL-JEPA addestra il proprio encoder del target **senza EMA**, con learning rate moltiplicato per **0,05** (ottimo fra ×0,05 e ×0,10, prestazioni in calo a ×1,0) [Lett. 34]. Seguiamo quella strada: target lento (learning rate ridotto, LoRA a rango basso), SIGReg contro il collasso, un'ancora di ricostruzione contro la perdita di informazione.
+**SIGReg sul target di posa [Nostra scelta, 3/10].** L'encoder di posa si addestra da zero (§4.4.3, `worldsign-posa.md`). Il collasso del bersaglio è escluso da due difese diverse. **Lo stop-gradient:** il livello fisico legge `sg(s)`, quindi `E_fis` non può spingere il bersaglio verso la costante. **I termini della posa:** invarianza fra due viste, SIGReg su entrambe e un'ancora di ricostruzione dei keypoint, nella forma di LeJEPA, senza EMA [Lett. 35]. Una costante annulla l'invarianza ma non l'ancora né SIGReg.
 
 ### 2.5 Motivazione 4 — perché un world model predittivo
 
@@ -460,8 +460,8 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
 ### 4.1 Principi di progetto
 
 1. **Replicare ricette validate invece di inventarne.** Maschera e loss di V-JEPA 2.1 al livello fisico [Lett. 30, 32]; schema di VL-JEPA al livello semantico [Lett. 34] **[Nostra scelta]**.
-2. **Riusare tutti i pesi pre-addestrati utili**, adattandoli con LoRA **su tutti i blocchi**: encoder video, encoder di posa, predictor fisico **[Nostra scelta]**.
-3. **Tetto di 22 M di parametri addestrabili**, per il rischio di overfitting di §3.4. Era 20 M: è stato alzato per ospitare la fusione multi-livello di V-JEPA 2.1 (§4.4.5) **[Nostra scelta]**.
+2. **Riusare tutti i pesi pre-addestrati utili**, adattandoli con LoRA **su tutti i blocchi**: encoder video e predictor fisico. L'encoder di posa non ha pesi pre-addestrati e si addestra da zero (§4.4.3) **[Nostra scelta]**.
+3. **Tetto di 30 M di parametri addestrabili**, per il rischio di overfitting di §3.4. Era 20 M, poi 22 M per la fusione multi-livello di V-JEPA 2.1 (§4.4.5), poi 30 M il 3/10 per l'encoder di posa da zero (`worldsign-posa.md` §3), che si addestra sulla posa e non sulle didascalie **[Nostra scelta]**.
 4. **Parametri vincolati contro parametri liberi [Nostra argomentazione].** Le matrici LoRA su pesi congelati restano in un intorno a basso rango di una funzione già sensata e sono a basso rischio. I moduli addestrati da zero non hanno un prior e sono a rischio più alto. **Se c'è da tagliare, si tagliano i liberi.**
 5. **Un encoder congelato più grande è più sicuro, non meno [Nostra argomentazione].** I suoi pesi congelati non possono memorizzare il corpus, e spostano lavoro dai parametri appresi a quelli pre-addestrati. Il suo costo è computazionale, non statistico.
 
@@ -490,13 +490,13 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
                │ [Aperto: PC6]                                        │
                └─────────────────────────────────────────────────────┘
                               ▼
-               lettura R per istante t e articolatore a ─► ŝ_{t,a} ──── L1 pesata ────► E_fis
-                                                                              ▲
-  POSA  69 keypoint, presenza   ─► ENCODER POSA (S-JEPA)  ─► s_{t,a} ────────┘
-                                   addestrabile (§4.4.3)     └─► D_pose ─► L_anchor
+               lettura R per passo t (4 riquadri concatenati) ─► ŝ_t ── L1 pesata ──► E_fis
+                                                                              ▲ sg
+  POSA  69 keypoint, presenza ─► ENCODER POSA (da zero, §4.4.3) ─► s_t ───────┘
+                                 L_inv (vista) · L_anchor (keypoint) · SIGReg
 
  ─── PASSAGGIO SEMANTICO ── nessuna maschera, come VL-JEPA ─────────────────────────────────
-  video ─► ENCODER VIDEO (lo stesso, con gradiente) ─► 8.192 token dell'ultimo blocco  ┐
+  video ─► ENCODER VIDEO (lo stesso, senza gradiente) ─► sg(8.192 token dell'ultimo blocco)  ┐
                                           8 query apprese (costanti) ┤
                                                                      ▼
                ┌─────────────────────────────────────────────────────┐
@@ -506,17 +506,17 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
                   media delle 8 query ─► ŷ ∈ ℝ⁵¹² ──── D ────► E_sem ◄──── ẽ
 
  ═══════════════════════════════════════════════════════════════════════════════════════
-   SIGReg per articolatore su s_{t,a} e per modalità su { ŷ } e { ẽ }  ·  un solo λ
+   SIGReg sulla posa per vista e per modalità su { ŷ } e { ẽ }  ·  un solo λ  ·  addestramento per livello
    retrieval = argmin di E_sem  ·  plausibilità = E_fis media su più maschere
  ═══════════════════════════════════════════════════════════════════════════════════════
 ```
 
 | | Quanti | Quali |
 |---|---|---|
-| **Encoder** | 3 | video (congelato + LoRA) · posa (S-JEPA pre-addestrato da noi, addestrabile; congelato nell'ablation ESP-3) · testo (congelato, precalcolato) |
+| **Encoder** | 3 | video (congelato + LoRA, adattato dal solo livello fisico) · posa (da zero, `worldsign-posa.md`) · testo (congelato, precalcolato) |
 | **Predictor** | 2 | fisico (riuso di V-JEPA 2.1 + LoRA, con fusione multi-livello) · semantico (da zero, schema VL-JEPA) |
 | **Vettore di retrieval** | — | `ŷ`, l'uscita del predictor semantico |
-| **Parametri addestrabili** | ≈ 21,6 M | dettaglio in §4.8 |
+| **Parametri addestrabili** | ≈ 29,9 M | dettaglio in §4.8 |
 
 ### 4.3 Notazione
 
@@ -527,12 +527,12 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
 | `m`, `𝓜` | maschera multi-blocco; insieme dei token mascherati |
 | `a ∈ {LH, RH, corpo, volto}` | articolatore |
 | `p̂_{t,j}`, `c_{t,j}` | keypoint `j` normalizzato al tempo `t`, e sua confidenza |
-| `s_{t,a} ∈ ℝ^C` | rappresentazione della posa per istante e articolatore **[Aperto: C, PC5]** |
-| `ŝ_{t,a} ∈ ℝ^C` | la stessa quantità, predetta dal video mascherato |
+| `s_t ∈ ℝ^C` | bersaglio di posa per passo, `C = 256` (`worldsign-posa.md`) |
+| `ŝ_t ∈ ℝ^C` | la stessa quantità, predetta dal video mascherato |
 | `ŷ ∈ ℝ⁵¹²` | embedding semantico predetto dal video (vettore di retrieval) |
 | `ẽ ∈ ℝ⁵¹²` | target testuale della didascalia |
 | `q_1 … q_8` | query apprese del predictor semantico |
-| `ŝ^pred_{t,a}`, `ŝ^ctx_{t,a}` | le due letture di `ŝ_{t,a}`: dai token mascherati e dai token visibili del riquadro (§4.5.2) |
+| `sg(·)` | stop-gradient: il valore passa, il gradiente no (`worldsign-gerarchia.md` §2) |
 | `z`, `K` | variabile latente discreta e sua cardinalità (**solo nell'ablation facoltativa ESP-4**, §4.5.9) |
 
 ### 4.4 Componenti
@@ -551,7 +551,7 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
 - **256×256 con crop sul segnante**, invece di 384×384 a inquadratura intera: 8.192 token contro 18.432. La 3D-RoPE lo rende possibile senza interpolare posizioni, e il crop dà alle mani più pixel **[Nostra scelta, confermata da PC4 il 29/9: a 384² il probe delle mani guadagna +0,005 di R², sotto la soglia di +0,05, e il retrieval peggiora (T2V R@1 0,056 contro 0,067)]**.
 - **Uscite verso i predictor.**
   - Il predictor fisico riceve la **fusione multi-livello di V-JEPA 2.1**: blocchi 6, 12, 18 e 24, ciascuno con la propria LayerNorm, concatenati e fusi da un MLP (§4.4.5) [Lett. 32, 72]. Sono gli indici che il codice di V-JEPA 2.1 usa per un encoder a 24 blocchi, non una scelta nostra.
-  - Il predictor semantico riceve l'uscita dell'ultimo blocco, come in VL-JEPA [Lett. 34] **[Nostra scelta]**.
+  - Il predictor semantico riceve l'uscita dell'ultimo blocco, come in VL-JEPA [Lett. 34], **senza gradiente**: l'encoder lo adatta solo il livello fisico (`worldsign-gerarchia.md`) **[Nostra scelta]**.
 
 **Perché V-JEPA 2.1, e con quale riserva.** La 2.1 introduce una loss predittiva **densa** su tutti i token e una **supervisione profonda** su più layer intermedi [Lett. 32], e l'avevamo scelta per questo. **Però** le varianti distillate sono state addestrate con una loss **solo sull'ultimo layer del teacher, senza supervisione profonda** [Lett. 32]. Nei checkpoint distillati la predizione multi-livello non c'è (`n_output_distillation = 1`), mentre ViT-g e ViT-G ne hanno 4 [Lett. 72]: la fusione la aggiungiamo noi (§4.4.5). **PC3, chiuso il 29/9: V-JEPA 2.1-L.** Sulle feature congelate (8.000 clip di YouTube-SL-25, test su 1.394) i due encoder sono alla pari: R² delle mani 0,706 contro 0,700 di V-JEPA 2-L, l'encoder usato da VL-JEPA [Lett. 34]; T2V R@1 0,067 per entrambi; V2T R@1 0,039 contro 0,067, a favore di V-JEPA 2-L. Il probe fonologico non è calcolabile. A parità vale la regola di §4.12.1: la 2.1-L.
 
@@ -573,52 +573,18 @@ W'  =  W  +  (α / r) · B · A
 |---|---|---|
 | Encoder video, 24 blocchi | 16 | base |
 | Predictor fisico, 12 blocchi | 16 | base |
-| Encoder di posa, tutti i layer | **4** | **×0,05** |
 
 **Avvertenza** [Lett. 68]: LoRA **non** protegge dal *catastrophic forgetting* più del fine-tuning completo. Limita il sottospazio dei parametri, non la deriva della funzione.
 
 #### 4.4.3 Encoder della posa (target del livello fisico)
 
-**Scelta: S-JEPA [Lett. 99], pre-addestrato da noi sulla posa del corpus [Scelta verificata in PC5, 2026-09-20].**
+**Scelta [Nostra scelta, 3/10]: l'encoder di posa di worldSign, adattato al tubelet di V-JEPA e addestrato da zero insieme al resto.** Tutti i dettagli sono in `worldsign-posa.md`; qui la sintesi.
 
-- **Architettura** [Lett. 99, adattata]: transformer su token **giunto × passo** — 69 keypoint × 32 passi di due frame, cioè un passo per tubelet video — con 8 blocchi, d = 256, 8 teste (**6,35 M parametri**). Un predictor di 5 blocchi serve solo nel pre-addestramento.
-- **Pre-addestramento** [Lett. 99]: dai token visibili si predicono i latenti che una **copia EMA** dell'encoder (momento da 0,999 a 1,0) assegna ai token nascosti; entropia incrociata fra distribuzioni softmax (temperature 0,1 e 0,06), con **centratura** del target contro il collasso. Il 90 % dei token si nasconde, più spesso dove i giunti si muovono (**mascheramento guidato dal movimento**, da MAMP [Lett. 100]). 100 epoche su 16.476 clip di YouTube-SL-25: 57 minuti su una H100.
-- **Adattamenti al segnato [Nostra scelta].** Nessun flip orizzontale, che scambierebbe la mano dominante (§3.8); la seconda vista usa rotazione ±15°, scala 0,9–1,1, traslazione ±0,1 e jitter; la presenza dei keypoint pesa la loss; token 2D normalizzati sulle spalle (§3.6).
-- **Rappresentazione per articolatore** `s_{t,a}`: media, per ciascuno dei quattro articolatori, dei token dei suoi giunti all'uscita dell'encoder EMA. È già a `T' = 32` passi, allineata ai token video, con `C = 256`.
-
-**Perché S-JEPA: il confronto di PC5 [Nostra misura].** Quattro candidati sulle stesse 19.896 clip di YouTube-SL-25, split per video (16.476 / 3.420), letture lineari su 8.000 clip. R² della lettura lineare dei keypoint, posizione / velocità:
-
-| Candidato | Mani | Corpo | Volto | Rango effettivo |
-|---|---|---|---|---|
-| Feature cinematiche sbiancate (tetto per costruzione) | 1,000 / 1,000 | 1,000 / 1,000 | 1,000 / 1,000 | 44–102 su 45–105 |
-| Uni-Sign congelato [Lett. 8] | 0,75 / 0,58 | 0,41 / 0,20 | **−1,75 / −3,11** | 28–124 su 256 |
-| MAMP [Lett. 100], stesso backbone | 0,75 / 0,41 | 0,36 / 0,06 | 0,19 / 0,10 | ≈ 61 su 256 |
-| **S-JEPA** [Lett. 99] | **0,94 / 0,85** | **0,74 / 0,56** | **0,76 / 0,64** | ≈ 76 su 256 |
-
-S-JEPA è il migliore su **ogni** articolatore, in posizione e in velocità, e supera la soglia R² ≥ 0,7 di PC5 su tutti e quattro. Durante il pre-addestramento il rango effettivo della mano destra sale da 20 a 63 senza cedimenti. MAMP conserva male proprio il moto che il suo obiettivo predice (velocità 0,41): **[Nostra ipotesi]** quell'informazione resta nel decoder, che poi si scarta. Uni-Sign ha la faccia sotto la media pesata.
-
-**Una lezione dalla prima corsa [Nostra osservazione].** Con la normalizzazione ancora senza guardie (§3.6) l'ordine era rovesciato (MAMP 0,88, S-JEPA 0,44 sulle mani): l'errore quadratico di MAMP e le letture inseguivano gli outlier, mentre l'entropia incrociata di S-JEPA è insensibile alla scala. Un R² su bersagli con code pesanti non ordina i modelli.
-
-**Difetto noto: il latente è anisotropo [Nostra misura].** IsoScore 0,023–0,027 e rango effettivo ≈ 76 su 256: una nuvola dieci volte più schiacciata dei target testuali (IsoScore 0,26, PC1). È in tensione con SIGReg su `s_{t,a}` (§4.5.6), che chiede `N(0, I)`.
-
-**Nessun articolatore è privo di identità [Nostra misura].** Da medie per clip, S-JEPA riconosce il canale nell'85 % dei casi (caso 51 %); ma anche le feature cinematiche grezze arrivano all'83 %. L'identità di chi segna sta nella posa stessa, non la aggiunge l'encoder: la difesa dalle scorciatoie (§3.4) va cercata altrove. Il probe «lingua» su questi dati coincide quasi con quello del canale (due lingue, dieci canali). Per separarli c'è ora una lettura su **canali mai visti** in addestramento (split per canale, dentro ogni lingua), ma su queste clip **non si può calcolare**: l'ASL viene da **un solo canale** (8.425 clip), l'aed da nove. La causa è a monte [Nostra misura]: l'ordine di rilascio di YouTube-SL-25 raggruppa i video per canale, e i primi 684 ASL scaricati vengono tutti dallo stesso. L'ordine di download ora mescola i video dentro ogni lingua (seme fisso), così che ogni prefisso copra molti canali; la lettura si rifà quando l'ASL ne avrà almeno due.
-
-**Regime in addestramento: addestrabile in modo lieve [Nostra scelta, 29/9].** È la configurazione di riferimento; congelato è l'ablation ESP-3 (§4.14).
-
-- **Come.** LoRA a rango 4 su tutti i layer di S-JEPA, learning rate ×0,05 rispetto a quello base, come l'encoder del target di VL-JEPA [Lett. 34]; nessuna EMA.
-- **Obiettivo 1: il target diventa isotropo.** SIGReg per articolatore (§4.5.6) porta `s_{t,a}` verso `N(0, I)`. Si parte da IsoScore ≈ 0,026; lo sbiancamento fisso a rango pieno arriva a 0,82–0,85 senza perdere R² (spettro del 22/9), ed è il riferimento di ciò che si può ottenere.
-- **Obiettivo 2: il target conserva le sue prestazioni.** L'ancora di ricostruzione (§4.5.3) tiene il contenuto cinematico; in più, una lettura lineare dei keypoint da `s_{t,a}`, su un batch sonda fisso, confronta il R² di posizione e velocità per articolatore con i valori di PC5 (mani 0,94 / 0,85, corpo 0,74 / 0,56, volto 0,76 / 0,64).
-- **Criteri [Nostra proposta, soglie da calibrare in PC7].** Alla fine dello stadio 1 (fermata F1): IsoScore ≥ 0,8 per articolatore e R² entro 0,02 dai valori di PC5. In addestramento scatta un allarme se il R² scende oltre 0,02 sotto PC5 o se l'IsoScore smette di crescere (§4.13.3).
-
-| | Addestrabile lieve (riferimento) | Congelato (ablation ESP-3) |
-|---|---|---|
-| Target | si muove poco: LoRA r = 4, LR ×0,05 | fermo |
-| Isotropia | imposta da SIGReg per articolatore | nessuna: IsoScore ≈ 0,026 |
-| Anti-collasso | SIGReg e ancora | per costruzione |
-| SIGReg su `s_{t,a}` e ancora | termini di loss | solo diagnostica |
-| Rischi | target mobile; l'encoder può semplificarsi verso ciò che il video predice facilmente, restando isotropo (§5.5): lo sorvegliano l'ancora e la lettura dei keypoint | il predictor fisico regredisce una nuvola schiacciata su poche direzioni; SIGReg sulla posa resta alto |
-
-Lo sbiancamento fisso resta misurato (spettro del 22/9) ma non è nel piano.
+- **Ingresso:** i token di posa (69 giunti × 32 passi, x, y e presenza dei due frame), ricanonicalizzati frame per frame fra le spalle; 9 canali per giunto e frame (globale, locale rispetto alla radice della parte, osso, velocità, valido), i due frame del passo concatenati.
+- **Architettura:** un transformer spaziale per articolatore (corpo, mani, volto; pesi non condivisi), media sui giunti; i 4 token **concatenati** (512); un transformer temporale a 512 sui 32 passi; `LayerNorm` e `Linear(512 → 256)`. **8,06 M parametri.** Il bersaglio è **un vettore per passo**, `s_t ∈ ℝ²⁵⁶`.
+- **Addestramento:** invarianza fra la sequenza e una vista (rotazione ±10°, rumore σ = 0,01), SIGReg su entrambe, ancora di ricostruzione dei keypoint: la forma di LeJEPA [Lett. 35], senza maschera e senza EMA. Learning rate 3e-4, warm-up sul 20 % della run e coseno.
+- **Rapporto con il livello fisico:** `E_fis` legge `LN(sg(s))`. Il video non può spostare il bersaglio.
+- **S-JEPA** [Lett. 99] è replicato a parte, sui dati del paper (`signworld/models/sjepa/`), per un adattamento futuro; non è collegato al modello. Le misure di PC5 riguardavano un S-JEPA pre-addestrato che non fa più parte del piano.
 
 #### 4.4.4 Ramo testuale (l'Y-Encoder)
 
@@ -644,7 +610,7 @@ Gli embedding multilingue tendono a raggrupparsi **per lingua anziché per signi
 - non c'è una relazione stabilita fra anisotropia e prestazioni [Lett. 50];
 - il whitening è sconsigliato per la classificazione [Lett. 52].
 
-**Al suo posto, una testa MLP a due layer** (`768 → 512 → 512`, GELU, **inizializzazione standard**, protetta dallo stadio 2a del curriculum, §4.10), addestrata insieme alle altre loss. È un *whitening durante l'addestramento*: WhitenedCSE mostra che integrarlo nel training evita il degrado dell'allineamento del post-processing [Lett. 49]; un whitening appreso è preferibile a quello PCA nel retrieval di immagini [Lett. 55]; e in LLaVA-1.5 un proiettore MLP su encoder congelati supera quello lineare [Lett. 70] **[Nostra scelta]**.
+**Al suo posto, una testa MLP a due layer** (`768 → 512 → 512`, GELU, **inizializzazione standard**, che entra nello stadio P con il suo warm-up, §4.10), addestrata insieme alle altre loss. È un *whitening durante l'addestramento*: WhitenedCSE mostra che integrarlo nel training evita il degrado dell'allineamento del post-processing [Lett. 49]; un whitening appreso è preferibile a quello PCA nel retrieval di immagini [Lett. 55]; e in LLaVA-1.5 un proiettore MLP su encoder congelati supera quello lineare [Lett. 70] **[Nostra scelta]**.
 
 **Nota di parsimonia.** Le varianti «senza testa», «testa lineare» e «whitening fisso» **non saranno testate**: la decisione di non usare il whitening fisso si basa sulla letteratura citata, non su un nostro esperimento **[Nostra scelta]**.
 
@@ -659,7 +625,7 @@ Gli embedding multilingue tendono a raggrupparsi **per lingua anziché per signi
 | Uscita | **da sostituire**: nella distillazione il layer finale produce la dimensione del teacher ViT-G [Lett. 32]; si aggiunge una **testa nuova** verso lo spazio della posa |
 | Adattamento | LoRA r = 16 sui 12 blocchi + fusione multi-livello e testa d'uscita addestrate da zero **[Nostra scelta]** |
 | ⚠️ Condizione | le fonti sono **discordanti**: il paper descrive i modelli distillati come solo encoder, il codice di caricamento restituisce anche un predictor [Lett. 32, 72] **[Aperto: PC6]** |
-| Ripiego | se i pesi non ci sono: stessa struttura ma **1 blocco da zero** (~1,8 M), per restare nel tetto di 22 M; oppure il predictor di V-JEPA 2-L, coerente solo se PC3 sceglie V-JEPA 2-L come encoder **[Nostra scelta]** |
+| Ripiego | se i pesi non ci sono: stessa struttura ma **1 blocco da zero** (~1,8 M), per restare nel tetto di 30 M; oppure il predictor di V-JEPA 2-L, coerente solo se PC3 sceglie V-JEPA 2-L come encoder **[Nostra scelta]** |
 
 **Fusione multi-livello, riprodotta da V-JEPA 2.1** [Lett. 32; codice ufficiale, Lett. 72]:
 
@@ -749,13 +715,14 @@ Al suo posto: un **probe di identificazione della lingua su `ŷ`**. Se risultass
 
 | Passaggio | Input dell'encoder video | Predictor | Bersaglio | Chi riceve gradiente |
 |---|---|---|---|---|
-| **Fisico** | video con maschera multi-blocco (~10 % dei token visibili) | fisico | `s_{t,a}` dalla posa **completa** | LoRA video, LoRA e testa del predictor fisico, LoRA di posa (LR ×0,05), teste `D_pose` |
-| **Semantico** | video **completo** | semantico | `ẽ`, precalcolato | LoRA video, predictor semantico, testa testuale |
+| **Posa** | — | — | sé stessa: una vista, i keypoint | encoder di posa e decoder dell'ancora |
+| **Fisico** | video con maschera multi-blocco (~10 % dei token visibili) | fisico | `sg(s_t)` dalla posa **completa** | LoRA video, LoRA e testa del predictor fisico, fusione |
+| **Semantico** | video **completo**, letto senza gradiente | semantico | `ẽ`, precalcolato | predictor semantico, testa testuale |
 
-- **Nessuna EMA e nessuno stop-gradient** **[Nostra scelta]**.
+- **Addestramento per livello, nessuna EMA** **[Nostra scelta, 3/10]**: gli stop-gradient `sg(s)` e `sg(Enc(x))` fanno sì che ogni loss aggiorni solo il suo livello (`worldsign-gerarchia.md` §3).
 - La posa **non entra mai** nell'input del contesto: serve solo come bersaglio (§4.6).
 
-#### 4.5.2 Livello fisico: maschera, predizione densa, lettura per articolatore
+#### 4.5.2 Livello fisico: maschera, predizione densa, lettura per passo
 
 **Maschera: quella di V-JEPA, senza modifiche** [Lett. 30, 31].
 
@@ -795,52 +762,50 @@ Il codice di V-JEPA 2.1 calcola così entrambi i termini: `F.layer_norm` sui tok
 
 - **Predizione multi-livello: fusione in ingresso sì, quattro uscite no.** Il predictor fisico riceve la fusione dei blocchi 6/12/18/24 come in V-JEPA 2.1; l'uscita resta una, verso la posa, perché i quattro target di V-JEPA 2.1 sono layer dell'encoder video (§4.4.5) **[Nostra scelta]**.
 
-**Lettura per istante e articolatore [Nostra scelta, adattamento di Lett. 32].** Il bersaglio non è per token ma per articolatore, quindi i token predetti si aggregano nel riquadro di ogni articolatore. Le letture sono **due**, perché V-JEPA 2.1 tiene separati i due termini: una sui token mascherati del riquadro, una sui token visibili.
+**Lettura per passo [Nostra scelta, 3/10, adattamento di Lett. 32].** Il bersaglio non è per token ma per passo: per ogni passo si fa la media dei token predetti, visibili e nascosti, nel riquadro di ciascun articolatore; le 4 medie si concatenano e una testa le porta allo spazio della posa, come l'encoder di posa concatena le sue 4 parti (`worldsign-gerarchia.md` §4).
 
 ```
-ŝ^pred_{t,a}  =  Testa( media dei token MASCHERATI predetti da Pred_fis( Enc_v(v ⊙ m) )  nel riquadro di a all'istante t )
-ŝ^ctx_{t,a}   =  Testa( media dei token VISIBILI  predetti da Pred_fis( Enc_v(v ⊙ m) )  nel riquadro di a all'istante t )
+ŝ_t  =  Testa( [ media dei token predetti da Pred_fis( Enc_v(v ⊙ m) ) nel riquadro di a al passo t ]_{a = corpo, sx, dx, volto} )
 ```
 
-- Il riquadro si ricava dai keypoint, proiettato sulla griglia di 16×16 patch. Gli articolatori a bassa confidenza si escludono.
-- La testa è una sola, condivisa dalle due letture. Come in V-JEPA, le liste dei token visibili e mascherati si tagliano alla lunghezza minima nel batch: i token rimasti fuori da entrambe non entrano in nessuna lettura.
+- Il riquadro si ricava dai keypoint, proiettato sulla griglia di 16×16 patch; un riquadro non visibile dà zeri.
+- Due letture separate (solo nascosti, solo visibili), come teneva V-JEPA 2.1, non funzionano con un bersaglio per passo: un riquadro senza token nascosti lascerebbe vuota la sua parte mentre il bersaglio la contiene. La distinzione fra i due termini passa nei pesi (§4.5.3).
 
 #### 4.5.3 Energia fisica, plausibilità e ancora
 
 ```
-e(ŝ)  =  (1/C) · ‖ ŝ − LN( s_{t,a} ) ‖₁             errore di una lettura: L1 media sui canali, target con layer norm
+e_t(m)  =  (1/C) · ‖ ŝ_t − LN( sg(s_t) ) ‖₁             errore di un passo: L1 media sui canali, target con layer norm
 
-               Σ_(t,a)  c̄_{t,a} · n^mask_{t,a}(m) · e( ŝ^pred_{t,a} )
-L_pred(m)  =  ──────────────────────────────────────────────────────
-                     Σ_(t,a)  c̄_{t,a} · n^mask_{t,a}(m)
+ω_t(m)  =  c_t · ( n^m_t(m)  +  λ · w^v_t(m) )              peso del passo
 
-               Σ_(t,a)  c̄_{t,a} · [ Σ_{i visibile nel riquadro} 1/√d_min(i) ] · e( ŝ^ctx_{t,a} )
-L_ctx(m)   =  ──────────────────────────────────────────────────────────────────────────────
-                     Σ_(t,a)  c̄_{t,a} · n^vis_{t,a}(m)
-
-E_fis(v, p ; m)  =  L_pred(m)  +  λ · L_ctx(m)                        λ = 0,5 con warm-up (§4.5.2)
+               Σ_t  ω_t(m) · e_t(m)
+E_fis(v, p ; m)  =  ──────────────────────                    λ = 0,5
+                     Σ_t  ω_t(m)
 
 Ē_fis(v, p)      =  (1/M) · Σ_{i=1..M}  E_fis(v, p ; m_i)          plausibilità: media su M maschere casuali
 
-   c̄_{t,a}                 confidenza media dei keypoint di a all'istante t
-   n^mask, n^vis            token mascherati e visibili nel riquadro di a all'istante t
+   c_t        confidenza del passo: media della presenza dei 69 giunti
+   n^m_t      token mascherati nei riquadri del passo
+   w^v_t      somma dei pesi dei token visibili nei riquadri (1 ciascuno nel cooldown, o 1/√d_min)
 ```
 
-- **Stessi pesi di V-JEPA 2.1, portati sul riquadro [Nostra scelta, adattamento di Lett. 32].** Ogni riquadro pesa quanto i token che stanno dietro la sua lettura: in `L_pred` ogni token mascherato conta una volta, come nella media di V-JEPA 2.1 sui token mascherati; in `L_ctx` ogni token visibile conta `1/√d_min` e si divide per il numero dei visibili, come nel termine di contesto di V-JEPA 2.1. La confidenza `c̄` è l'unico peso nostro.
+- **I pesi di V-JEPA 2.1, portati sul passo [Nostra scelta, adattamento di Lett. 32].** Ogni token mascherato nei riquadri conta una volta, ogni token visibile `λ` volte il suo peso: è la media di V-JEPA 2.1 su `L_pred + λ · L_ctx`. La confidenza `c_t` è l'unico peso nostro. Formule complete in `worldsign-loss.md` §3.
 - **In addestramento** si minimizza `E_fis` sui dati del training set, mediata sulle due maschere del passo (brevi e lunghe), come in V-JEPA.
 - **In valutazione** la plausibilità di una sequenza è la sua energia, **mediata su più maschere**: una sola maschera potrebbe non coprire proprio la parte anomala **[Nostra scelta]**.
 - **Cosa misura [Nostra osservazione].** Le maschere a tubi coprono tutta la clip nel tempo, quindi l'energia valuta la coerenza **usando contesto prima e dopo**: quanto una sequenza è coerente dentro la finestra, non quanto il futuro sia prevedibile dal solo passato. È coerente con l'ablazione di §4.5.2.
 - **Perché funziona senza negativi** [Lett. 28]. In un EBM regolarizzato l'energia viene abbassata solo sulle configurazioni osservate. Il volume a bassa energia è limitato dalla regolarizzazione (SIGReg, rango della LoRA), quindi una configurazione mai vista resta ad energia alta **senza che il modello abbia mai visto un negativo**. È il meccanismo con cui V-JEPA mostra più «sorpresa» davanti agli eventi implausibili [Lett. 33].
 
-**Ancora di ricostruzione:**
+**I termini della posa** (`worldsign-posa.md` §4): l'encoder di posa si addestra con la sua invarianza, l'ancora di ricostruzione e SIGReg (§4.5.6).
 
 ```
-               Σ_t Σ_a Σ_{j∈a}  c_{t,j} · ‖ D_pose^a( s_{t,a} )_j − p̂_{t,j} ‖²
-L_anchor  =  ───────────────────────────────────────────────────────────────────
-                                 Σ_t Σ_j  c_{t,j}
+L_inv     =  media sui passi validi di  (1/C) ‖ s_t − s̃_t ‖²                    s̃: la stessa sequenza in una vista (rotazione, rumore)
+
+               Σ_t Σ_j  c_{t,j} · ‖ D( s_t )_j − p̂_{t,j} ‖²
+L_anchor  =  ──────────────────────────────────────
+                σ² · Σ_t Σ_j  c_{t,j}
 ```
 
-`D_pose^a` è una testa lineare per articolatore; `p̂_{t,j}` è il keypoint mediato sui due frame del tubelet. Il peso `c_{t,j}` impedisce di imparare il rumore dello stimatore di posa **[Nostra scelta]**, ispirato al campionamento guidato dalla confidenza di Uni-Sign [Lett. 8].
+`D` è un solo decoder lineare dal vettore del passo ai 69 giunti; `p̂_{t,j}` è il keypoint mediato sui due frame del tubelet; `σ²` la varianza dei keypoint sulle clip di training, così che predire la media valga 1. Il peso `c_{t,j}` impedisce di imparare il rumore dello stimatore di posa **[Nostra scelta]**, ispirato al campionamento guidato dalla confidenza di Uni-Sign [Lett. 8].
 
 #### 4.5.4 Livello semantico: energia video–testo
 
@@ -905,25 +870,16 @@ per M direzioni casuali  v_m  (‖v_m‖ = 1), ricampionate a ogni passo:
 - `φ̂_u(τ) = (1/N) Σ_n e^{iτu_n}` è la funzione caratteristica empirica; `e^{−τ²/2}` è quella della normale standard, ed è anche il peso dell'integrale. L'integrale si calcola con la regola dei trapezi su 17 nodi in `[−5, 5]`; `M = 1.024` direzioni, come raccomanda LeJEPA [Lett. 35].
 - **Il fattore N** è quello di LeJEPA: per un campione davvero gaussiano il valore atteso resta ≈ 1,06 (`√(2π) − √(2π/3)`) qualunque sia `N`, mentre per ogni altra distribuzione cresce con `N`. È la scala a cui si riferisce λ = 0,05 [Lett. 35]. Con più GPU, `N` conta i campioni di tutte le GPU.
 - **Applicato con un solo λ** **[Nostra scelta]**:
-  - alle rappresentazioni della posa, **separatamente per articolatore**, in **tutti** i bracci: `SIGReg_posa = ¼ · Σ_a SIGReg({s_{t,a}})`. È un termine di loss nella configurazione di riferimento, dove l'encoder di posa è addestrabile (§4.4.3); nell'ablation ESP-3, con S-JEPA congelato, diventa diagnostica, perché non può spostare un target fermo, e su quel target anisotropo resterebbe comunque alto;
+  - al bersaglio di posa, **separatamente per vista**, in **tutti** i bracci: `SIGReg_posa = ½ · [ SIGReg({s_t}) + SIGReg({s̃_t}) ]`, sui passi con qualche giunto presente (`worldsign-posa.md` §4.2);
   - a **ciascuna modalità separatamente**, con le stesse direzioni: `SIGReg_sem = ½ · [ SIGReg({ŷ}) + SIGReg({ẽ}) ]`, nei bracci **A, B e C** di ESP-1 (non in A₀ e B₀, §4.5.7). È come LeJEPA lo applica, a ogni vista separatamente [Lett. 35].
 
-**Perché per articolatore e non sull'unione dei quattro [Nostra argomentazione].** SIGReg garantisce qualcosa solo sulla distribuzione su cui è calcolato [Lett. 35]. Sull'unione, un articolatore può perdere varianza lungo poche direzioni ed essere compensato dagli altri, senza che il test lo rilevi:
-
-```
-lungo una direzione: se p_a = N(0, σ²) e gli altri tre articolatori compensano,
-la miscela resta N(0, 1)  se e solo se  σ ≥ ¼          (fino al 94 % di varianza persa)
-
-su k direzioni insieme:   σ ≥ 4^(−1/k)          k = 1 → 0,25   ·   k = 2 → 0,50   ·   k = 4 → 0,71
-```
-
-Il vincolo per articolatore dà a ciascuno la garanzia piena, a costo nullo. L'identità dell'articolatore non resta nella distribuzione, ma non serve: lettura e ancora sanno già quale articolatore trattano. Gli effetti su retrieval e metriche si monitorano (§4.13.3). **Lo stesso argomento vale per le due modalità:** sull'unione, `ŷ` ed `ẽ` potrebbero compensarsi a vicenda; separatamente, ciascuna ha la garanzia piena.
-- **Tutto il batch effettivo per valutazione**, raccolto su tutte le GPU: 128 campioni per modalità in `SIGReg_sem`, 128 × 32 per articolatore in `SIGReg_posa`. Il bias di minibatch è `O(1/N)`; 128 è il batch più piccolo testato da LeJEPA, ancora competitivo [Lett. 35] **[Nostra scelta]**.
+**Perché per modalità e per vista [Nostra argomentazione].** SIGReg garantisce qualcosa solo sulla distribuzione su cui è calcolato [Lett. 35]: sull'unione, `ŷ` ed `ẽ` potrebbero compensarsi a vicenda; separatamente, ciascuna ha la garanzia piena. Il bersaglio di posa è un vettore per passo che concatena i quattro articolatori (§4.4.3): non ci sono più insiemi per articolatore.
+- **Tutto il batch effettivo per valutazione**, raccolto su tutte le GPU: 128 campioni per modalità in `SIGReg_sem`, fino a 128 × 32 passi per vista in `SIGReg_posa`. Il bias di minibatch è `O(1/N)`; 128 è il batch più piccolo testato da LeJEPA, ancora competitivo [Lett. 35] **[Nostra scelta]**.
 
 #### 4.5.7 Obiettivo complessivo e bracci di ESP-1
 
 ```
-L  =  (1 − λ) · ( E_fis  +  L_anchor  +  L_pred_sem )  +  λ · ( SIGReg_posa  +  SIGReg_sem )          λ = 0,05
+L  =  (1 − λ) · ( L_inv + L_anchor  +  E_fis  +  L_pred_sem )  +  λ · ( SIGReg_posa  +  SIGReg_sem )          λ = 0,05
 ```
 
 `L_pred_sem` e `SIGReg_sem` dipendono dal braccio di ESP-1:
@@ -945,12 +901,12 @@ Tutti i bracci usano lo stesso batch effettivo di 128 clip, InfoNCE compreso (§
 |---|---|
 | λ = 0,05 fra termini predittivi e SIGReg | è la forma della loss di LeJEPA; λ = 0,05 è un *«default robusto»* e le prestazioni sono *«stabili al variare di λ»* [Lett. 35] |
 | Pesi dentro `E_fis` | quelli di V-JEPA 2.1 (§4.5.2) [Lett. 32] |
-| Pesi uguali fra `E_fis`, `L_anchor` e `L_pred_sem` | sommare le loss con pesi uguali *«eguaglia o supera gli ottimizzatori multi-task complessi»* [Lett. 96] |
+| Pesi uguali fra i termini predittivi | sommare le loss con pesi uguali *«eguaglia o supera gli ottimizzatori multi-task complessi»* [Lett. 96] |
 
-- **Condizione perché i pesi uguali abbiano senso [Nostra argomentazione]:** scale confrontabili per costruzione. `E_fis` è una L1 media per canale contro un target normalizzato con layer norm (media 0 e varianza 1 sui canali di ogni vettore), quindi di ordine 1; `E_sem = 1 − coseno` sta fra 0 e 2; `L_anchor` si divide per la varianza dei keypoint, così che predire la media valga 1.
-- **Cosa resta incerto:** il rapporto fra i tre termini predittivi non ha un precedente diretto nella nostra configurazione; i pesi uguali sono il default della letteratura, non una prova. Rete di sicurezza: l'allarme sulla quota di gradiente (§4.13.3), con correzione decisa solo alle fermate F1 e F2.
+- **Con l'addestramento per livello i pesi fra livelli non contano [Nostra argomentazione, 3/10].** Ogni parametro riceve il gradiente di un solo livello, e con Adam la scala di una loss non cambia l'aggiornamento dei parametri che ricevono solo quella (`worldsign-gerarchia.md` §3). Contano solo i rapporti dentro un livello: invarianza, ancora e SIGReg sulla posa; `E_sem` e SIGReg semantico.
+- **Condizione perché i pesi uguali abbiano senso dentro un livello [Nostra argomentazione]:** scale confrontabili per costruzione. `L_inv` è di ordine 1 con `s` vicino a `N(0, I)`; `L_anchor` si divide per la varianza dei keypoint, così che predire la media valga 1; `E_sem = 1 − coseno` sta fra 0 e 2.
 
-Il livello fisico, l'ancora e SIGReg sulla posa sono **identici in tutti i bracci**: i bracci differiscono solo nella loss semantica.
+Il livello della posa e quello fisico sono **identici in tutti i bracci**: i bracci differiscono solo nella loss semantica.
 
 #### 4.5.8 Perché i termini non si ostacolano
 
@@ -1040,10 +996,11 @@ inferenza       retrieval = argmin di F_sem;  nel braccio C la similarità è il
 
 | Elemento | H-JEPA [Lett. 27] | Questo progetto |
 |---|---|---|
-| Livelli | JEPA impilate | **due livelli di astrazione** su un encoder video condiviso |
+| Livelli | JEPA impilate | **tre livelli**: posa (bersaglio), fisico, semantico; il semantico legge l'encoder adattato dal fisico |
 | Predictor per livello | sì | sì: fisico e semantico |
 | Predizione a tutti i livelli | sì | sì |
-| Livello basso dettagliato, alto astratto | sì | fisico denso per articolatore; semantico globale per clip |
+| Livello basso dettagliato, alto astratto | sì | fisico denso per passo; semantico globale per clip |
+| Addestramento | per livello o globale [Lett. 27] | **per livello**, con stop-gradient fra i livelli; «globale» come ablation |
 | Variabile latente | sì | solo nell'ablation facoltativa ESP-4 |
 | Variabile azione e pianificazione | sì | **no**: non agiamo sul mondo |
 
@@ -1057,9 +1014,9 @@ inferenza       retrieval = argmin di F_sem;  nel braccio C la similarità è il
 | Elemento | V-JEPA 2.1 [Lett. 32] | Nostro livello fisico |
 |---|---|---|
 | Maschera | multi-blocco, ~90 % | **identica** |
-| Loss | densa: mascherati + visibili vicini, L1 pesata per distanza | **identica**, letta per articolatore |
+| Loss | densa: mascherati + visibili vicini, L1 pesata per distanza | **stessi pesi**, letta per passo |
 | Predizione multi-livello | 4 livelli in ingresso e in uscita (non nei modelli distillati) | **fusione dei 4 livelli in ingresso**, un'uscita verso la posa |
-| Target encoder | EMA dello stesso encoder video | encoder di **posa** addestrabile, LR ×0,05, senza EMA (congelato nell'ablation ESP-3) |
+| Target encoder | EMA dello stesso encoder video | encoder di **posa** da zero, letto con lo stop-gradient e addestrato con i suoi termini, senza EMA |
 
 | Elemento | VL-JEPA [Lett. 34] | Nostro livello semantico |
 |---|---|---|
@@ -1080,18 +1037,18 @@ Stime con formule standard: un blocco transformer con MLP 4× ha ≈ `12·d²` p
 | Encoder video ViT-L | V-JEPA 2.1 | 300 M | — | — |
 | ├ LoRA r = 16, 24 blocchi (attenzione e MLP) | — | — | 7,08 M | vincolato |
 | └ LayerNorm e bias | — | — | 0,10 M | vincolato |
-| Encoder di posa S-JEPA, 8 blocchi, d = 256 | pre-addestrato da noi (§4.4.3) | 6,35 M | ~0,15 M (addestrabile, riferimento); 0 nell'ablation ESP-3 | vincolato |
+| Encoder di posa: 4 parti a 128, temporale a 512, `Linear(512 → 256)` | da zero (§4.4.3) | — | 8,06 M | libero |
 | Predictor fisico, 12 blocchi, d = 384 | V-JEPA 2.1 **[Aperto: PC6]** | ~22 M | — | — |
 | ├ LoRA r = 16 (12 blocchi) | — | — | 1,33 M | vincolato |
 | ├ fusione multi-livello: 4 LayerNorm, Linear 4.096 → 1.024, Linear 1.024 → 384 | da zero, inizializzazione in §4.10 | — | 4,60 M | libero |
-| └ testa verso lo spazio della posa (`384 → C`, `C = 256`) | da zero | — | 0,10 M | libero |
+| └ testa di lettura per passo (`4·384 → C`, `C = 256`) | da zero | — | 0,39 M | libero |
 | Predictor semantico: 4 blocchi d = 384, proiezioni `1024 → 384` e `384 → 512`, 8 query | da zero | — | 7,67 M | libero |
-| Teste `D_pose` (4) | da zero | — | ~0,04 M | libero |
-| Testa testuale MLP, `768 → 512 → 512` | standard (stadio 2a) | — | 0,66 M | libero |
+| Decoder dell'ancora `D` (`256 → 138`) | da zero | — | 0,04 M | libero |
+| Testa testuale MLP, `768 → 512 → 512` | standard (stadio P) | — | 0,66 M | libero |
 | EmbeddingGemma-300M | — | 0 in GPU (precalcolato) | 0 | — |
-| **Totale** | | **≈ 332 M** | **≈ 21,7 M** | **8,7 vincolati · 13,0 liberi** |
+| **Totale** | | **≈ 326 M** | **≈ 29,9 M** | **8,5 vincolati · 21,4 liberi** |
 
-**Margine di ~0,3 M rispetto al tetto di 22 M.** Nell'ablation ESP-3, con l'encoder di posa congelato, gli addestrabili scendono di ~0,15 M, entro la tolleranza di P3. Conseguenze:
+**Margine di ~0,06 M rispetto al tetto di 30 M** (conteggio misurato in `worldsign-architettura.md` §9: 29.939.466). Conseguenze:
 
 | Eventualità | Effetto sul totale |
 |---|---|
@@ -1109,17 +1066,17 @@ Unità: **1 = un forward dell'encoder ViT-L su tutti gli 8.192 token.** FLOP per
 |---|---|
 | Forward del passaggio fisico | encoder su ~820 token ≈ 0,06 · predictor fisico su 8.192 token ≈ 0,12 → **≈ 0,18** |
 | Forward del passaggio semantico | encoder su 8.192 token = 1,00 · predictor semantico ≈ 0,04 → **≈ 1,04** |
-| **Passo completo** | `3 × (0,18 + 1,04)` ≈ **3,7** |
-| Quota del passaggio semantico | **≈ 85 %** |
-| Stadio 1 del curriculum (solo fisico, §4.10) | ≈ 0,55 |
+| **Passo completo** | il passaggio semantico non fa backward nell'encoder (addestramento per livello): `3 × 0,18 + 1,00 + 3 × 0,04` ≈ **1,7**; l'encoder di posa è trascurabile **[Nostra stima, 3/10]** |
+| Quota del passaggio semantico | **≈ 65 %** |
+| Stadio P del curriculum (posa e semantico, §4.10) | ≈ 1,1 |
 | ViT-L rispetto a ViT-B, a parità di token | ≈ 2,5× per passo (i predictor restano uguali) |
 | Braccio C (InfoNCE) | stesso costo degli altri bracci: batch 128, senza GradCache (§4.14) |
 | Risoluzione 384² (18.432 token) | ≈ 3,4× l'encoder a 256²: il termine d'attenzione cresce col quadrato |
 | Ramo testuale | ~0: embedding precalcolati |
 | Fusione multi-livello | trascurabile: un MLP sui ~820 token visibili |
-| **Durata di una run su 2 H100 da 80 GB**, 6 epoche senza early stopping (§4.10) | Con utilizzo del calcolo al 30–40 %: ViT-B ≈ 3,5–6 giorni (stima centrale ≈ 4,6) · ViT-L ≈ 9–15 giorni (≈ 11,6). **Calibrazione su una run precedente** sulle stesse 2 GPU (ViT-L a 384², 64 frame, batch 512, ~312 s per passo): utilizzo effettivo del calcolo ≈ 10 %. Le metriche di sistema di quella run (102 ore) mostrano GPU attive ~90 % del tempo ma memoria occupata al 28 %, micro-batch da 4 clip con GradCache (che aggiunge un passaggio in avanti), ricalcolo delle attivazioni su tutti i blocchi e CPU al 5 %: il limite è il modo in cui la GPU viene usata, non il caricamento dei dati. A quell'efficienza i tempi vanno moltiplicati per ~3,8. Ipotesi: circa 989 TFLOPs di picco in bf16 per GPU (valore usato da torchtitan per H100, da verificare), activation checkpointing, scalatura quasi lineare su 2 GPU perché la LoRA rende minima la sincronizzazione dei gradienti |
+| **Durata di una run su 2 H100 da 80 GB**, 6 epoche senza early stopping (stima del 29/9; con 15 epoche e il passo a ≈ 1,7 i tempi vanno moltiplicati per ≈ 1,15, §4.10) | Con utilizzo del calcolo al 30–40 %: ViT-B ≈ 3,5–6 giorni (stima centrale ≈ 4,6) · ViT-L ≈ 9–15 giorni (≈ 11,6). **Calibrazione su una run precedente** sulle stesse 2 GPU (ViT-L a 384², 64 frame, batch 512, ~312 s per passo): utilizzo effettivo del calcolo ≈ 10 %. Le metriche di sistema di quella run (102 ore) mostrano GPU attive ~90 % del tempo ma memoria occupata al 28 %, micro-batch da 4 clip con GradCache (che aggiunge un passaggio in avanti), ricalcolo delle attivazioni su tutti i blocchi e CPU al 5 %: il limite è il modo in cui la GPU viene usata, non il caricamento dei dati. A quell'efficienza i tempi vanno moltiplicati per ~3,8. Ipotesi: circa 989 TFLOPs di picco in bf16 per GPU (valore usato da torchtitan per H100, da verificare), activation checkpointing, scalatura quasi lineare su 2 GPU perché la LoRA rende minima la sincronizzazione dei gradienti |
 
-**Il passaggio semantico non mascherato domina il costo.** Se la misura nella dry run (PC7) sfora il budget, c'è un **ripiego**: scartare **token casuali al 50 %** nel solo passaggio semantico, per efficienza e non come compito predittivo. Il costo del passo scende a ≈ 1,8.
+**Il passaggio semantico non mascherato domina il costo.** Se la misura nella dry run (PC7) sfora il budget, c'è un **ripiego**: scartare **token casuali al 50 %** nel solo passaggio semantico, per efficienza e non come compito predittivo. Il costo del passo scende a ≈ 1,2 (era ≈ 1,8 su 3,7 prima che il passaggio semantico perdesse il backward nell'encoder).
 - Il precedente: in CLIP, scartare il 50 % dei patch dà ~2× di velocità e ~+1 % di accuratezza [Lett. 79]; nella fase video–testo di UMT si maschera l'80 % dei token video [Lett. 78].
 - **Cautela [Nostra ipotesi]:** entrambi sono contrastivi, dove conta solo l'ordinamento relativo; nella nostra regressione il rischio di predire la media è maggiore.
 - **Token casuali e non blocchi [Nostra argomentazione]:** lasciano ogni articolatore parzialmente visibile nei frame, mentre i tubi a blocchi possono cancellare una mano per tutta la clip.
@@ -1133,16 +1090,16 @@ Valori **di partenza**, da calibrare nella dry run **[Nostra scelta]**:
 | Voce | Valore |
 |---|---|
 | Ottimizzatore | AdamW, β = (0,9; 0,999), come V-JEPA 2.1 [Lett. 32] |
-| Weight decay | 0,04 costante, come V-JEPA 2.1 [Lett. 32], su matrici LoRA e moduli liberi; 0 su norme, bias ed embedding |
-| **Epoche** | **6 epoche** sul corpus con didascalie, nelle proporzioni naturali fra lingue (§3.5). I video senza didascalia affidabile entrano solo nel passaggio fisico |
-| **Early stopping** | **pazienza di 2 epoche.** La metrica per decidere (media di R@1 T2V e V2T sullo split held-out channel) si valuta a fine epoca; se non migliora per 2 epoche consecutive, la run si ferma e si fa il **cooldown dal checkpoint migliore** (riga «Schedule») **[Nostra scelta]** |
+| Weight decay | 0,04 costante, come V-JEPA 2.1 [Lett. 32], su matrici LoRA e moduli liberi; 0 su norme, bias, posizioni ed embedding |
+| **Epoche** | **15 epoche** sul corpus con didascalie, nelle proporzioni naturali fra lingue (§3.5) **[Nostra scelta, 3/10]**. I video senza didascalia affidabile entrano solo nel passaggio fisico |
+| **Early stopping** | **pazienza di 3 epoche, contata nello stadio F** (prima l'encoder non è ancora adattato). La metrica per decidere (media di R@1 T2V e V2T sullo split held-out channel) si valuta a fine epoca; se non migliora per 3 epoche consecutive, la run si ferma e si fa il **cooldown dal checkpoint migliore** (riga «Schedule») **[Nostra scelta, 3/10]** |
 | **Batch effettivo** | **128 in tutti i bracci**, InfoNCE compreso (revisione del 29/9, §4.14). 128 è il batch più piccolo testato da LeJEPA, ancora competitivo [Lett. 35], ed è il numero di video per batch di V-JEPA 2.1 [Lett. 32] |
-| Micro-batch per SIGReg | 128 clip, uguale in tutti i bracci: 128 campioni per modalità (`{ŷ}` e `{ẽ}` separatamente) e 128 × 32 per articolatore |
-| **Passi** | al massimo, senza early stopping: 6 × ~3,2 M ≈ 19,2 M clip viste → **≈ 150.000 passi** a batch 128 **[Nostra stima, da ricalcolare quando la cardinalità del dataset è definitiva]** |
-| Learning rate | ricerca su {1e-4, 2e-4, 5e-4} nella dry run (PC7), a batch 128; **×0,05 per la LoRA dell'encoder di posa**, come l'encoder del target di VL-JEPA [Lett. 34] |
-| **Schedule** | **come V-JEPA 2** [Lett. 31]: warmup lineare, fase costante, cooldown lineare. Proporzioni di V-JEPA 2: warmup 12k e cooldown 12k su 252k passi, cioè ≈ 5 % ciascuno. **Con l'early stopping** il cooldown non resta fissato in fondo: se la run si ferma prima, si riparte dal checkpoint migliore e si fa lì il cooldown (≈ 5 % dei passi previsti); lo schedule lo consente, perché *«si possono avviare più cooldown da checkpoint diversi della fase costante»* [Lett. 31] |
+| Micro-batch per SIGReg | 128 clip, uguale in tutti i bracci: 128 campioni per modalità (`{ŷ}` e `{ẽ}` separatamente) e fino a 128 × 32 passi per vista della posa |
+| **Passi** | al massimo, senza early stopping: 15 × ~3,2 M ≈ 48 M clip viste → **≈ 375.000 passi** a batch 128 **[Nostra stima, da ricalcolare quando la cardinalità del dataset è definitiva]** |
+| Learning rate | ricerca su {1e-4, 2e-4, 5e-4} nella dry run (PC7), a batch 128; **3e-4 per l'encoder di posa** (`worldsign-posa.md` §4.3) |
+| **Schedule** | **un gruppo per famiglia** (`worldsign-gerarchia.md` §6.2): ogni famiglia tranne la posa sale linearmente per **2 epoche** dalla sua entrata, poi resta costante; la posa sale sul **20 %** della run, poi scende con un **coseno** a 0. Su tutto, il **cooldown di V-JEPA 2** [Lett. 31]: lineare a 0 sul 5 % dei passi. **Con l'early stopping** il cooldown non resta fissato in fondo: si riparte dal checkpoint migliore e si fa lì; lo schedule lo consente, perché *«si possono avviare più cooldown da checkpoint diversi della fase costante»* [Lett. 31] |
 | Peso λ della loss sui token visibili | 0,5 con warm-up progressivo, come V-JEPA 2.1 [Lett. 32] |
-| **Durata degli stadi** | 1a ≈ 1 % · 1 ≈ 5 % · 2a ≈ 1 % dei passi, da confermare in PC7 |
+| **Durata degli stadi** | P = epoca 1 · F₀ = epoca 2 · F = dall'epoca 3 **[Nostra scelta, 3/10]** |
 | Validazione e checkpoint | ogni ~500.000 clip viste (4.000 passi a batch 128), su 2.000 clip dello split held-out channel |
 | Precisione | bf16, pesi master in fp32 per le LoRA |
 | Clipping del gradiente | nessuno, come V-JEPA 2.1 [Lett. 32] |
@@ -1151,39 +1108,38 @@ Valori **di partenza**, da calibrare nella dry run **[Nostra scelta]**:
 | Braccio InfoNCE | temperatura apprendibile (init 0,07); batch 128, come gli altri bracci |
 | ESP-4 (facoltativa) | frazione ε del rilassamento **[Aperto: PC7]** |
 
-**Curriculum** [Nostra scelta], ispirato ai tre stadi di Uni-Sign, dove il pretraining su larga scala porta la traduzione da **3,75 a 25,27 BLEU-4** [Lett. 8]:
+**Curriculum** [Nostra scelta, 3/10] (`worldsign-gerarchia.md` §6):
 
 ```
 Stadio 0    precalcolo: selezione dei 64 frame, pose, embedding testuali, medie per lingua
-Stadio 1a   solo i moduli fisici nuovi (fusione, testa fisica, teste D_pose); tutte le LoRA congelate
-Stadio 1    livello fisico completo:  E_fis + L_anchor + SIGReg_posa        ≈ 15 % del costo di un passo completo
-Stadio 2a   solo i moduli semantici nuovi (predictor semantico, testa del testo); LoRA video congelata
-Stadio 2    tutto
+Stadio P    epoca 1         posa + semantico: encoder di posa, predictor semantico, testa del testo; LoRA ferme
+Stadio F₀   epoca 2         + livello fisico: fusione e testa di lettura; LoRA ancora ferme
+Stadio F    dall'epoca 3    tutto: anche la LoRA del predictor fisico e dell'encoder video
 Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-Daily; poi SLT, SLR, SLP
 ```
 
-**Perché gli stadi 1a e 2a** [Lett. 95]. Addestrare insieme una testa casuale e il corpo pre-addestrato *«distorce le feature pre-addestrate»*; addestrare prima la sola testa dà +1 % in distribuzione e +10 % fuori distribuzione rispetto al fine-tuning completo. Da noi i moduli nuovi sono la fusione e le teste fisiche (stadio 1a), il predictor semantico e la testa del testo (stadio 2a).
+**Perché lo stadio P [Nostra argomentazione].** La LoRA non deve inseguire un bersaglio di posa ancora casuale; il semantico parte subito, su V-JEPA 2.1 pre-addestrato, come VL-JEPA [Lett. 34].
 
-**Perché lo stadio 1 [Nostra argomentazione].** Il target di posa e il livello fisico si stabilizzano prima che il gradiente semantico raggiunga l'encoder condiviso; ed è lo stadio più economico.
+**Perché lo stadio F₀** [Lett. 95]. Addestrare insieme una testa casuale e il corpo pre-addestrato *«distorce le feature pre-addestrate»*; addestrare prima la sola testa dà +1 % in distribuzione e +10 % fuori distribuzione rispetto al fine-tuning completo. Stadi da un'epoca hanno precedenti in ULMFiT e LLaVA (`worldsign-gerarchia.md` §6.1).
 
 **Inizializzazione.**
 - LoRA con B = 0 e A gaussiana: al passo 0 ogni matrice adattata coincide con quella pre-addestrata [Lett. 67].
 - Token di maschera a zero, come nella configurazione di V-JEPA 2.1 [Lett. 72].
-- Fusione multi-livello: se PC6 lo consente, inizializzata in modo da riprodurre il predictor distillato sull'ultimo livello, con i pesi degli altri tre livelli a zero; altrimenti inizializzazione standard, protetta dallo stadio 1a **[Nostra scelta]**.
+- Fusione multi-livello: se PC6 lo consente, inizializzata in modo da riprodurre il predictor distillato sull'ultimo livello, con i pesi degli altri tre livelli a zero; altrimenti inizializzazione standard, protetta dallo stadio F₀ **[Nostra scelta]**.
 - Nessuna calibrazione dei pesi delle loss al passo 0: con B = 0 il gradiente sulle matrici A è nullo e le teste nuove sono casuali, quindi le norme misurate in quel momento non rappresentano l'importanza dei termini **[Nostra argomentazione, su Lett. 67]**.
 
 ### 4.11 Regolarizzazione contro l'overfitting
 
 | Misura | Motivo |
 |---|---|
-| Encoder video, encoder di posa e predictor fisico congelati + LoRA | il vincolo più forte sulla capacità |
-| Tetto di 22 M di parametri addestrabili (≈ 21,6 M usati) | §3.4 |
-| Rango 4 e learning rate ×0,05 sull'encoder di posa | il target si muove lentamente (§2.4) |
-| Ancora di ricostruzione dei keypoint | il target resta fedele al corpo |
+| Encoder video e predictor fisico congelati + LoRA | il vincolo più forte sulla capacità |
+| Tetto di 30 M di parametri addestrabili (≈ 29,9 M usati) | §3.4, `worldsign-posa.md` §3 |
+| Stop-gradient fra i livelli; coseno sul learning rate della posa | il video non sposta il suo bersaglio, che rallenta mentre il video lo insegue |
+| Ancora di ricostruzione dei keypoint, invarianza fra viste | il target resta fedele al corpo e robusto al rumore del rilevatore |
 | Stochastic depth e dropout nel predictor semantico e nelle teste | regolarizzazione standard dei moduli da zero |
 | LayerScale nei rami residui del predictor semantico | stabilità con pochi dati |
 | Weight decay selettivo | |
-| **Early stopping sullo split held-out channel**, pazienza 2 epoche | misura la generalizzazione a segnanti mai visti |
+| **Early stopping sullo split held-out channel**, pazienza 3 epoche nello stadio F | misura la generalizzazione a segnanti mai visti |
 | SIGReg | vincola la distribuzione degli embedding |
 | Augmentation (§3.8) | |
 
@@ -1199,7 +1155,7 @@ Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-
 | **PC2** | Baseline: casuale; solo statistiche della didascalia; **regressione ridge da feature V-JEPA congelate a embedding testuali** | la soglia minima da battere |
 | **PC3** | 20.000 clip, feature congelate sull'**uscita dell'encoder** di V-JEPA 2.1-L distillato e di V-JEPA 2-L; tre probe lineari: keypoint delle mani dal riquadro (R²), proprietà fonologiche su segni isolati [Lett. 74–76], regressione ridge verso il testo (R@1) | scelta dell'encoder video: vince il migliore su almeno 2 probe su 3; a parità, 2.1-L **[Nostra proposta]**. **Chiuso il 29/9: V-JEPA 2.1-L**, a parità sui due probe calcolabili (§4.4.1) |
 | **PC4** | Gli stessi probe a 256² e a 384², entrambi con crop | risoluzione: 384² solo se il probe delle mani guadagna più di +0,05 di R², perché il costo dell'encoder triplica **[Nostra proposta]**. **Chiuso il 29/9: 256²**, guadagno +0,005 |
-| **PC5** | Scelta dell'encoder di posa fra feature cinematiche, Uni-Sign congelato, MAMP e S-JEPA, sulle stesse clip: R² di una lettura lineare di posizioni e velocità per articolatore (**≥ 0,7**), rango effettivo e IsoScore, riconoscimento di canale e lingua | **chiuso il 2026-09-20: S-JEPA** (§4.4.3) |
+| **PC5** | Scelta dell'encoder di posa fra feature cinematiche, Uni-Sign congelato, MAMP e S-JEPA, sulle stesse clip: R² di una lettura lineare di posizioni e velocità per articolatore (**≥ 0,7**), rango effettivo e IsoScore, riconoscimento di canale e lingua | chiuso il 2026-09-20: S-JEPA. **Superato il 3/10:** l'encoder di posa si addestra da zero (§4.4.3) |
 | **PC6** | I checkpoint 2.1-L e 2.1-B contengono i pesi del predictor? Dimensioni d'ingresso e d'uscita? Struttura della proiezione d'ingresso e presenza delle LayerNorm per livello nell'encoder? Con i pesi dei tre livelli aggiuntivi a zero, il predictor con fusione dà la stessa uscita di quello distillato? | **riuso del predictor fisico o ripiego** (§4.4.5); innesto della fusione multi-livello |
 | **PC7** | **Dry run**: 1 % dei video (~32.000 clip), architettura completa su **ViT-L**, tutta la diagnostica ogni 50 passi; run brevi (~2.000 passi) con learning rate 10⁻⁴, 2·10⁻⁴ e 5·10⁻⁴ a batch 128, l'unico del piano (§4.14); **misura del costo per passo** (stima 3,7) | learning rate (loss di validazione più bassa senza instabilità), soglie degli allarmi rispetto al loro rumore naturale, valore di L, durata degli stadi, eventuale ripiego sui token del passaggio semantico |
 | **PC8** | **Tolto il 29/9** (piano solo ViT-L, §4.14). Era: tre run ViT-B identiche tranne il seed, per stimare `σ_seed` | senza `σ_seed` gli effetti si leggono con gli intervalli bootstrap; **[Aperto]** un secondo seed di θ\* |
@@ -1208,7 +1164,7 @@ Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-
 
 **Revisione del 29/9 [Nostra scelta].** Senza la scala ViT-B, la run di gate è la **run 1 del piano (§4.14): architettura completa, ViT-L, braccio A** (allineamento + SIGReg, la configurazione della tesi), sul corpus di pretraining. Test diretto su OpenASL, **senza fine-tuning** (R@1 T2V; riferimento C²RL = 62,2, ottenuto con fine-tuning [Lett. 87]): il confronto è quindi prudente.
 
-**Quando partono le altre run.** Gli altri quattro bracci di ESP-1 partono in parallelo quando la run di gate supera la fermata F2 (§4.13.5); se la run di gate si ferma a F3, si fermano anche loro. ESP-2, ESP-3 ed ESP-4 (facoltativa) partono alla fine di ESP-1, sulla configurazione migliore θ\*. Un problema dell'architettura costa così una run sola.
+**Quando partono le altre run.** Gli altri quattro bracci di ESP-1 partono in parallelo quando la run di gate supera la fermata F2 (§4.13.5); se la run di gate si ferma a F3, si fermano anche loro. ESP-2, ESP-6 ed ESP-4 (facoltativa) partono alla fine di ESP-1, sulla configurazione migliore θ\*. Un problema dell'architettura costa così una run sola.
 
 | Esito finale (F4) | Decisione |
 |---|---|
@@ -1267,7 +1223,7 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 
 | Test | Cosa verifica | Esito atteso | Costo **[Nostra stima]** |
 |---|---|---|---|
-| **Riproduzione dei pesi** | encoder video (LoRA a zero) ed EmbeddingGemma confrontati con le uscite del codice ufficiale sugli stessi input (20 clip, 1.000 didascalie); encoder di posa S-JEPA ricaricato e confrontato con le uscite salvate al termine del suo pre-addestramento (20 sequenze di posa); elenco delle chiavi del checkpoint non caricate | coseno medio per token > 0,999 e differenza massima < 10⁻³ in fp32; nessuna chiave mancante inattesa. Intercetta normalizzazione dei pixel, canali o frame in ordine sbagliato, RoPE mal configurata, pesi caricati a metà | < 1 ora |
+| **Riproduzione dei pesi** | encoder video (LoRA a zero) ed EmbeddingGemma confrontati con le uscite del codice ufficiale sugli stessi input (20 clip, 1.000 didascalie); elenco delle chiavi del checkpoint non caricate | coseno medio per token > 0,999 e differenza massima < 10⁻³ in fp32; nessuna chiave mancante inattesa. Intercetta normalizzazione dei pixel, canali o frame in ordine sbagliato, RoPE mal configurata, pesi caricati a metà | < 1 ora |
 | **Prompt di EmbeddingGemma** | la model card prescrive prefissi per compito, per esempio `task: search result \| query: …` e `title: none \| text: …` [Lett. 57]; se ne fissa uno, se ne salva l'impronta (hash) accanto agli embedding e si verifica che sia identica in PC1, addestramento e valutazione; si ricodificano 100 didascalie a caso (coseno > 0,9999 con quelle salvate) | stesso prefisso ovunque: un prefisso diverso cambia la geometria senza errori visibili **[Nostra argomentazione]** | minuti |
 | **Allineamento video–posa** | 50 clip: i 64 frame si decodificano con il dataloader d'addestramento, si riesegue lo stimatore di posa su quei frame e si confronta con la posa salvata. Decoder diversi o video a frequenza variabile possono sfasare gli indici | errore medio dei keypoint delle mani < 2 % della larghezza del frame, senza sfasamenti sistematici **[Nostra proposta]**; altrimenti `E_fis` ha un pavimento alto e l'errore è silenzioso | < 1 ora |
 | **Riquadri e normalizzazione della posa** | riquadri degli articolatori disegnati su 50 clip (controllo a occhio); frazione di riquadri fuori immagine; frazione di frame senza spalle affidabili; media, deviazione standard e massimo dei keypoint normalizzati | riquadri sulle mani nelle 50 clip; riquadri fuori immagine **entro un limite per articolatore** — mani ≤ 5 %, volto ≤ 1 %, corpo solo riportato, perché nelle inquadrature a mezzo busto gomiti e fianchi escono dal bordo per natura **[Nostra proposta, provvisoria]**; nessun NaN; keypoint entro 5 larghezze di spalle. Il limite unico dell'1 % falliva su OpenASL per il corpo (4,4 %) e per le mani (2,7 e 1,6 %): i valori si fissano sulle clip di test di YouTube-SL-25. Stessa soglia di confidenza della pipeline (1,0). Se le spalle mancano, o distano meno di metà della mediana della clip, si usa la scala dell'ultimo frame valido (§3.6) | < 1 ora |
@@ -1277,7 +1233,7 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 | **Efficienza di calcolo** | tre misure durante 200 passi reali: (i) clip al secondo del solo dataloader; (ii) FLOP effettivi al secondo confrontati con il picco teorico delle GPU (utilizzo del calcolo, MFU); (iii) memoria GPU occupata e occupazione dei core di calcolo. La percentuale di nvidia-smi da sola non basta: in una run precedente era ~90 % con un utilizzo del calcolo di ~10 % (§4.9) | utilizzo del calcolo ≥ 30 % (i migliori addestramenti su larga scala stanno al 38–46 % [Lett. 97, 98]); memoria GPU ≥ 70 %; dataloader non limitante. Leve, in ordine: micro-batch grande quanto la memoria consente; ricalcolo delle attivazioni solo dove serve; bf16 ovunque; pre-estrazione dei frame solo se il dataloader risulta il limite. È il fattore che decide se una run dura settimane o mesi | ~1 ora |
 | **Testare i test** | ogni metrica su casi sintetici con risposta nota: R@k = 1 su embedding identici e ≈ k/N su casuali; allarme di collasso su vettori costanti; SIGReg ≈ 0 su gaussiane, alto su vettori costanti e su miscele; test di leak con token mascherati lasciati apposta nell'input; `ω` su un modello a media semplice; test col rumore su un modello che ignora il video | ogni allarme scatta quando deve, e solo allora | minuti |
 | **Stessi tensori** | R@k calcolato **esattamente** sui tensori della loss: `ŷ` dopo la proiezione, `ẽ` dopo la testa | coincidenza: una metrica calcolata su tensori diversi da quelli del punteggio è un errore silenzioso classico **[Nostra argomentazione]** | minuti |
-| **Grafo e ottimizzatore** | dopo 2 passi ogni parametro addestrabile ha gradiente non nullo (le matrici A della LoRA lo ricevono solo quando B ≠ 0); i pesi congelati sono invariati; il gruppo di parametri dell'encoder di posa ha learning rate ×0,05 | tutto conforme | minuti |
+| **Grafo e ottimizzatore** | dopo 2 passi ogni parametro addestrabile ha gradiente non nullo (le matrici A della LoRA lo ricevono solo quando B ≠ 0); i pesi congelati sono invariati; ogni famiglia del curriculum ha il suo gruppo e il suo schedule (`worldsign-gerarchia.md` §6.2) | tutto conforme | minuti |
 | **Infrastruttura** | salvataggio e ricaricamento danno la stessa loss su un batch fisso; la ripresa conserva l'ordine del campionatore; lo stesso seed dà le stesse prime loss; parametri identici su tutte le GPU dopo 10 passi; SIGReg sui campioni raccolti da tutte le GPU uguale al calcolo su una sola GPU | tutto conforme | < 1 ora |
 | **Mondo giocattolo** | 20.000 clip sintetiche con 4 forme colorate, una per «articolatore», che si muovono con inerzia e gravità e rimbalzano perdendo altezza; la «posa» sono centri e contorni delle forme; didascalie da modelli fissi («il cerchio rosso cade e rimbalza, il quadrato blu va a sinistra»); architettura completa su ViT-B per poche migliaia di passi | livello fisico migliore dell'interpolazione lineare sulle forme mascherate; R@1 > 20 % su 1.000 clip con combinazioni di movimenti mai viste; teletrasporto e video al contrario (rimbalzi che guadagnano altezza) alzano `Ē_fis`, un cambio di luminosità no. Verifica **l'intera catena** — maschere, 3D-RoPE, lettura, pesi della loss, due passaggi, SIGReg, valutazione — prima dei dati veri **[Nostra proposta]** | poche ore-GPU su ViT-B |
 | **Overfitting controllato** | 64 clip reali con **tutte** le loss attive | `E_fis` ed `E_sem` → ~0; R@1 = 100 % su quelle clip; R² degli articolatori visibili > 0,95 | < 1 ora |
@@ -1290,20 +1246,21 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 |---|---|
 | P1 | nessun canale in comune fra addestramento e validazione |
 | P2 | nessun segmento di YouTube-SL-25 sovrapposto a una clip di validazione o di test di OpenASL; nessun video dei test set di PHOENIX-2014T e CSL-Daily nel corpus (§3.9) |
-| P3 | parametri addestrabili pari a 21,6 M (± 1 %) |
+| P3 | parametri addestrabili tutti nel budget e sotto il tetto di 30 M (≈ 29,9 M) |
 | P4 | i pesi congelati sono davvero congelati |
 | P5 | checksum dei pesi pre-addestrati |
 | P6 | i token mascherati sono **rimossi** dall'input dell'encoder; indici di contesto e di target disgiunti |
 | P7 | statistiche della maschera: 8 blocchi brevi e 2 lunghi, rapporto medio ≈ 90 % |
 | P8 | nessun flip orizzontale |
-| P9 | posa nel formato dell'encoder S-JEPA: 69 keypoint, 32 passi di due frame, normalizzazione e guardie di §3.6 |
+| P9 | posa nel formato dell'encoder di posa: 69 keypoint, 32 passi di due frame, normalizzazione e guardie di §3.6 |
 | P10 | posa normalizzata: media ≈ 0, distanza fra le spalle ≈ 1 |
 | P11 | target testuali a media ≈ 0 per lingua |
 | P12 | trasformazioni geometriche applicate in modo identico a video e keypoint |
 | P13 | overfitting di un singolo batch con SIGReg disattivato (se non riesce: bug nel grafo) |
 | P14 | **la posa non raggiunge il predictor**: il gradiente dell'uscita del predictor fisico rispetto ai keypoint è nullo |
 | P15 | nel braccio InfoNCE, nessuna coppia dello stesso video nel denominatore |
-| P16 | SIGReg calcolato su tutto il batch effettivo: 128 campioni per modalità, 128 × 32 per articolatore |
+| P16 | SIGReg calcolato su tutto il batch effettivo: 128 campioni per modalità, fino a 128 × 32 passi per vista della posa |
+| P17 | **i livelli si addestrano separati** (`worldsign-gerarchia.md` §3): `E_fis` non dà gradiente all'encoder di posa, i termini della posa non ne danno al ramo video, i termini semantici non ne danno alla LoRA video (salvo l'ablation «globale») |
 
 #### 4.13.3 Allarmi durante l'addestramento
 
@@ -1313,14 +1270,14 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 | **Collasso** | effective rank e deviazione standard per dimensione di `s`, dell'uscita dell'encoder video mediata, di `ŷ` | < 0,5× il passo 0; **si guarda prima `s`**, il target | nullo |
 | **Predictor fisico** | `γ = Var(ŝ)/Var(s)`, `R²`, correlazione | `γ < 0,3` → predice la media; `R² > 0,98` subito → leak | nullo |
 | **Predictor semantico** | `γ = tr Cov(ŷ)/tr Cov(ẽ)`; `R² = 1 − media ‖ẽ − ŷ‖² / tr Cov(ẽ)` per lingua, in train e validazione | `γ < 0,3` → media; `R²` basso **anche in train** → ambiguità o sottoadattamento | nullo |
-| **Dinamica** | R² di `ŝ` sui riquadri mascherati contro la baseline «media di `s_{t,a}` negli istanti in cui `a` è visibile» | non la supera → nessuna dinamica appresa | nullo |
+| **Dinamica** | R² di `ŝ_t` sui passi soprattutto mascherati contro la baseline «media di `s_t` sui passi soprattutto visibili della stessa clip» | non la supera → nessuna dinamica appresa | nullo |
 | **Localizzazione** (§4.6) | `E_fis` con il riquadro spostato in una zona mascherata dove l'articolatore non c'è | cresce meno del 10 % → predizioni non localizzate | nullo: solo una lettura in più |
 | **Ordine temporale** | `ω = cos(ŷ(V), ŷ(V invertito))` | > 0,95 → predictor cieco all'ordine | basso: ogni 2.000 passi |
-| **Deriva dell'encoder video** | R² con cui l'uscita adattata predice la parte delle feature V-JEPA originali **non spiegata dalla posa** (feature originali salvate una volta) | < 0,5 → l'encoder si sta appiattendo sulla posa | una tantum + regressione ridge ogni 2.000 passi |
-| **Encoder di posa** | errore dell'ancora ed effective rank di `s` | l'ancora peggiora mentre `E_fis` scende → il target si semplifica | nullo |
+| **Deriva dell'encoder video** | R² con cui l'uscita adattata predice la parte delle feature V-JEPA originali **non spiegata dai keypoint** (feature originali salvate una volta) | < 0,5 → l'encoder si sta appiattendo sulla posa | una tantum + regressione ridge ogni 2.000 passi |
+| **Encoder di posa** | `L_inv`, `L_anchor`, `SIGReg_posa`; effective rank, deviazione, IsoScore e SIGReg di `s` | rango o deviazione sotto 0,5× il passo 0 → collasso; SIGReg oltre 1,5× il passo 0 → il target lascia `N(0, I)` | nullo |
 | Testa testuale | correlazione di Spearman fra le similarità prima e dopo la testa | < 0,8 → la testa sta alterando la semantica | nullo |
 | **Conflitto fra loss** | coseno fra i gradienti di `E_sem` e di SIGReg rispetto a `ŷ`; coseno fra i gradienti dei due passaggi sulla LoRA video | < −0,3 per 500 passi → target anisotropo, oppure posa e significato in conflitto | nullo: gradienti già separati |
-| LoRA | `‖ΔW‖ / ‖W‖` per blocco (video, posa, predictor fisico) | crescita rapida, oppure > 0,1 | nullo |
+| LoRA | `‖ΔW‖ / ‖W‖` per blocco (video, predictor fisico) | crescita rapida, oppure > 0,1 | nullo |
 | **Lingue piccole e sbilanciamento** | scarto train/val di `E_sem` per lingua in funzione delle epoche; R@1 ripartito per lingua (§4.13.4) | lo scarto cresce, o le lingue piccole restano molto indietro → lo sbilanciamento pesa: si cerca una soluzione (§3.5) | nullo |
 | **Modality gap** | accuratezza di un classificatore logistico che distingue `ŷ` da `ẽ` | > 95 % → spazi separati | minimo |
 | **Hubness** | asimmetria della distribuzione di quante volte ogni video compare nei primi k risultati [Lett. 83] | cresce → predizioni schiacciate verso il centro, cioè verso la media | nullo: dalla matrice di similarità di validazione |
@@ -1329,16 +1286,15 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 | **Scorciatoia sul testo** | R@1 con il video sostituito da rumore | cala meno del 50 % → il modello non guarda il video | basso: ogni 500 passi |
 | **Retrieval** | R@1 held-out channel | sotto la baseline ridge dopo il warmup | la validazione che serve comunque |
 | **Velocità del target di posa** | CKA lineare fra `s` al passo 0 e ora, su un batch sonda fisso [Lett. 91] | **diagnostica, non ferma il training**: rendere isotropo il target la abbassa per costruzione, perché la CKA lineare non è invariante a una mappa lineare non ortogonale [Lett. 91]; il contenuto si sorveglia con la riga successiva | nullo: 256 clip ogni 500 passi |
-| **Target di posa: isotropia e contenuto** | IsoScore di `s` per articolatore; R² di posizione e velocità dei keypoint letti linearmente da `s` sul batch sonda, contro PC5 | R² oltre 0,02 sotto PC5 → il target perde cinematica; IsoScore che non cresce → SIGReg sulla posa non agisce **[Nostra proposta, soglie da calibrare in PC7]** | basso: stesso batch sonda |
-| **Collasso per articolatore** | valore di SIGReg ed effective rank per mano sinistra, mano destra, busto e volto | un articolatore peggiora → collasso parziale | nullo |
-| **Effetti di SIGReg per articolatore** | coseno fra i gradienti di `SIGReg_posa` ed `E_fis` sulla LoRA di posa; quota di gradiente di `SIGReg_posa`; errore dell'ancora per articolatore; andamento di R@1 held-out ed `E_fis` | coseno stabilmente negativo, oppure R@1 o `E_fis` che peggiorano mentre cresce la quota di `SIGReg_posa` → il vincolo per articolatore danneggia il target o il retrieval, e va rivalutato **[Nostra proposta]** | nullo |
-| **Lettura per articolatore** | R² per articolatore e per copertura della maschera ρ | R² dei riquadri visibili non alto già all'inizio → bug di lettura o di riquadri; R² che non scende al crescere di ρ → maschera ignorata o leak | nullo |
-| **Errore in keypoint** | keypoint decodificati con `D_pose` dagli articolatori mascherati, confrontati con interpolazione dagli istanti visibili e con velocità costante | non batte le baseline → nessuna dinamica utile; è anche il risultato fisico **interpretabile** | nullo |
+| **Target di posa: isotropia e contenuto** | IsoScore, rango e SIGReg di `s`; R² di posizione e velocità dei keypoint di ogni articolatore letti linearmente da `s` sul batch sonda | R² sceso oltre 0,02 sotto **il suo massimo** → il target perde cinematica **[Nostra proposta, soglie da calibrare in PC7]** | basso: stesso batch sonda |
+| **Termini della posa in conflitto** | coseni fra i gradienti di `L_inv`, `L_anchor` e `SIGReg_posa` sull'encoder di posa, e loro quote | coseno ancora–SIGReg stabilmente sotto −0,3 → SIGReg combatte l'ancora **[Nostra proposta]** | nullo |
+| **Lettura per passo** | R² su tutti i passi, sui passi soprattutto visibili e soprattutto mascherati, per copertura della maschera ρ | R² dei passi visibili non alto già all'inizio → bug di lettura o di riquadri; R² che non scende al crescere di ρ → maschera ignorata o leak | nullo |
+| **Errore in keypoint** | keypoint decodificati con `D` dai passi soprattutto mascherati, confrontati con interpolazione dai passi visibili e con velocità costante | non batte le baseline → nessuna dinamica utile; è anche il risultato fisico **interpretabile** | nullo |
 | Articolatori esclusi | frazione di riquadri esclusi per bassa confidenza, per articolatore | mani escluse in massa → il livello fisico ignora proprio le mani | nullo |
 | **Query del predictor semantico** | coseno medio fra le uscite delle 8 query | ≈ 1 → query collassate, pooling inutile | nullo |
 | **Attenzione del predictor semantico** | entropia dell'attenzione delle query e quota di attenzione sui riquadri degli articolatori rispetto allo sfondo | attenzione uniforme o concentrata sullo sfondo → scorciatoia di sfondo o di canale | basso: batch piccolo ogni 500 passi |
 | LoRA per blocco | norma del gradiente della LoRA video per blocco | blocchi a gradiente nullo o esplosivo | nullo |
-| **Quota di gradiente per termine** | frazione della norma del gradiente sulla LoRA video dovuta a ciascun termine della loss | un termine sopra il 90 % per 500 passi → pesi sbilanciati; la correzione si decide solo alle fermate F1 e F2 | nullo |
+| **Quota di gradiente per termine** | frazione della norma del gradiente sulla LoRA video dovuta a ciascun termine; con l'addestramento per livello i termini semantici devono valere 0 | un termine semantico diverso da 0 → lo stop-gradient non agisce (bug); nell'ablation «globale», un termine sopra il 90 % per 500 passi → pesi sbilanciati | nullo |
 | **Numerica** | NaN e Inf; picchi di loss oltre 6σ dalla media mobile; frazione di passi tagliati dal clipping; overflow in bf16; throughput e attesa del dataloader | qualunque NaN → stop; picchi ripetuti → instabilità; throughput sotto la stima di PC7 → budget a rischio | nullo |
 
 #### 4.13.4 Diagnostiche dei risultati
@@ -1359,9 +1315,9 @@ La run di gate (§4.12.2) si ferma in quattro punti fissati in anticipo; a ogni 
 
 | Fermata | Criteri (devono passare tutti) | Se uno fallisce |
 |---|---|---|
-| **F1 · fine dello stadio 1** (solo fisico) | nessun NaN · `E_fis` in calo · R² dei riquadri visibili > 0,9 · la dinamica batte la baseline · effective rank di `s` > 0,5× il passo 0 · IsoScore di `s` ≥ 0,8 per articolatore · R² dei keypoint da `s` entro 0,02 da PC5 · nessun articolatore in collasso | stop → triage del livello fisico |
-| **F2 · ~10 % dello stadio 2** | `γ_sem` > 0,3 · `SIGReg_sem` in calo · R@1 held-out > 5× il caso · test col rumore superato · query non collassate · nessun conflitto stabile fra gradienti | stop → triage del livello semantico |
-| **F3 · ~30 %** | R@1 > baseline ridge · `ω` < 0,95 · hubness stabile · curva di R@1 estrapolata compatibile con la soglia `X` | stop o correzione |
+| **F1 · fine dello stadio P** (epoca 1) | **posa:** `L_anchor` e `SIGReg_posa` in calo · effective rank di `s` > 0,5× il passo 0 · IsoScore di `s` ≥ 0,8 · R² di posizione delle mani da `s` ≥ 0,9. **Semantico:** `γ_sem` > 0,3 · `SIGReg_sem` in calo · R@1 held-out > 5× il caso · test col rumore superato · query non collassate | stop → triage della posa o del semantico |
+| **F2 · fine dello stadio F₀** (epoca 2) | `E_fis` in calo · R² dei passi soprattutto visibili > 0,9 · la dinamica batte la baseline · nessun leak | stop → triage del livello fisico |
+| **F3 · fine della prima epoca di F** (epoca 3) | `E_fis` in calo · nessuna LoRA sposta il suo strato oltre il 10 % · deriva dell'encoder ≥ 0,5 · R@1 > baseline ridge · `ω` < 0,95 · hubness stabile · curva di R@1 estrapolata compatibile con la soglia `X` · nessun conflitto stabile fra gradienti | stop o correzione |
 | **F4 · fine** | tabella del gate su OpenASL | come da gate |
 
 Una correzione che tocca solo componenti **successivi** alla fermata riparte dall'ultimo checkpoint valido; una che tocca componenti **precedenti** riparte da zero **[Nostra proposta]**.
@@ -1372,14 +1328,14 @@ Una correzione che tocca solo componenti **successivi** alla fermata riparte dal
 |---|---|---|---|
 | `E_fis` non scende | sincronia video–posa → R² dei riquadri visibili → R² per copertura ρ | posa sfasata · riquadri o lettura sbagliati · maschera o 3D-RoPE | correggere la pipeline |
 | `E_fis` crolla subito (R² > 0,98) | test di leak → P6 → P14 | leak | correggere il mascheramento |
-| Collasso di `s` o di un articolatore | R² dei keypoint da `s` → CKA → ancora → SIGReg ed effective rank per articolatore | target troppo veloce · collasso parziale di un articolatore | learning rate della posa più basso; ripiego a due stadi [Lett. 84] |
+| Collasso di `s` | R² dei keypoint da `s` per articolatore → ancora → SIGReg ed effective rank di `s` → coseno ancora–SIGReg | ancora troppo debole · viste troppo forti · SIGReg che combatte l'ancora | learning rate della posa più basso; peso dei termini della posa; ripiego a due stadi [Lett. 84] |
 | R@1 al caso | test sintetici delle metriche → stessi tensori → `γ_sem` → `SIGReg_sem` → query → test col rumore | bug di valutazione · predizione media · collasso · query collassate · scorciatoia sul testo | secondo la causa |
 | R@1 alto su canali visti, basso su held-out | probe di canale → attenzione sullo sfondo | scorciatoia di canale | più crop e jitter; meno parametri liberi |
 | Validazione buona, OpenASL basso | contaminazione (P2) → R@1 tollerante ai duplicati → fasce di durata | incoerenza fra validazione e benchmark | secondo la causa |
 | NaN o picchi di loss | overflow in bf16 → quota di gradiente per termine → valori di SIGReg | instabilità numerica | SIGReg in fp32; learning rate più basso |
 | Encoder video appiattito sulla posa | deriva dell'encoder → conflitto fra gradienti → quota di gradiente | peso del livello fisico troppo alto | ridurre il peso di `E_fis`, alla fermata successiva |
 
-**Cadenza:** energie, norme e quote di gradiente, numerica a ogni passo · collasso (anche per articolatore), predictor, lettura per articolatore, dinamica, errore in keypoint, localizzazione, LoRA, query e conflitti ogni 100 passi · retrieval, hubness, tabella 2×2, modality gap, attenzione, velocità del target e test col rumore ogni 500 · ordine temporale, deriva dell'encoder, probe fonologici e test di plausibilità ogni 2.000 · **tutto al passo 0** · diagnostiche dei risultati a ogni validazione completa · profilo temporale su BOBSL solo nella valutazione finale. **Cadenze e finestre degli allarmi espresse in passi sono in unità di 1.024 clip viste; con il batch unico di 128 (§4.14) si moltiplicano per 8.**
+**Cadenza:** energie, norme e quote di gradiente, numerica a ogni passo · collasso, predictor, lettura per passo, dinamica, errore in keypoint, localizzazione, LoRA, query e conflitti ogni 100 passi · retrieval, hubness, tabella 2×2, modality gap, attenzione, velocità del target e test col rumore ogni 500 · ordine temporale, deriva dell'encoder, probe fonologici e test di plausibilità ogni 2.000 · **tutto al passo 0** · diagnostiche dei risultati a ogni validazione completa · profilo temporale su BOBSL solo nella valutazione finale. **Cadenze e finestre degli allarmi espresse in passi sono in unità di 1.024 clip viste; con il batch unico di 128 (§4.14) si moltiplicano per 8.**
 
 **Costo complessivo della diagnostica [Nostra stima]:**
 
@@ -1399,7 +1355,7 @@ Il collaudo (§4.13.1) costa poche ore-GPU, una volta sola **[Nostra stima]**.
 
 **Principi [Nostra scelta]:**
 - tutte le run su **ViT-L**, con le stesse epoche (stessi dati visti) e lo **stesso batch effettivo, 128**, in tutti i bracci;
-- **configurazione di riferimento θ\* = il braccio migliore di ESP-1** secondo la metrica per decidere; ESP-2, ESP-3 ed ESP-4 si applicano a θ\*;
+- **configurazione di riferimento θ\* = il braccio migliore di ESP-1** secondo la metrica per decidere; ESP-2, ESP-6 ed ESP-4 si applicano a θ\* (`worldsign-ablation.md`);
 - una variabile alla volta rispetto a θ\*; solo ESP-1 confronta più loss;
 - **significatività**: intervalli bootstrap sulle query per ogni R@k. Con un solo seed per run `σ_seed` non si stima: dove il documento chiede `|Δ| ≥ 2·σ_seed`, vale la non sovrapposizione degli intervalli bootstrap. **[Aperto]** un secondo seed di θ\*, se il budget misurato in PC7 lo consente;
 - **metrica per decidere**: R@1 held-out channel; **metrica di benchmark**: R@1 sul test di OpenASL **senza fine-tuning**, sensata perché l'addestramento di OpenASL è già quasi tutto nel pretraining [Lett. 6, 88];
@@ -1422,7 +1378,7 @@ InfoNCE, batch 128                                            C
 | 4 | **B** | `E_sem + L_unif` | `½ [SIGReg({ŷ}) + SIGReg({ẽ})]` |
 | 5 | **C** | `L_InfoNCE(ŷ, ẽ)`, batch 128, clip dello stesso video escluse dal denominatore (P15) | `½ [SIGReg({ŷ}) + SIGReg({ẽ})]` |
 
-Le formule sono in §4.5.7. Livello fisico, ancora e SIGReg sulla posa sono identici in tutti i bracci.
+Le formule sono in §4.5.7. Il livello della posa e quello fisico sono identici in tutti i bracci.
 
 **Letture:**
 - A₀ → A: quanto porta SIGReg;
@@ -1438,13 +1394,13 @@ Le formule sono in §4.5.7. Livello fisico, ancora e SIGReg sulla posa sono iden
 | Run | Esperimento | Differenza rispetto a θ\* | Domanda |
 |---|---|---|---|
 | 6 | **ESP-2** | nessun livello fisico: niente encoder di posa, predictor fisico, ancora e SIGReg sulla posa; solo passaggio semantico | il livello fisico migliora il semantico? (H3) |
-| 7 | **ESP-3** | encoder di posa S-JEPA **congelato**: niente LoRA di posa e niente sbiancamento; SIGReg sulla posa solo diagnostica | serve un target di posa addestrabile e reso isotropo? (H2) |
+| 7 | **ESP-6** | **senza encoder di posa**: il bersaglio del livello fisico è il target encoder di V-JEPA 2.1 (bi-encoder video–video) | la posa come bersaglio serve, rispetto al bersaglio video di V-JEPA 2.1? (`worldsign-ablation.md` §2.2) |
 | 8 | **ESP-4 (facoltativa)** | `K = 4` ipotesi dalle 8 query (§4.5.9), a zero parametri aggiuntivi | l'ambiguità delle didascalie richiede una variabile latente? (H7) |
 
 #### Ordine e costo **[Nostra stima]**
 
 ```
-collaudo (§4.13.1)  →  PC1–PC7  →  run 1 (A, gate) fino alla fermata F2
+collaudo (§4.13.1)  →  PC1–PC7  →  run 1 (A, gate) fino alla fermata F2 (fine dello stadio F₀)
          →  run 2–5 in parallelo  →  fine di ESP-1: scelta di θ* (metrica per decidere)
          →  run 6–7 (e 8, facoltativa) in parallelo su θ*  →  modello finale: fine-tuning sui benchmark
 ```
@@ -1455,7 +1411,7 @@ Unità: **L = un addestramento completo su ViT-L, braccio A**; il valore in GPU-
 |---|---|
 | A, A₀, B₀, B, C | ≈ 1 L ciascuna: stesso batch, nessun GradCache |
 | ESP-2 | ≈ 0,85 L: manca il passaggio fisico, ≈ 15 % del passo (§4.9) |
-| ESP-3 | ≈ 1 L: l'encoder di posa congelato risparmia poco |
+| ESP-6 | ≈ 1 L, più il forward del target encoder [da misurare in PC7] |
 | ESP-4 (facoltativa) | ≈ 1 L |
 | **Totale** | **≈ 6,85 L**, ≈ 7,85 L con ESP-4, più il fine-tuning del modello finale |
 
@@ -1526,15 +1482,14 @@ Per ogni ipotesi riportiamo l'enunciato, la base in letteratura, il test previst
 - *Test.* ESP-1: il braccio A confrontato con A₀, B₀, B e C, su ViT-L; in più, la densità delle rappresentazioni misurata con la metrica di SignCL.
 - *Falsificazione.* A ≈ A₀, oppure A < C oltre l'incertezza (§4.14).
 
-**H2 — Un target di posa addestrabile non collassa senza EMA** **[Nostra ipotesi — la più rischiosa]**
-- *Enunciato.* Con LoRA a rango 4, learning rate ×0,05, SIGReg per articolatore e ancora di ricostruzione, le rappresentazioni della posa **diventano isotrope e restano informative** per tutto l'addestramento: R² dei keypoint entro 0,02 dai valori di PC5.
-- *Base.* LeJEPA rinuncia a EMA e stop-gradient con garanzia anti-collasso [Lett. 35]; VL-JEPA addestra il proprio encoder del target senza EMA, con learning rate ridotto [Lett. 34]. **Però** la validazione di LeJEPA è unimodale, e V-JEPA 2.1 usa l'EMA [Lett. 32].
-- *Test.* Effective rank di `s`, errore dell'ancora e `γ` del predictor fisico fin dalle prime epoche (§4.13).
-- *Falsificazione.* L'effective rank di `s` crolla, l'ancora peggiora mentre `E_fis` scende, oppure il R² dei keypoint letti da `s` scende oltre 0,02 sotto PC5. *Ripiego:* percorso a due stadi ispirato a SALT [Lett. 84].
-- *Stato (revisione del 29/9).* L'encoder di posa S-JEPA resta addestrabile nella configurazione di riferimento: H2 si mette alla prova in ogni run tranne ESP-3, che misura cosa cambia congelandolo.
+**H2 — Un target di posa addestrato da zero resta informativo e non collassa** **[Nostra ipotesi — la più rischiosa]**
+- *Enunciato.* Con lo stop-gradient fra i livelli e i termini della posa (invarianza fra viste, SIGReg, ancora), un encoder di posa addestrato da zero insieme al resto dà un bersaglio **isotropo e informativo** per tutto l'addestramento: IsoScore di `s` ≥ 0,8 e R² di posizione delle mani ≥ 0,9 alla fine dello stadio P, senza cadute oltre 0,02 dal massimo in seguito (`worldsign-posa.md` §6).
+- *Base.* LeJEPA rinuncia a EMA e stop-gradient con garanzia anti-collasso, grazie a SIGReg e all'invarianza fra viste [Lett. 35]; lo stop-gradient sul bersaglio è la difesa di V-JEPA e S-JEPA contro un target che si muove [Lett. 30, 99]. **Però** la validazione di LeJEPA è unimodale e con viste forti; le nostre viste sono deboli (rotazione e rumore), e l'astrazione del bersaglio dipende anche dall'ancora.
+- *Test.* Rango, IsoScore e SIGReg di `s`, R² dei keypoint per articolatore sul batch sonda, coseno ancora–SIGReg, fin dalla fermata F1 (§4.13).
+- *Falsificazione.* Il rango di `s` crolla, l'IsoScore non arriva a 0,8, oppure il R² dei keypoint scende oltre 0,02 sotto il suo massimo. *Ripiego:* S-JEPA adattato come livello 0 (`worldsign-ablation.md` §3.3, P2), o un bersaglio EMA (P1).
 
 **H3 — Il livello fisico migliora la rappresentazione semantica** **[Nostra ipotesi]**
-- *Enunciato.* L'encoder video adattato da entrambi i predictor dà un retrieval e una discriminazione fine migliori dell'encoder adattato dal solo livello semantico.
+- *Enunciato.* L'encoder video adattato dal livello fisico dà un retrieval e una discriminazione fine migliori dell'encoder non adattato, letto dallo stesso livello semantico (ESP-2: lo schema di VL-JEPA).
 - *Base.* H-JEPA: predizione a tutti i livelli [Lett. 27]; struttura gerarchica del segnato [Lett. 1]; la loss densa di V-JEPA 2.1 migliora le feature locali [Lett. 32].
 - *Test.* ESP-2: retrieval, probe fonologici, coppie minime.
 - *Falsificazione.* Nessuna differenza oltre 2·σ_seed fra θ* e la variante senza livello fisico.
@@ -1579,9 +1534,9 @@ Per ogni ipotesi riportiamo l'enunciato, la base in letteratura, il test previst
 | PC1 | valore di SIGReg già basso sui target di EmbeddingGemma | i modelli contrastivi moderni sono isotropi [Lett. 51] |
 | ESP-1 | A ≫ A₀; B₀ > A₀; A ≈ B₀; B ≈ A; A ≈ C entro l'incertezza | H1 |
 | ESP-2 | θ* > senza livello fisico, con lo scarto più grande su coppie minime e probe fonologici che sul retrieval | H3 |
-| ESP-3 | **[Aperto]**: previsione da fissare prima del lancio | H2 |
+| ESP-6 | **[Aperto]**: previsione da fissare prima del lancio | H3 |
 | ESP-4 (facoltativa) | guadagno piccolo o nullo; se c'è, concentrato sulle didascalie più libere (BOBSL, YouTube-SL-25) | H7, [Lett. 34, 80] |
-| H2 | nessun collasso di `s` grazie a SIGReg e ancora | [Lett. 34, 35] |
+| H2 | nessun collasso di `s` grazie allo stop-gradient, a SIGReg, all'invarianza e all'ancora | [Lett. 35] |
 | Plausibilità | manipolazioni temporali rilevate da `Ē_fis`; il controllo con la posa sfasata rilevato | [Lett. 33] |
 
 ### 5.4 Come leggere gli esiti: nessun esito è inutile
@@ -1593,9 +1548,9 @@ Per ogni ipotesi riportiamo l'enunciato, la base in letteratura, il test previst
 | A ≪ C | i negativi aggiungono qualcosa oltre all'uniformity; il divario è quantificato e l'architettura resta usabile con InfoNCE |
 | B > A | serve una dispersione a coppie in più rispetto al vincolo sulle proiezioni 1-D **[Nostra interpretazione]** |
 | A ≈ B₀ | il vincolo distribuzionale fornisce l'uniformity quanto il termine a coppie, senza calcolare distanze fra campioni |
-| collasso del target di posa senza EMA | la garanzia di LeJEPA non si estende a un target di un'altra modalità; si passa al percorso a due stadi [Lett. 84] |
+| collasso del target di posa addestrato da zero | la garanzia di LeJEPA non basta con viste deboli; si passa a S-JEPA adattato o a un bersaglio EMA (`worldsign-ablation.md` §3.3) |
 | il livello fisico non migliora il semantico | risultato di semplificazione: basta lo schema VL-JEPA con SIGReg |
-| posa congelata ≈ o > posa addestrabile (ESP-3) | il target addestrabile non serve: il modello si semplifica |
+| bersaglio video ≈ o > bersaglio di posa (ESP-6) | la posa come bersaglio non serve: il modello si semplifica |
 | la variabile latente migliora (ESP-4, se fatta) | l'ambiguità delle didascalie è rilevante: la `z` entra nel modello finale |
 | risultato sotto la baseline ridge | le feature congelate contengono già la struttura utile; è comunque un'informazione su V-JEPA applicato al segnato |
 
@@ -1603,9 +1558,8 @@ Per ogni ipotesi riportiamo l'enunciato, la base in letteratura, il test previst
 
 | Pericolo | Perché può accadere | Come ce ne accorgiamo | Mitigazione |
 |---|---|---|---|
-| **Collasso del target di posa** | l'encoder è addestrabile nella configurazione di riferimento: target senza EMA (H2) | effective rank di `s` | S-JEPA congelato (ESP-3), percorso a due stadi [Lett. 84] |
-| **Il target di posa si semplifica** | encoder addestrabile: SIGReg impedisce il collasso, non la perdita di informazione | errore dell'ancora contro `E_fis`; R² dei keypoint letti da `s` contro PC5 | più peso all'ancora |
-| **Target di posa anisotropo** | S-JEPA misurato: IsoScore ≈ 0,03, rango effettivo ≈ 76/256 (§4.4.3) | IsoScore di `s`; SIGReg_posa come diagnostica | SIGReg per articolatore sull'encoder addestrabile (riferimento); nell'ablation ESP-3 il target resta anisotropo |
+| **Collasso del target di posa** | l'encoder di posa si addestra da zero, senza EMA (H2) | effective rank, IsoScore e SIGReg di `s` (fermata F1) | più peso all'ancora; S-JEPA adattato o bersaglio EMA (`worldsign-ablation.md` §3.3) |
+| **Il target di posa si semplifica** | invarianza e SIGReg non impediscono la perdita di informazione | R² dei keypoint per articolatore letti da `s` contro il loro massimo | più peso all'ancora |
 | **Outlier nella normalizzazione della posa** | lo stimatore sovrappone le spalle: l'1 % delle clip arrivava a centinaia di larghezze di spalle | raggio massimo nel collaudo della posa (§4.13.1) | guardie di §3.6, già nel codice |
 | **Encoder video appiattito sulla posa** | il gradiente fisico domina l'adattamento | deriva dell'encoder; coseno fra i gradienti dei due passaggi | ridurre il peso di `E_fis` |
 | **Il predictor predice la media** | relazioni uno-a-molti [Lett. 37, 81] | `γ`, `R²`, hubness | bracci B₀, B e C; ESP-4 (facoltativa) |
@@ -1622,7 +1576,7 @@ Per ogni ipotesi riportiamo l'enunciato, la base in letteratura, il test previst
 | **Sbilanciamento fra lingue** | ASL e CSL coprono gran parte dei dati; nessun ribilanciamento (§3.5) | R@1 ripartito per lingua; scarto train/val per lingua | soluzione alternativa solo se lo sbilanciamento pesa sulle prestazioni **[Aperto]** |
 | **Rumore di allineamento in BOBSL** | ritardo medio di ~2,7 s [Lett. 9] | tabella 2×2 | al livello semantico solo clip allineate |
 | **Stimatore di posa inaffidabile sulle mani** | mani piccole, veloci, in contatto [Lett. 26] | distribuzione delle confidenze; frazione di articolatori esclusi | pesatura per confidenza |
-| **Formato di posa diverso fra pre-addestramento e addestramento** | errore silenzioso: stessi 69 keypoint, normalizzazione diversa | P9; riproduzione dei pesi di S-JEPA (§4.13.1) | un solo modulo di tokenizzazione della posa, condiviso |
+| **Formato di posa diverso fra pre-addestramento e addestramento** | errore silenzioso: stessi 69 keypoint, normalizzazione diversa | P9 | un solo modulo di tokenizzazione della posa, condiviso |
 | **Pesi del predictor assenti nel checkpoint** | fonti discordanti [Lett. 32, 72] | PC6: presenti in 2.1-B (22,9 M) e 2.1-L (23,0 M) | predictor da zero a 2 blocchi, o V-JEPA 2-L |
 | **Encoder distillato poco adatto** | la distillazione non usa supervisione profonda [Lett. 32] | PC3 | passare a V-JEPA 2-L |
 | **Costo del passaggio semantico non mascherato** | ≈ 85 % del passo | PC7 | scarto casuale del 50 % dei token [Lett. 78, 79] |
@@ -1647,12 +1601,12 @@ Per ogni ipotesi riportiamo l'enunciato, la base in letteratura, il test previst
 | Encoder: V-JEPA 2.1-L distillato o V-JEPA 2-L | **chiuso il 29/9: V-JEPA 2.1-L** (PC3, §4.4.1) | — |
 | Risoluzione: 256² o 384² | **chiuso il 29/9: 256² con crop** (PC4, §4.4.1) | — |
 | Dimensione di troncamento MRL | **chiuso il 29/9: nessun troncamento**, il vettore si usa a 768 (§4.4.4) | — |
-| Encoder di posa | **chiuso: S-JEPA**, `C = 256`, 6,35 M | PC5, 2026-09-20 |
-| Regime dell'encoder di posa in addestramento | **chiuso il 29/9**: addestrabile lieve (LoRA r = 4, LR ×0,05), reso isotropo da SIGReg e tenuto informativo dall'ancora; congelato è l'ablation ESP-3 | — |
-| Soglie di isotropia e di conservazione del target di posa | proposta: IsoScore ≥ 0,8 per articolatore, R² entro 0,02 da PC5 | PC7 |
+| Encoder di posa | **chiuso il 3/10**: l'encoder di worldSign adattato, da zero, `C = 256`, 8,06 M (`worldsign-posa.md`) | — |
+| Gerarchia e stadi | **chiuso il 3/10**: per livello, stadi P/F₀/F a confini di epoca, 15 epoche, pazienza 3 nello stadio F (`worldsign-gerarchia.md`) | — |
+| Soglie della fermata F1 sulla posa | proposta: IsoScore ≥ 0,8, R² di posizione delle mani ≥ 0,9, caduta dal massimo ≤ 0,02 | PC7 |
 | Probe della lingua separato dall'identità del canale | split per canale implementato; **non calcolabile** finché l'ASL delle clip di test viene da un solo canale | nuove clip di test dopo il download con l'ordine mescolato |
 | Pesi del predictor nel checkpoint 2.1 | **presenti** (2.1-B 22,9 M, 2.1-L 23,0 M); restano dimensioni e fusione | PC6 |
-| Tempo di calcolo | cinque bracci di ESP-1 più ESP-2 ed ESP-3 (≈ 6,85 L), ESP-4 facoltativa (≈ 1 L), più il fine-tuning del modello finale | misura di L in PC7 |
+| Tempo di calcolo | cinque bracci di ESP-1 più ESP-2 ed ESP-6 (≈ 6,85 L), ESP-4 facoltativa (≈ 1 L), più il fine-tuning del modello finale | misura di L in PC7 |
 | Secondo seed di θ\* (`σ_seed`) | aperto | budget, dopo la misura di L in PC7 |
 | Soglia `X` del gate | **chiusa: 46,7**; dopo la revisione del 29/9 è il criterio della fermata F3 (§4.12.2) | — |
 | Learning rate, durata degli stadi, ε di ESP-4 (facoltativa) | valori di partenza | PC7 |
@@ -1673,22 +1627,22 @@ Il retrieval per la lingua dei segni oggi si basa su obiettivi contrastivi, che 
 
 Proponiamo un **world model a energia con due livelli di astrazione** per la lingua dei segni continua e multilingua che:
 - **percepisce** con un encoder video congelato, adattato con LoRA su tutti i blocchi;
-- **predice lo stato del corpo** dal video in gran parte mascherato, con la maschera e la loss di V-JEPA 2.1, verso le rappresentazioni di un encoder di posa addestrabile;
+- **predice lo stato del corpo** dal video in gran parte mascherato, con la maschera e la loss di V-JEPA 2.1, verso le rappresentazioni di un encoder di posa addestrato da zero e letto con lo stop-gradient;
 - **predice il significato** dal video intero, con lo schema di VL-JEPA, verso l'embedding della didascalia;
 - **allinea senza negativi**, imponendo l'uniformity con SIGReg;
 - usa l'**energia** — l'errore di predizione — per il retrieval e come misura di plausibilità;
-- **resta sotto i 22 M di parametri addestrabili** (≈ 21,6 M), perché il corpus conta ~6.650 ore ma solo ~41.000 video e il rischio di overfitting è alto.
+- **resta sotto i 30 M di parametri addestrabili** (≈ 29,9 M, di cui 8,1 M nell'encoder di posa), perché il corpus conta ~6.650 ore ma solo ~41.000 video e il rischio di overfitting è alto.
 
 ### 6.2 Perché il progetto è informativo in ogni caso
 
-L'esperimento centrale (ESP-1) confronta cinque configurazioni di loss su ViT-L con un protocollo controllato: stesso batch (128), stessi dati visti, stessi moduli addestrabili. Qualunque sia l'esito (§5.4), si ottiene un risultato: la conferma della tesi, oppure una misura di quanto aggiungono i negativi e dei limiti di SIGReg. ESP-2 dice se il livello fisico serve; ESP-3 se il target di posa deve essere addestrabile e isotropo; ESP-4, se c'è tempo, se l'ambiguità delle didascalie richiede una variabile latente. Le diagnostiche fail-fast (§4.13), a un costo sotto l'1 % del calcolo, servono a far emergere i problemi tecnici alla prima run, non a budget esaurito.
+L'esperimento centrale (ESP-1) confronta cinque configurazioni di loss su ViT-L con un protocollo controllato: stesso batch (128), stessi dati visti, stessi moduli addestrabili. Qualunque sia l'esito (§5.4), si ottiene un risultato: la conferma della tesi, oppure una misura di quanto aggiungono i negativi e dei limiti di SIGReg. ESP-2 dice se il livello fisico serve; ESP-6 se serve la posa come bersaglio, rispetto al bersaglio video; ESP-4, se c'è tempo, se l'ambiguità delle didascalie richiede una variabile latente. Le diagnostiche fail-fast (§4.13), a un costo sotto l'1 % del calcolo, servono a far emergere i problemi tecnici alla prima run, non a budget esaurito.
 
 ### 6.3 Prossimi passi
 
 1. Collaudo (§4.13.1) e controlli preliminari PC1–PC7.
 2. Run di gate: θ\* = braccio A, ViT-L, con le fermate F1–F3 (§4.13.5).
 3. Superata F2: gli altri quattro bracci di ESP-1 in parallelo — A₀, B₀, B, C a batch 128 (§4.14).
-4. Scelta di θ\* con la metrica per decidere; ESP-2 ed ESP-3 su θ\*, ESP-4 facoltativa.
+4. Scelta di θ\* con la metrica per decidere; ESP-2 ed ESP-6 su θ\*, ESP-4 facoltativa.
 5. Modello finale: fine-tuning su OpenASL, PHOENIX-2014T e CSL-Daily; traduzione, riconoscimento continuo (su PHOENIX-2014T e CSL-Daily, che hanno le gloss [Lett. 12, 13]) e produzione.
 6. Stesura per CVPR 2027 (registrazione 10 novembre, invio 16 novembre 2026), seguendo il protocollo di comparabilità (§3.9).
 

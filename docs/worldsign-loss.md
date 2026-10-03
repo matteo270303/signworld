@@ -5,9 +5,10 @@ Formalizzazione completa di **cosa minimizza** WorldSign: le due energie, ogni t
 Documenti collegati:
 - `worldsign-progetto.md`: motivazioni, con i riferimenti [Lett. N] della sua bibliografia;
 - `worldsign-architettura.md`: i moduli e i layer che producono le quantità usate qui;
+- `worldsign-posa.md` e `worldsign-gerarchia.md`: il livello della posa, gli stop-gradient fra i livelli e gli stadi;
 - `worldsign-ablation.md`: le varianti.
 
-Stato: 30/9/2026. **[Aperto]** indica un valore da calibrare in PC7.
+Stato: 3/10/2026 (encoder di posa da zero, gerarchia per livello). **[Aperto]** indica un valore da calibrare in PC7.
 
 ---
 
@@ -29,7 +30,8 @@ WorldSign ha **due energie** su un encoder video condiviso:
 **WorldSign è regolarizzato** (tesi H1). Il volume a energia bassa è limitato da:
 - **SIGReg**, che impone alle rappresentazioni la distribuzione `N(0, I)` (§8);
 - il **basso rango** delle LoRA su encoder congelati (§10);
-- l'**ancora** di ricostruzione, che impedisce al target di posa di perdere informazione (§4).
+- l'**ancora** di ricostruzione, che impedisce al target di posa di perdere informazione (§4);
+- lo **stop-gradient fra i livelli**: `E_fis` non può spostare il bersaglio di posa, `E_sem` non tocca l'encoder video (`worldsign-gerarchia.md` §3).
 
 Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 
@@ -41,8 +43,9 @@ Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 | `λ_S` | 0,05 | peso di SIGReg nell'obiettivo (LeJEPA) |
 | `𝓑` | 128 clip | il batch effettivo, su tutte le GPU (64 per GPU) |
 | `m ∈ {brevi, lunghe}` | | le due maschere di ogni passo |
-| `a ∈ {corpo, sx, dx, volto}` | | articolatore |
-| `C = 256`, `d = 512` | | larghezza del latente di posa e dello spazio semantico |
+| `t = 1 … 32` | | passo (2 frame) |
+| `a ∈ {corpo, sx, dx, volto}` | | articolatore: il suo riquadro nella lettura dal video |
+| `C = 256`, `d = 512` | | larghezza del bersaglio di posa e dello spazio semantico |
 
 ---
 
@@ -50,12 +53,12 @@ Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 
 | Quantità | Definizione | Dove |
 |---|---|---|
-| `s_{t,a} = f_ψ(p)_{t,a}` | latente di posa: S-JEPA con LoRA, media per articolatore, layer finale | arch. §5 |
-| `ŝ^pred_{t,a}(v, m)` | lettura dei token **nascosti** predetti nel riquadro di `a` al passo `t` | arch. §4.4 |
-| `ŝ^ctx_{t,a}(v, m)` | lettura dei token **visibili** predetti nel riquadro | arch. §4.4 |
-| `n^mask_{t,a}(m)`, `n^vis_{t,a}(m)` | token nascosti e visibili nel riquadro | arch. §4.4 |
+| `s_t = G_ω(p)_t` | bersaglio di posa: l'encoder di posa sulla sequenza pulita, un vettore per passo | arch. §5 |
+| `s̃_t = G_ω(A(p))_t` | lo stesso sulla vista (rotazione, rumore) | `worldsign-posa.md` §4.1 |
+| `ŝ_t(v, m)` | lettura per passo: medie dei token predetti (visibili e nascosti) nei 4 riquadri, concatenate, `Linear(1.536 → 256)` | arch. §4.4 |
+| `n^m_t(m)`, `w^v_t(m)` | token nascosti nei riquadri del passo e somma dei pesi dei visibili | arch. §4.4 |
 | `c_{t,j}` | peso del giunto `j` al passo `t`: 1 se presente in un frame del tubelet, altrimenti 0 | arch. §2.2 |
-| `c̄_{t,a} = (1/|a|) Σ_{j∈a} c_{t,j}` | confidenza media dell'articolatore | `articulator_confidence` |
+| `c_t = (1/69) Σ_j c_{t,j}` | confidenza del passo | `step_confidence` |
 | `p̂_{t,j}` | keypoint medio del passo, in unità di spalla | arch. §2.2 |
 | `ŷ(v) ∈ ℝ^{K×512}` | predizione semantica (K = 1; K = 4 in ESP-4) | arch. §6 |
 | `ẽ(c) ∈ ℝ^{512}` | target testuale: testa MLP su EmbeddingGemma centrato per lingua | arch. §7 |
@@ -64,40 +67,36 @@ Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 
 ## 3. Energia fisica `E_fis`
 
-È la loss di V-JEPA 2.1 [Lett. 32], portata dal token al riquadro dell'articolatore. Seguiamo il **cooldown** di V-JEPA 2.1 (`cooldown-256px-64f.yaml`): clip da 64 frame, partendo da un modello già addestrato, come facciamo noi.
+È la loss di V-JEPA 2.1 [Lett. 32], portata dal token al passo (`worldsign-gerarchia.md` §4). Seguiamo il **cooldown** di V-JEPA 2.1 (`cooldown-256px-64f.yaml`): clip da 64 frame, partendo da un modello già addestrato, come facciamo noi.
 
-**Target normalizzato.** Come V-JEPA 2.1 fa con i token del teacher, il target si normalizza sui suoi canali, **senza parametri affini**:
-
-```
-s̄_{t,a}  =  LN(s_{t,a})  =  ( s_{t,a} − mean_c(s_{t,a}) ) / sqrt( var_c(s_{t,a}) + 10⁻⁵ )
-```
-
-**Errore di una lettura:** L1 media sui canali (`loss_exp = 1` di V-JEPA 2.1):
+**Target normalizzato e stoppato.** Come V-JEPA 2.1 fa con i token del teacher, il target si normalizza sui suoi canali, **senza parametri affini**, e arriva con il gradiente fermato:
 
 ```
-e(ŝ)  =  (1/C) · ‖ ŝ − s̄_{t,a} ‖₁
+s̄_t  =  LN( sg(s_t) )  =  ( s_t − mean_c(s_t) ) / sqrt( var_c(s_t) + 10⁻⁵ )
 ```
 
-**I due termini, per una maschera `m`:**
+**Errore di un passo:** L1 media sui canali (`loss_exp = 1` di V-JEPA 2.1):
 
 ```
-               Σ_(b,t,a)  c̄_{t,a} · n^mask_{t,a}(m) · e( ŝ^pred_{t,a} )
-L_pred(m)  =  ─────────────────────────────────────────────────────
-                     Σ_(b,t,a)  c̄_{t,a} · n^mask_{t,a}(m)
-
-               Σ_(b,t,a)  c̄_{t,a} · w^ctx_{t,a}(m) · e( ŝ^ctx_{t,a} )
-L_ctx(m)   =  ─────────────────────────────────────────────────────
-                     Σ_(b,t,a)  c̄_{t,a} · n^vis_{t,a}(m)
-
-w^ctx_{t,a}(m)  =  Σ_{i visibile nel riquadro} ω_i        ω_i = 1 (cooldown; nostro default)
-                                                          ω_i = 1/√d_min(i) (pre-training di V-JEPA 2.1, opzione)
-
-E_fis(v, p ; m)  =  L_pred(m)  +  λ_ctx · L_ctx(m)          λ_ctx = 0,5, costante dal primo passo (cooldown)
+e_t(m)  =  (1/C) · ‖ ŝ_t(v, m) − s̄_t ‖₁
 ```
 
-`b` scorre sulle clip del batch; `d_min(i)` è la distanza euclidea, sulla griglia (passo, riga, colonna), dal token nascosto più vicino. Con `ω_i = 1` si ha `w^ctx = n^vis` e `L_ctx` diventa la media, pesata per `c̄`, dell'errore delle letture visibili.
+**Per una maschera `m`:**
 
-**Corrispondenza con V-JEPA 2.1 [Nostra scelta, adattamento di Lett. 32].** V-JEPA 2.1 calcola `L_pred` come media, su token e canali, di `|z − LN(h)|` sui token nascosti, e `L_ctx` come la stessa media sui visibili moltiplicata per `ω_i`. Da noi un riquadro rappresenta i suoi token, quindi pesa quanti ne contiene: in `L_pred` ogni token nascosto conta una volta, in `L_ctx` ogni visibile conta `ω_i` e si divide per il numero dei visibili. L'unico peso nostro è la confidenza `c̄`: un articolatore non visto non entra.
+```
+ω_{b,t}(m)  =  c_{b,t} · ( n^m_{b,t}(m) + λ_ctx · w^v_{b,t}(m) )
+
+                   Σ_(b,t)  ω_{b,t}(m) · e_{b,t}(m)
+E_fis(v, p ; m)  =  ──────────────────────────────────          λ_ctx = 0,5, costante dal primo passo (cooldown)
+                       Σ_(b,t)  ω_{b,t}(m)
+
+w^v_{b,t}(m)  =  Σ_{i visibile nei riquadri del passo} ω_i     ω_i = 1 (cooldown; nostro default)
+                                                                ω_i = 1/√d_min(i) (pre-training di V-JEPA 2.1, opzione)
+```
+
+`b` scorre sulle clip del batch; `d_min(i)` è la distanza euclidea, sulla griglia (passo, riga, colonna), dal token nascosto più vicino.
+
+**Corrispondenza con V-JEPA 2.1 [Nostra scelta, adattamento di Lett. 32].** V-JEPA 2.1 calcola `L_pred` come media sui token nascosti e `L_ctx` come media sui visibili pesata per `ω_i`. Da noi un passo rappresenta i token dei suoi riquadri, quindi pesa quanti ne contiene: ogni token nascosto conta una volta, ogni visibile `λ_ctx · ω_i`. Due letture separate (solo nascosti, solo visibili) non funzionerebbero più: un riquadro senza token nascosti darebbe una parte vuota, mentre il bersaglio contiene comunque quell'articolatore, quindi resterebbe un errore irriducibile. L'unico peso nostro è la confidenza `c_t`: un passo senza giunti non entra.
 
 **Nell'addestramento** le due maschere del passo pesano uguale:
 
@@ -115,30 +114,39 @@ Ogni GPU calcola il rapporto sulle sue 64 clip e DDP media i gradienti delle GPU
 
 Una sola maschera potrebbe non coprire la parte anomala. Le maschere sono tubi su tutta la clip, quindi l'energia misura la coerenza **dentro la finestra**, con contesto prima e dopo, non la prevedibilità del futuro dal solo passato.
 
-**Dove va il gradiente.** Nessuno stop-gradient e nessuna EMA (§4.5.1 del progetto):
+**Dove va il gradiente** (`worldsign-gerarchia.md` §3):
 - **lato predizione:** testa di lettura, LoRA del predictor, fusione, LoRA e LayerNorm dell'encoder video (attraverso il contesto);
-- **lato target:** LoRA di S-JEPA e layer finale, perché `s` è una funzione addestrabile.
-
-Il collasso del target è la prima preoccupazione di H2. Lo contrastano `SIGReg_posa`, l'ancora, il learning rate basso della LoRA di posa e lo schedule del layer finale.
+- **lato target: nessuno.** `s` arriva con lo stop-gradient: il video non può spostare il bersaglio. L'encoder di posa si addestra solo con i suoi termini (§4), che ne impediscono il collasso.
 
 **Scala.** Il target ha media 0 e varianza 1 sui canali di ogni vettore, quindi `e` è di ordine 1: predire il vettore nullo costa la media di `|s̄|`, circa 0,8 per canali quasi gaussiani.
 
 ---
 
-## 4. Ancora di ricostruzione `L_anchor`
+## 4. I termini della posa
+
+L'encoder di posa si addestra da zero con tre termini, nella forma di LeJEPA [Lett. 35] (`worldsign-posa.md` §4).
+
+### 4.1 Ancora di ricostruzione `L_anchor`
 
 ```
-                 Σ_(b,t) Σ_a Σ_{j∈a}  c_{t,j} · ‖ D_pose^a( s_{t,a} )_j − p̂_{t,j} ‖²
-L_anchor  =  ─────────────────────────────────────────────────────────────────────────
-                             σ²  ·  Σ_(b,t) Σ_j  c_{t,j}
+                 Σ_(b,t) Σ_j  c_{t,j} · ‖ D( s_t )_j − p̂_{t,j} ‖²
+L_anchor  =  ─────────────────────────────────────────────────────
+                       σ²  ·  Σ_(b,t) Σ_j  c_{t,j}
 
 σ²  =  Σ_{t,j} c_{t,j} · ‖ p̂_{t,j} − μ_j ‖²  /  Σ_{t,j} c_{t,j}          μ_j = media pesata del giunto j
 ```
 
-- `D_pose^a` è una `Linear(256 → 2·|a|)` per articolatore (arch. §5.1).
-- **`σ²` fissa la scala:** è la varianza dei keypoint attorno alla media di ciascun giunto, calcolata **una volta sulle clip di training** (20.000 clip, `statistics_clips`), un buffer salvato con il checkpoint. **Predire la media di ogni giunto vale esattamente 1**, come `E_fis` ed `E_sem` sono di ordine 1 (§4.5.7 del progetto).
-- **A cosa serve:** tiene il target fedele al corpo mentre l'encoder di posa si muove, impedendogli di semplificarsi verso ciò che il video predice facilmente (§5.5 del progetto); dà un errore in keypoint interpretabile.
-- **In ESP-3** il target è congelato: il gradiente dell'ancora raggiunge solo `D_pose`, che diventa una sonda lineare dell'informazione cinematica in `s`.
+- `D` è un solo `Linear(256 → 138)` dal vettore del passo ai 69 giunti (arch. §5.1).
+- **`σ²` fissa la scala:** è la varianza dei keypoint attorno alla media di ciascun giunto, calcolata **una volta sulle clip di training** (20.000 clip, `statistics_clips`), un buffer salvato con il checkpoint. **Predire la media di ogni giunto vale esattamente 1.**
+- **A cosa serve:** tiene la cinematica nel bersaglio, che senza di essa potrebbe ridursi a ciò che è invariante alle viste; dà un errore in keypoint interpretabile.
+
+### 4.2 Invarianza `L_inv`
+
+```
+L_inv  =  Σ_(b,t) [c_{b,t} > 0] · (1/C) ‖ s_{b,t} − s̃_{b,t} ‖²  /  Σ_(b,t) [c_{b,t} > 0]
+```
+
+`s̃` è il bersaglio calcolato su una vista della stessa sequenza: rotazione nel piano (±10°) e rumore sui giunti (σ = 0,01 unità di spalla). È il termine predittivo di LeJEPA con due viste.
 
 ---
 
@@ -259,32 +267,32 @@ Le direzioni sono le stesse su tutte le GPU: vengono da un generatore con lo ste
 
 ```
 SIGReg_sem   =  ½ · [ SIGReg({ŷ}) + SIGReg({ẽ}) ]                         bracci A, B, C
-SIGReg_posa  =  (1/|𝒜|) · Σ_{a∈𝒜}  SIGReg( { s_{t,a} : c̄_{t,a} > 0 } )     tutti i bracci
+SIGReg_posa  =  ½ · [ SIGReg({ s_t : c_t > 0 }) + SIGReg({ s̃_t : c_t > 0 }) ]   tutti i bracci
 ```
 
 | Termine | Campioni `N` per valutazione | Direzioni | Nota |
 |---|---|---|---|
 | `SIGReg({ŷ})` | 128 (128·K in ESP-4) | condivise con `{ẽ}` | ogni modalità separatamente, come LeJEPA fa con le viste |
 | `SIGReg({ẽ})` | 128 | condivise con `{ŷ}` | spinge la testa testuale, l'unica parte mobile del ramo |
-| `SIGReg({s_{·,a}})` | ≈ 128 × 32 passi in cui `a` è presente | condivise fra i 4 articolatori | `𝒜`: articolatori con almeno due campioni nell'intero batch, uguali su ogni GPU |
+| `SIGReg({s_t})`, `SIGReg({s̃_t})` | ≈ 128 × 32 passi con qualche giunto presente | condivise fra le due viste | con meno di due campioni nell'intero batch vale 0, su ogni GPU |
 
-**Perché per modalità e per articolatore [Nostra argomentazione].** SIGReg garantisce qualcosa solo sull'insieme su cui è calcolato. Sull'unione di più gruppi, uno può perdere varianza lungo alcune direzioni ed essere compensato dagli altri senza che il test se ne accorga. Lungo una direzione, se un articolatore ha `N(0, σ²)` e gli altri tre compensano, la miscela resta `N(0, 1)` per ogni `σ ≥ ¼`: fino al 94 % della varianza persa. Separatamente, ogni insieme ha la garanzia piena.
+**Perché per modalità e per vista [Nostra argomentazione].** SIGReg garantisce qualcosa solo sull'insieme su cui è calcolato. Sull'unione di più gruppi, uno può perdere varianza lungo alcune direzioni ed essere compensato dagli altri senza che il test se ne accorga. Separatamente, ogni insieme ha la garanzia piena. Sulla posa il bersaglio è un vettore per passo che concatena i quattro articolatori (`worldsign-posa.md` §3): non ci sono più insiemi per articolatore.
 
 **Cosa SIGReg non fa.** Non allinea: se `z ~ N(0, I)` allora anche `R·z` lo è, per ogni rotazione `R`. Quale clip corrisponda a quale frase lo decidono solo i termini predittivi.
 
 **Il modality gap.** Se `ŷ` ed `ẽ` sono entrambe ≈ `N(0, I)` hanno la stessa distribuzione marginale: stessa media (0), nessun classificatore le distingue.
-
-**In ESP-3** `SIGReg_posa` si misura, senza gradiente, e si registra come diagnostica: un target fermo non si può spostare.
 
 ---
 
 ## 9. L'obiettivo completo
 
 ```
-L  =  (1 − λ_S) · ( E_fis + L_anchor + L_pred_sem )  +  λ_S · ( SIGReg_posa + SIGReg_sem )          λ_S = 0,05
+L  =  (1 − λ_S) · ( L_inv + L_anchor + E_fis + L_pred_sem )  +  λ_S · ( SIGReg_posa + SIGReg_sem )          λ_S = 0,05
 ```
 
-| Braccio / ablation | `E_fis`, `L_anchor` | `SIGReg_posa` | `L_pred_sem` | `SIGReg_sem` |
+Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: la posa (`L_inv`, `L_anchor`, `SIGReg_posa`), il fisico (`E_fis`), il semantico (`L_pred_sem`, `SIGReg_sem`). Con Adam i pesi **fra** livelli non contano; contano solo i rapporti dentro ciascun livello (`worldsign-gerarchia.md` §3).
+
+| Braccio / ablation | termini della posa | `E_fis` | `L_pred_sem` | `SIGReg_sem` |
 |---|---|---|---|---|
 | **A** (gate) | sì | sì | `E_sem` | sì |
 | **A₀** | sì | sì | `E_sem` | — |
@@ -292,20 +300,19 @@ L  =  (1 − λ_S) · ( E_fis + L_anchor + L_pred_sem )  +  λ_S · ( SIGReg_pos
 | **B** | sì | sì | `E_sem + L_unif` | sì |
 | **C** | sì | sì | `L_InfoNCE` | sì |
 | **ESP-2** (su θ\*) | — | — | come θ\* | come θ\* |
-| **ESP-3** (su θ\*) | sì (l'ancora addestra solo `D_pose`) | diagnostica | come θ\* | come θ\* |
 | **ESP-4** (su θ\*, facoltativa) | sì | sì | `L_F` (§5.2) | `{ŷ_k}` tutte le ipotesi |
 
 **Pesi presi dalla letteratura, nessuna calibrazione:**
 - `λ_S = 0,05`: la forma di LeJEPA, *«default robusto»*, prestazioni *«stabili al variare di λ»* [Lett. 35];
-- pesi uguali fra i termini predittivi: sommare con pesi uguali *«eguaglia o supera gli ottimizzatori multi-task complessi»* [Lett. 96]. Ha senso perché le scale sono confrontabili per costruzione: `E_fis` di ordine 1 (target con LayerNorm), `E_sem ∈ [0, 2]`, `L_anchor` = 1 per la media.
+- pesi uguali fra i termini predittivi di un livello: sommare con pesi uguali *«eguaglia o supera gli ottimizzatori multi-task complessi»* [Lett. 96]. Le scale sono confrontabili per costruzione: `L_inv` di ordine 1 (s vicino a `N(0, I)`), `L_anchor` = 1 per la media.
 
-**Per stadio del curriculum** (§4.10 del progetto) entrano solo i termini dei passaggi eseguiti, con la stessa formula:
+**Per stadio del curriculum** (`worldsign-gerarchia.md` §6) entrano solo i termini dei livelli eseguiti, con la stessa formula:
 
-| Stadio | Passaggi | Termini |
-|---|---|---|
-| 1a, 1 | fisico | `E_fis`, `L_anchor`, `SIGReg_posa` |
-| 2a | semantico | `L_pred_sem`, `SIGReg_sem` |
-| 2 e cooldown | entrambi | tutti |
+| Stadio | Epoche | Livelli | Termini |
+|---|---|---|---|
+| P | 1 | posa, semantico | posa, `L_pred_sem`, `SIGReg_sem` |
+| F₀ | 2 | + fisico (teste nuove) | tutti |
+| F e cooldown | 3 → fine | tutti (con le LoRA) | tutti |
 
 ---
 
@@ -313,26 +320,27 @@ L  =  (1 − λ_S) · ( E_fis + L_anchor + L_pred_sem )  +  λ_S · ( SIGReg_pos
 
 | Regolarizzazione | Dove | Valore | Cosa impedisce |
 |---|---|---|---|
-| **SIGReg** | `ŷ`, `ẽ`, `s` per articolatore | `λ_S = 0,05`, 1.024 direzioni, 17 nodi | collasso; anisotropia; modality gap |
-| **Congelamento + LoRA** | encoder video, predictor fisico (r = 16), S-JEPA (r = 4) | `B = 0` all'inizio, scala `α/r = 1` **[Aperto: α]** | allontanarsi dai pesi pre-addestrati: i pesi congelati non memorizzano il corpus, gli aggiornamenti restano a basso rango |
-| **Weight decay** (AdamW, disaccoppiato) | matrici addestrabili, LoRA comprese | 0,04 costante, come V-JEPA 2.1 | pesi grandi; 0 su norme, bias, scalari e query apprese |
+| **SIGReg** | `ŷ`, `ẽ`, `s` e `s̃` per passo | `λ_S = 0,05`, 1.024 direzioni, 17 nodi | collasso; anisotropia; modality gap |
+| **Stop-gradient fra i livelli** | `sg(s)` in `E_fis`; `sg(Enc(x))` nel passaggio semantico | — | che il video sposti il proprio bersaglio; che il semantico deformi l'encoder adattato dalla fisica |
+| **Congelamento + LoRA** | encoder video, predictor fisico (r = 16) | `B = 0` all'inizio, scala `α/r = 1` **[Aperto: α]** | allontanarsi dai pesi pre-addestrati: i pesi congelati non memorizzano il corpus, gli aggiornamenti restano a basso rango |
+| **Weight decay** (AdamW, disaccoppiato) | matrici addestrabili, LoRA comprese | 0,04 costante, come V-JEPA 2.1 | pesi grandi; 0 su norme, bias, scalari, posizioni e query apprese |
 | **Dropout** | predictor semantico (attenzione, residui, MLP), testa testuale | 0,1 **[Aperto: PC7]** | co-adattamento nei moduli da zero |
 | **Stochastic depth** (DropPath) | rami residui del predictor semantico | 0,1 **[Aperto: PC7]** | dipendenza da singoli blocchi |
 | **LayerScale** | rami residui del predictor semantico | init 1e-4 **[Aperto: PC7]** | aggiornamenti grandi all'inizio: ogni blocco parte vicino all'identità |
-| **Ancora** | `s` → keypoint | peso uguale agli altri termini | perdita di informazione cinematica nel target |
-| **Target lento** | LoRA di S-JEPA | LR ×0,05 [Lett. 34] | un target che insegue il predictor |
-| **Schedule del layer finale** | layer finale di posa | picco 0,5 × base **[Aperto]**, warm-up 10 %, coseno a 0 al 50 % della run **[Aperto]** | un target che continua a muoversi fino alla fine |
+| **Ancora** | `s` → keypoint | peso uguale agli altri termini della posa | perdita di informazione cinematica nel target |
+| **Invarianza fra viste** | `s` contro `s̃` | peso uguale | dipendenza dal rumore del rilevatore e dall'inquadratura |
+| **Schedule della posa** | encoder di posa | picco 3e-4, warm-up 20 % della run, coseno a 0 | un target che continua a muoversi mentre il video lo insegue |
 | **Aumentazioni** | video e keypoint | jitter ±10 %, colore ±0,2 **[Aperto]**, niente flip | scorciatoie su inquadratura e colore |
-| **Curriculum** | stadi 1a e 2a | 1 % dei passi ciascuno **[Aperto: PC7]** | che le teste casuali distorcano le feature pre-addestrate [Lett. 95] |
-| **Early stopping** | metrica held-out channel | pazienza 2 epoche, poi cooldown dal checkpoint migliore | overfitting sui canali |
+| **Curriculum** | stadi P e F₀ | un'epoca ciascuno; warm-up di 2 epoche per ogni gruppo che entra | che la LoRA insegua un bersaglio casuale; che le teste casuali distorcano le feature pre-addestrate [Lett. 95] |
+| **Early stopping** | metrica held-out channel | pazienza 3 epoche, contata nello stadio F, poi cooldown dal checkpoint migliore | overfitting sui canali |
 | **Split per canale** | dati | 10 % dei canali per lingua dei segni **[Aperto]** | misurare la generalizzazione su clip dello stesso segnante |
 
-**Cosa non c'è, per scelta:** nessuna EMA, nessuno stop-gradient, nessun clipping del gradiente (come V-JEPA 2.1), nessuna calibrazione dei pesi delle loss.
+**Cosa non c'è, per scelta:** nessuna EMA, nessuno stop-gradient dentro un livello, nessun clipping del gradiente (come V-JEPA 2.1), nessuna calibrazione dei pesi delle loss.
 
-**Ottimizzazione.**
-- AdamW `β = (0,9; 0,999)`, bf16 con pesi in fp32, batch effettivo 128.
-- Schedule principale come V-JEPA 2: warm-up lineare 5 %, fase costante, cooldown lineare a 0 sul 5 % dei passi, dal checkpoint migliore.
-- Learning rate base **[Aperto: PC7, {1e-4, 2e-4, 5e-4}]**.
+**Ottimizzazione** (`worldsign-gerarchia.md` §6.2).
+- AdamW `β = (0,9; 0,999)`, bf16 con pesi in fp32, batch effettivo 128; un gruppo per famiglia del curriculum.
+- Ogni famiglia tranne la posa: warm-up lineare di 2 epoche dalla sua entrata, poi costante; la posa: warm-up sul 20 % della run, poi coseno a 0. Su tutto, il cooldown di V-JEPA 2: lineare a 0 sul 5 % dei passi, dal checkpoint migliore.
+- Learning rate base **[Aperto: PC7, {1e-4, 2e-4, 5e-4}]**; posa 3e-4.
 
 ---
 
@@ -340,7 +348,7 @@ L  =  (1 − λ_S) · ( E_fis + L_anchor + L_pred_sem )  +  λ_S · ( SIGReg_pos
 
 | Termine | Calcolo | Aggregazione fra GPU |
 |---|---|---|
-| `E_fis`, `L_anchor`, `E_sem`, `L_F` | media sulle clip della GPU | DDP media i gradienti: media globale (esatta a denominatori uguali) |
+| `E_fis`, `L_anchor`, `L_inv`, `E_sem`, `L_F` | media sulle clip della GPU | DDP media i gradienti: media globale (esatta a denominatori uguali) |
 | `L_unif`, `L_InfoNCE` | tutte le coppie del batch intero | `all_gather` con backward; ogni GPU calcola lo stesso valore |
 | `SIGReg_sem`, `SIGReg_posa` | funzione caratteristica del batch intero | `all_reduce` di somme e conteggi, con backward |
 

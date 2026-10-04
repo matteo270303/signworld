@@ -1,10 +1,21 @@
-"""Retrieval metrics computed from a query-by-gallery similarity matrix (§4.12.3, §4.13.4)."""
+"""Retrieval metrics computed from a query-by-gallery similarity matrix (§4.12.3, §4.13.4).
+
+A (texts, clips) matrix holds both directions: ``both_ways`` gives text to video as it is and
+video to text as its transpose, and ``bidirectional_measures`` reports R@k, Precision@k,
+Recall@k, MRR and MedR of each, keyed ``t2v_*`` and ``v2t_*``.
+"""
 
 from collections.abc import Hashable, Iterable, Sequence
 from dataclasses import dataclass
+from typing import Final
 
 import torch
 from torch import Tensor
+
+from .directions import DIRECTIONS
+
+KS: Final = (1, 5, 10)
+"""The k of R@k, Precision@k and Recall@k in every report."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +66,52 @@ def recall_at_k(similarity: Tensor, relevance: Tensor, ks: Iterable[int]) -> dic
     """Fraction of queries whose best relevant item is among the top ``k``, for every ``k``."""
     ranks = match_ranks(similarity, relevance)
     return {k: (ranks < k).float().mean().item() for k in ks}
+
+
+def both_ways(*matrices: Tensor) -> dict[str, tuple[Tensor, ...]]:
+    """(texts, clips) matrices in each direction: as given for text to video, transposed for
+    video to text, so that rows are always the queries."""
+    shapes = {matrix.shape for matrix in matrices}
+    if len(shapes) != 1:
+        raise ValueError(f"the matrices of one retrieval differ in shape: {sorted(shapes)}")
+    oriented = {"t2v": matrices, "v2t": tuple(matrix.T for matrix in matrices)}
+    return {direction: oriented[direction] for direction in DIRECTIONS}
+
+
+def ranking_measures(
+    similarity: Tensor, relevance: Tensor, prefix: str, ks: Sequence[int] = KS
+) -> dict[str, float]:
+    """R@k, Precision@k, Recall@k, MRR and MedR of one direction, keyed ``{prefix}_*``.
+
+    R@k is the share of queries with a match among the first k, the recall of cross-modal
+    retrieval papers; Precision@k the matches among the first k over k; Recall@k, in the
+    information-retrieval sense, the matches among the first k over all the query's matches
+    (with one match per query it equals R@k); MRR the mean reciprocal rank of the first match
+    and MedR its median rank (1 = first; with an even number of queries the mean of the two
+    middle ranks, as ``np.median``, where ``Tensor.median`` would take the lower one).
+    """
+    ranks = match_ranks(similarity, relevance).float() + 1  # 1 = the first result matches
+    out = {f"{prefix}_r{k}": float((ranks <= k).float().mean()) for k in ks}
+    top = similarity.topk(min(max(ks), similarity.shape[1]), dim=1).indices
+    hits = relevance.gather(1, top).float()
+    matches = relevance.sum(dim=1).float()
+    for k in ks:
+        found = hits[:, :k].sum(dim=1)
+        out[f"{prefix}_precision{k}"] = float((found / k).mean())
+        out[f"{prefix}_recall{k}"] = float((found / matches).mean())
+    out[f"{prefix}_mrr"] = float((1 / ranks).mean())
+    out[f"{prefix}_medr"] = float(ranks.quantile(0.5))
+    return out
+
+
+def bidirectional_measures(
+    similarity: Tensor, relevance: Tensor, ks: Sequence[int] = KS
+) -> dict[str, float]:
+    """``ranking_measures`` of text to video and video to text on a (texts, clips) matrix."""
+    out: dict[str, float] = {}
+    for direction, (scores, relevant) in both_ways(similarity, relevance).items():
+        out |= ranking_measures(scores, relevant, direction, ks)
+    return out
 
 
 def bootstrap_recall(

@@ -13,6 +13,8 @@
 > Teoremi matematici standard e nozioni generali di deep learning compaiono senza etichetta.
 
 > **Revisione del 3/10/2026.** L'encoder di posa **non è pre-addestrato**: si addestra da zero insieme al resto del modello, con invarianza fra viste, SIGReg e ancora (`worldsign-posa.md`). La gerarchia è un **H-JEPA addestrato per livello**: il livello fisico legge la posa con lo stop-gradient ed è l'unico ad adattare l'encoder video; il semantico legge l'encoder senza modificarlo. Gli stadi sono P, F₀ e F, a confini di epoca (`worldsign-gerarchia.md`). Le sezioni che descrivevano l'S-JEPA pre-addestrato, il bersaglio per articolatore e gli stadi 1a/1/2a/2 sono aggiornate; in caso di dubbio valgono i due documenti.
+>
+> **Revisione del 4/10/2026.** Il retrieval si misura e si giudica **in entrambe le direzioni** (T2V e V2T). Tutte le metriche si riportano nei due versi: R@k, Precision@k, Recall@k, MRR, MedR, R@1 tollerante, ripartizioni, intervalli bootstrap, test col rumore, hubness delle due gallerie. Le baseline di PC2 e il gate F4 hanno una soglia per direzione. F3 confronta la media con la media, e `X` passa da 46,7 a 46,5 (§4.12.2). La metrica che decide resta la media di R@1 T2V e V2T (§4.10).
 
 ---
 
@@ -553,7 +555,7 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
   - Il predictor fisico riceve la **fusione multi-livello di V-JEPA 2.1**: blocchi 6, 12, 18 e 24, ciascuno con la propria LayerNorm, concatenati e fusi da un MLP (§4.4.5) [Lett. 32, 72]. Sono gli indici che il codice di V-JEPA 2.1 usa per un encoder a 24 blocchi, non una scelta nostra.
   - Il predictor semantico riceve l'uscita dell'ultimo blocco, come in VL-JEPA [Lett. 34], **senza gradiente**: l'encoder lo adatta solo il livello fisico (`worldsign-gerarchia.md`) **[Nostra scelta]**.
 
-**Perché V-JEPA 2.1, e con quale riserva.** La 2.1 introduce una loss predittiva **densa** su tutti i token e una **supervisione profonda** su più layer intermedi [Lett. 32], e l'avevamo scelta per questo. **Però** le varianti distillate sono state addestrate con una loss **solo sull'ultimo layer del teacher, senza supervisione profonda** [Lett. 32]. Nei checkpoint distillati la predizione multi-livello non c'è (`n_output_distillation = 1`), mentre ViT-g e ViT-G ne hanno 4 [Lett. 72]: la fusione la aggiungiamo noi (§4.4.5). **PC3, chiuso il 29/9: V-JEPA 2.1-L.** Sulle feature congelate (8.000 clip di YouTube-SL-25, test su 1.394) i due encoder sono alla pari: R² delle mani 0,706 contro 0,700 di V-JEPA 2-L, l'encoder usato da VL-JEPA [Lett. 34]; T2V R@1 0,067 per entrambi; V2T R@1 0,039 contro 0,067, a favore di V-JEPA 2-L. Il probe fonologico non è calcolabile. A parità vale la regola di §4.12.1: la 2.1-L.
+**Perché V-JEPA 2.1, e con quale riserva.** La 2.1 introduce una loss predittiva **densa** su tutti i token e una **supervisione profonda** su più layer intermedi [Lett. 32], e l'avevamo scelta per questo. **Però** le varianti distillate sono state addestrate con una loss **solo sull'ultimo layer del teacher, senza supervisione profonda** [Lett. 32]. Nei checkpoint distillati la predizione multi-livello non c'è (`n_output_distillation = 1`), mentre ViT-g e ViT-G ne hanno 4 [Lett. 72]: la fusione la aggiungiamo noi (§4.4.5). **PC3, chiuso il 29/9: V-JEPA 2.1-L.** Sulle feature congelate (8.000 clip di YouTube-SL-25, test su 1.394) i due encoder sono alla pari: R² delle mani 0,706 contro 0,700 di V-JEPA 2-L, l'encoder usato da VL-JEPA [Lett. 34]; T2V R@1 0,067 per entrambi; V2T R@1 0,039 contro 0,067, a favore di V-JEPA 2-L. Il probe fonologico non è calcolabile. A parità vale la regola di §4.12.1: la 2.1-L. **Con la regola del 4/10** il probe testuale si legge sulla media delle due direzioni (0,053 contro 0,067) e va a V-JEPA 2-L, mentre le mani vanno alla 2.1-L. Una vittoria a testa non basta a nessuno dei due, quindi **l'esito non cambia**: 2.1-L.
 
 #### 4.4.2 LoRA
 
@@ -1152,8 +1154,8 @@ Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-
 | ID | Controllo | Cosa decide |
 |---|---|---|
 | **PC1** | Geometria dei target testuali a 768 dimensioni, con il prefisso fissato e dopo centratura per lingua: effective rank [Lett. 43], spettro, IsoScore [Lett. 44], coseno medio fra coppie casuali, **valore di SIGReg** | nessuna dimensione da scegliere: il vettore si usa intero (§4.4.4). Misurato il 21/9: IsoScore 0,26, effective rank 621, SIGReg ≈ 14 volte il valore di una gaussiana. Se SIGReg sui target centrati resta alto, conflitto di anisotropia da segnalare prima del gate |
-| **PC2** | Baseline: casuale; solo statistiche della didascalia; **regressione ridge da feature V-JEPA congelate a embedding testuali** | la soglia minima da battere |
-| **PC3** | 20.000 clip, feature congelate sull'**uscita dell'encoder** di V-JEPA 2.1-L distillato e di V-JEPA 2-L; tre probe lineari: keypoint delle mani dal riquadro (R²), proprietà fonologiche su segni isolati [Lett. 74–76], regressione ridge verso il testo (R@1) | scelta dell'encoder video: vince il migliore su almeno 2 probe su 3; a parità, 2.1-L **[Nostra proposta]**. **Chiuso il 29/9: V-JEPA 2.1-L**, a parità sui due probe calcolabili (§4.4.1) |
+| **PC2** | Baseline: casuale; solo statistiche della didascalia; **regressione ridge da feature V-JEPA congelate a embedding testuali**. Tutte misurate **nelle due direzioni** (R@k, Precision@k, Recall@k, MRR, MedR); la penalità della ridge si sceglie sulla media dei due R@1 **[Nostra scelta, 4/10]** | la soglia minima da battere: **una per direzione**, il miglior R@1 T2V e il miglior R@1 V2T fra le baseline (usate dal gate e da F3) |
+| **PC3** | 20.000 clip, feature congelate sull'**uscita dell'encoder** di V-JEPA 2.1-L distillato e di V-JEPA 2-L; tre probe lineari: keypoint delle mani dal riquadro (R²), proprietà fonologiche su segni isolati [Lett. 74–76], regressione ridge verso il testo (media di R@1 T2V e V2T, dal 4/10) | scelta dell'encoder video: vince il migliore su almeno 2 probe su 3; a parità, 2.1-L **[Nostra proposta]**. **Chiuso il 29/9: V-JEPA 2.1-L**, a parità sui due probe calcolabili; con la media il risultato non cambia (§4.4.1) |
 | **PC4** | Gli stessi probe a 256² e a 384², entrambi con crop | risoluzione: 384² solo se il probe delle mani guadagna più di +0,05 di R², perché il costo dell'encoder triplica **[Nostra proposta]**. **Chiuso il 29/9: 256²**, guadagno +0,005 |
 | **PC5** | Scelta dell'encoder di posa fra feature cinematiche, Uni-Sign congelato, MAMP e S-JEPA, sulle stesse clip: R² di una lettura lineare di posizioni e velocità per articolatore (**≥ 0,7**), rango effettivo e IsoScore, riconoscimento di canale e lingua | chiuso il 2026-09-20: S-JEPA. **Superato il 3/10:** l'encoder di posa si addestra da zero (§4.4.3) |
 | **PC6** | I checkpoint 2.1-L e 2.1-B contengono i pesi del predictor? Dimensioni d'ingresso e d'uscita? Struttura della proiezione d'ingresso e presenza delle LayerNorm per livello nell'encoder? Con i pesi dei tre livelli aggiuntivi a zero, il predictor con fusione dà la stessa uscita di quello distillato? | **riuso del predictor fisico o ripiego** (§4.4.5); innesto della fusione multi-livello |
@@ -1162,30 +1164,30 @@ Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-
 
 #### 4.12.2 Gate (criterio fissato in anticipo)
 
-**Revisione del 29/9 [Nostra scelta].** Senza la scala ViT-B, la run di gate è la **run 1 del piano (§4.14): architettura completa, ViT-L, braccio A** (allineamento + SIGReg, la configurazione della tesi), sul corpus di pretraining. Test diretto su OpenASL, **senza fine-tuning** (R@1 T2V; riferimento C²RL = 62,2, ottenuto con fine-tuning [Lett. 87]): il confronto è quindi prudente.
+**Revisione del 29/9 [Nostra scelta].** Senza la scala ViT-B, la run di gate è la **run 1 del piano (§4.14): architettura completa, ViT-L, braccio A** (allineamento + SIGReg, la configurazione della tesi), sul corpus di pretraining. Test diretto su OpenASL, **senza fine-tuning**: il confronto è quindi prudente. Si legge R@1 **in entrambe le direzioni**, ognuna contro i propri riferimenti: C²RL dà T2V = 62,2 e V2T = 61,6, ottenuti con fine-tuning [Lett. 87]; la baseline ridge di PC2 è quella della stessa direzione. **Decide la direzione peggiore** **[Nostra scelta, 4/10]**: il modello serve al retrieval nei due versi, e una direzione buona non deve nasconderne una cattiva.
 
 **Quando partono le altre run.** Gli altri quattro bracci di ESP-1 partono in parallelo quando la run di gate supera la fermata F2 (§4.13.5); se la run di gate si ferma a F3, si fermano anche loro. ESP-2, ESP-6 ed ESP-4 (facoltativa) partono alla fine di ESP-1, sulla configurazione migliore θ\*. Un problema dell'architettura costa così una run sola.
 
 | Esito finale (F4) | Decisione |
 |---|---|
-| sotto la baseline ridge di PC2 | **stop**: bug o obiettivo controproducente |
-| < 0,5 × C²RL (≈ 31) | **stop**: il problema non è risolvibile con aggiustamenti |
-| ≥ 0,5 × C²RL | si procede: confronto dei bracci e modello finale |
+| in almeno una direzione, sotto la baseline ridge di PC2 di quella direzione | **stop**: bug o obiettivo controproducente |
+| in almeno una direzione, < 0,5 × C²RL di quella direzione (T2V ≈ 31,1, V2T = 30,8) | **stop**: il problema non è risolvibile con aggiustamenti |
+| in entrambe le direzioni, ≥ 0,5 × C²RL | si procede: confronto dei bracci e modello finale |
 
-**Soglia `X = 46,7` [Nostra scelta, fissata il 2026-09-21].** Era il secondo gate prima della riga ViT-L di ESP-1: 0,75 × 62,2 = 46,65, arrotondato per eccesso. Senza quella riga non c'è più un blocco di budget da proteggere, e `X` resta il criterio della fermata F3: la curva di R@1 estrapolata deve essere compatibile con `X`.
+**Soglia `X = 46,5` [Nostra scelta, fissata il 2026-09-21, rivista il 4/10].** Era il secondo gate prima della riga ViT-L di ESP-1. Senza quella riga non c'è più un blocco di budget da proteggere, e `X` resta il criterio della fermata F3: la curva estrapolata della **metrica che decide**, la media di R@1 T2V e V2T, deve essere compatibile con `X`. Perché il confronto sia omogeneo, `X` si calcola sulla media di C²RL: 0,75 × 61,9 = 46,425, arrotondato per eccesso. Prima valeva 0,75 × 62,2 = 46,65 → 46,7, sulla sola direzione T2V.
 
 **Come si legge [Nostra scelta].** La decisione usa la stima puntuale; accanto si riporta l'intervallo bootstrap sulle query (§4.12.3). Le soglie sono codificate in `signworld/experiment/evaluation/gate.py`, con test sui confini, così nessun risultato può spostarle dopo. Il gate è un criterio di sanità, non una claim: il confronto con C²RL non è a parità di dati né di architettura (ResNet-18 a 224²) [Lett. 87].
 
 #### 4.12.3 Protocollo finale
 
-- **Retrieval** (modello finale, dopo fine-tuning): R@1/5/10 T2V e V2T sui tre benchmark (§3.9), con intervalli bootstrap sulle query e, accanto, **R@1 tollerante ai duplicati** (§4.13.4) [Lett. 90].
+- **Retrieval** (modello finale, dopo fine-tuning): R@1/5/10, MRR e MedR, **T2V e V2T**, sui tre benchmark (§3.9), con intervalli bootstrap sulle query e, accanto, **R@1 tollerante ai duplicati** (§4.13.4) [Lett. 90]. Con un numero pari di query MedR è la media dei due ranghi centrali.
 - **Densità delle rappresentazioni** con la metrica di SignCL [Lett. 17]: verifica se SIGReg risolve il problema che SignCL ha individuato.
 - **Trasferimento a lingue con pochi dati** (richiede un pretraining in più: **non nel piano attuale**, §4.14): si esclude una lingua dal pretraining e poi si fa fine-tuning con 1, 5 e 20 ore **[Nostra scelta]**, al posto dello zero-shot che nel segnico non ha mai funzionato [Lett. 6, 16].
 - **Identificazione della lingua** su rappresentazioni della posa, uscita dell'encoder video e `ŷ` (verifica della clessidra, H5).
 - **Probe fonologici** sulle rappresentazioni della posa e sull'uscita dell'encoder video.
 - **Coppie minime**: segni che differiscono per un solo parametro, da dataset di segni isolati usati **solo in valutazione** [Lett. 74–76] **[Nostra proposta]**.
-- **Test di inversione temporale** e **test con il video sostituito da rumore**.
-- **Hubness** della galleria: quante volte ogni video compare fra i primi risultati [Lett. 83].
+- **Test di inversione temporale** e **test con il video sostituito da rumore** (R@1 nelle due direzioni; il calo si misura sulla loro media).
+- **Hubness** delle due gallerie: quante volte ogni video compare fra i primi risultati delle didascalie (T2V), e ogni didascalia fra quelli dei video (V2T) [Lett. 83].
 - **Profilo temporale di `E_sem`** su un sottoinsieme di BOBSL, come misura di allineamento ai sottotitoli (§4.5.4) **[Nostra proposta]**.
 - **Metriche geometriche** (effective rank, IsoScore, condition number) **solo come diagnostica, non come obiettivo**: il legame con il retrieval cross-modale non è dimostrato [Lett. 43].
 
@@ -1280,11 +1282,11 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 | LoRA | `‖ΔW‖ / ‖W‖` per blocco (video, predictor fisico) | crescita rapida, oppure > 0,1 | nullo |
 | **Lingue piccole e sbilanciamento** | scarto train/val di `E_sem` per lingua in funzione delle epoche; R@1 ripartito per lingua (§4.13.4) | lo scarto cresce, o le lingue piccole restano molto indietro → lo sbilanciamento pesa: si cerca una soluzione (§3.5) | nullo |
 | **Modality gap** | accuratezza di un classificatore logistico che distingue `ŷ` da `ẽ` | > 95 % → spazi separati | minimo |
-| **Hubness** | asimmetria della distribuzione di quante volte ogni video compare nei primi k risultati [Lett. 83] | cresce → predizioni schiacciate verso il centro, cioè verso la media | nullo: dalla matrice di similarità di validazione |
+| **Hubness** | asimmetria della distribuzione di quante volte ogni elemento della galleria compare nei primi k risultati, **per entrambe le gallerie**: i video per le query testuali (T2V), le didascalie per le query video (V2T) [Lett. 83] | cresce in T2V → `ŷ` schiacciate verso il centro, cioè verso la media; cresce in V2T → pochi `ẽ` attirano i video | nullo: dalla matrice di similarità di validazione |
 | **Tabella energetica 2×2** | `E_fis` (una maschera) incrociata con `E_sem` in validazione | cresce «fisica bassa, semantica alta» → didascalie disallineate o semantica non appresa; cresce «fisica alta, semantica bassa» → errori dello stimatore di posa o occlusioni | basso: un passaggio fisico in validazione |
 | **Coda ad alta energia** | `E_sem` ed `E_fis` per campione di addestramento, per lingua, salvate ai checkpoint | solo audit delle coppie disallineate [Lett. 82]; **mai filtri automatici**, che colpirebbero le lingue con pochi dati **[Nostra argomentazione]** | nullo: logging |
-| **Scorciatoia sul testo** | R@1 con il video sostituito da rumore | cala meno del 50 % → il modello non guarda il video | basso: ogni 500 passi |
-| **Retrieval** | R@1 held-out channel | sotto la baseline ridge dopo il warmup | la validazione che serve comunque |
+| **Scorciatoia sul testo** | R@1 T2V e V2T con il video sostituito da rumore | la media cala meno del 50 % → il modello non guarda il video | basso: ogni 500 passi |
+| **Retrieval** | R@k, MRR e MedR held-out channel, T2V e V2T; decide la media di R@1 | sotto la baseline ridge (media delle due direzioni) dopo il warmup | la validazione che serve comunque |
 | **Velocità del target di posa** | CKA lineare fra `s` al passo 0 e ora, su un batch sonda fisso [Lett. 91] | **diagnostica, non ferma il training**: rendere isotropo il target la abbassa per costruzione, perché la CKA lineare non è invariante a una mappa lineare non ortogonale [Lett. 91]; il contenuto si sorveglia con la riga successiva | nullo: 256 clip ogni 500 passi |
 | **Target di posa: isotropia e contenuto** | IsoScore, rango e SIGReg di `s`; R² di posizione e velocità dei keypoint di ogni articolatore letti linearmente da `s` sul batch sonda | R² sceso oltre 0,02 sotto **il suo massimo** → il target perde cinematica **[Nostra proposta, soglie da calibrare in PC7]** | basso: stesso batch sonda |
 | **Termini della posa in conflitto** | coseni fra i gradienti di `L_inv`, `L_anchor` e `SIGReg_posa` sull'encoder di posa, e loro quote | coseno ancora–SIGReg stabilmente sotto −0,3 → SIGReg combatte l'ancora **[Nostra proposta]** | nullo |
@@ -1304,9 +1306,9 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 | **R@1 tollerante ai duplicati**, accanto a R@1 standard: una didascalia identica o quasi identica a quella corretta conta come successo | falsi negativi della valutazione: su MS-COCO mancano ×3,6 associazioni immagine→didascalia e ×8,5 didascalia→immagine, e le classifiche fra modelli cambiano [Lett. 90] | nullo |
 | **Scarto fra canali visti e held-out channel**: una validazione con video nuovi di canali visti, più un probe lineare di canale e di segnante su `ŷ` | scorciatoia di canale o di identità | basso |
 | **R@1 su un sottoinsieme di addestramento** della stessa dimensione della validazione | scarto di overfitting | basso |
-| **R@1 per fasce** di durata e di lunghezza della didascalia | dove si concentrano gli errori | nullo |
-| **R@1 ripartito per lingua**, solo come diagnostica | il valore misto è una media pesata per numero di video, dominata dall'ASL: la ripartizione mostra le lingue con pochi dati **[Nostra argomentazione]** | nullo |
-| **Intervalli bootstrap** sulle query per **ogni** R@k riportato | differenze non significative lette come effetti | nullo |
+| **R@1 per fasce** di durata e di lunghezza della didascalia, T2V e V2T (la query di entrambe le direzioni è una clip, quindi le fasce sono le stesse) | dove si concentrano gli errori | nullo |
+| **R@1 ripartito per lingua**, T2V e V2T, solo come diagnostica | il valore misto è una media pesata per numero di video, dominata dall'ASL: la ripartizione mostra le lingue con pochi dati **[Nostra argomentazione]** | nullo |
+| **Intervalli bootstrap** sulle query per **ogni** R@k riportato, nelle due direzioni; in validazione per R@1 T2V e V2T | differenze non significative lette come effetti | nullo |
 | **Errore in keypoint** del livello fisico contro le baseline (§4.13.3) | risultato fisico interpretabile | nullo |
 
 #### 4.13.5 La run di gate come run diagnostica: fermate programmate
@@ -1317,7 +1319,7 @@ La run di gate (§4.12.2) si ferma in quattro punti fissati in anticipo; a ogni 
 |---|---|---|
 | **F1 · fine dello stadio P** (epoca 1) | **posa:** `L_anchor` e `SIGReg_posa` in calo · effective rank di `s` > 0,5× il passo 0 · IsoScore di `s` ≥ 0,8 · R² di posizione delle mani da `s` ≥ 0,9. **Semantico:** `γ_sem` > 0,3 · `SIGReg_sem` in calo · R@1 held-out > 5× il caso · test col rumore superato · query non collassate | stop → triage della posa o del semantico |
 | **F2 · fine dello stadio F₀** (epoca 2) | `E_fis` in calo · R² dei passi soprattutto visibili > 0,9 · la dinamica batte la baseline · nessun leak | stop → triage del livello fisico |
-| **F3 · fine della prima epoca di F** (epoca 3) | `E_fis` in calo · nessuna LoRA sposta il suo strato oltre il 10 % · deriva dell'encoder ≥ 0,5 · R@1 > baseline ridge · `ω` < 0,95 · hubness stabile · curva di R@1 estrapolata compatibile con la soglia `X` · nessun conflitto stabile fra gradienti | stop o correzione |
+| **F3 · fine della prima epoca di F** (epoca 3) | `E_fis` in calo · nessuna LoRA sposta il suo strato oltre il 10 % · deriva dell'encoder ≥ 0,5 · media di R@1 T2V e V2T > media della baseline ridge · `ω` < 0,95 · hubness stabile in entrambe le gallerie · curva estrapolata della media di R@1 compatibile con la soglia `X` (calcolata sulla media di C²RL, §4.12.2) · nessun conflitto stabile fra gradienti | stop o correzione |
 | **F4 · fine** | tabella del gate su OpenASL | come da gate |
 
 Una correzione che tocca solo componenti **successivi** alla fermata riparte dall'ultimo checkpoint valido; una che tocca componenti **precedenti** riparte da zero **[Nostra proposta]**.
@@ -1608,7 +1610,7 @@ Per ogni ipotesi riportiamo l'enunciato, la base in letteratura, il test previst
 | Pesi del predictor nel checkpoint 2.1 | **presenti** (2.1-B 22,9 M, 2.1-L 23,0 M); restano dimensioni e fusione | PC6 |
 | Tempo di calcolo | cinque bracci di ESP-1 più ESP-2 ed ESP-6 (≈ 6,85 L), ESP-4 facoltativa (≈ 1 L), più il fine-tuning del modello finale | misura di L in PC7 |
 | Secondo seed di θ\* (`σ_seed`) | aperto | budget, dopo la misura di L in PC7 |
-| Soglia `X` del gate | **chiusa: 46,7**; dopo la revisione del 29/9 è il criterio della fermata F3 (§4.12.2) | — |
+| Soglia `X` del gate | **chiusa: 46,5** (0,75 × la media di C²RL nelle due direzioni; era 46,7 sulla sola T2V fino al 4/10); dopo la revisione del 29/9 è il criterio della fermata F3 (§4.12.2) | — |
 | Learning rate, durata degli stadi, ε di ESP-4 (facoltativa) | valori di partenza | PC7 |
 | Costo reale del passo e ripiego sui token | stima 3,7 | PC7 |
 | Localizzazione regalata dal riquadro di lettura | allarme previsto | mitigazione da definire se l'allarme scatta |

@@ -6,6 +6,9 @@ what the measures read. ``split_measures`` derives from it:
 * **retrieval** both ways (``validation.retrieval``): R@k, Precision@k, Recall@k, MRR, MedR,
   the R@1 tolerant to near-duplicate captions, R@1 by caption language, clip duration and
   caption length, the chance level, bootstrap intervals where asked;
+* the **noise test** both ways (R@1 with the video replaced by noise; its drop on the metric
+  that decides) and the **hubness** of both galleries, the clips (``hubness_t2v``) and the
+  captions (``hubness_v2t``);
 * the **loss** of the objective and each of its terms, over the clips (``loss_*``);
 * **E_sem by caption language**;
 * the **physical read-outs** per step (gamma, R² overall, on mostly hidden and mostly visible
@@ -13,7 +16,7 @@ what the measures read. ``split_measures`` derives from it:
   against interpolation and constant velocity, averaged over the batches;
 * **alignment and uniformity** of Wang and Isola [Lett. 40] on the unit sphere;
 * the **geometry of ŷ and ẽ**: effective rank, IsoScore, condition number, SIGReg;
-* the **noise test**, **hubness**, the **modality gap** and the **2x2 energy table**.
+* the **modality gap** and the **2x2 energy table**.
 
 ``model_measures`` adds the leak test and the attention of the queries on the first clips;
 ``pose_target_measures`` the isotropy of the pose target and how much of each articulator's
@@ -40,7 +43,7 @@ from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSig
 from signworld.models.worldsign.readout import membership
 
 from ..metrics.geometry import centered, condition_number, effective_rank, isoscore
-from ..metrics.retrieval import hubness
+from ..metrics.retrieval import both_ways, hubness
 from .readings import (
     Spread,
     attention_readings,
@@ -247,9 +250,13 @@ def split_measures(
 
     if "noise" in t:
         noisy = retrieval(t["noise"], texts, t["rows"])
-        out["noise_t2v_r1"] = noisy.t2v[1]
-        out["noise_drop"] = 1 - noisy.t2v[1] / scores.t2v[1] if scores.t2v[1] > 0 else math.nan
-    out["hubness"] = hubness(similarity(predicted, texts), min(10, len(texts)))
+        out |= {f"noise_{direction}_r1": value for direction, value in noisy.r1.items()}
+        out["noise_drop"] = (
+            1 - noisy.decision / scores.decision if scores.decision > 0 else math.nan
+        )
+    nearest = min(10, len(texts))
+    for direction, (scored,) in both_ways(similarity(predicted, texts)).items():
+        out[f"hubness_{direction}"] = hubness(scored, nearest)
     out["modality_gap"] = modality_gap(predicted[:, 0], texts)
     if "e_fis" in t:
         semantic = 1 - functional.cosine_similarity(predicted.mean(1), texts, dim=-1)

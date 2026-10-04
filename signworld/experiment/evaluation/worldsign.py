@@ -8,8 +8,8 @@
   the queries; the isotropy and kinematic content of the pose target, as the probe batch
   reads them in validation.
 * **Temporal order ω** (video reversed) on every clip.
-* **Gate (F4)**: on OpenASL's test clips, T2V R@1 against the ridge baseline of PC2 and half of
-  C²RL (``evaluation.gate``).
+* **Gate (F4)**: on OpenASL's test clips, R@1 in both directions, each against its own ridge
+  baseline of PC2 and half of its own C²RL reference (``evaluation.gate``).
 * **Plausibility** (violation of expectation, ``plausibility``) on every clip.
 * **Hourglass (H5)**: accuracy of a linear probe of the sign language on the pose target, the
   video encoder's output and ŷ, on held-out videos.
@@ -27,6 +27,7 @@ from torch.nn import functional
 
 from signworld.experiment.train.config import WorldSignConfig
 from signworld.experiment.train.validation import EVERY_INTERVAL
+from signworld.metrics.directions import Bidirectional
 from signworld.metrics.measures import collect, model_measures, pose_target_measures, split_measures
 from signworld.metrics.probes import video_split
 from signworld.models.worldsign.model import WorldSign, WorldSignBatch
@@ -126,12 +127,13 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     videos: Sequence[str],
     *,
     masks: int = 8,
-    ridge_baseline_r1: float | None = None,
+    ridge_baseline: Bidirectional | None = None,
     gate: bool = False,
 ) -> EvaluationReport:
     """Every measurement of §4.12.3-§4.12.4 on one set of clips, on one GPU.
 
     ``batches`` is read several times: a list, or a data loader that decodes again.
+    ``ridge_baseline``: R@1 of the ridge baseline of PC2 in both directions, as fractions.
     """
     languages = model.text.centering.languages
     physical = model.pose is not None
@@ -149,9 +151,9 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     measures["order_cosine"] = order_cosine(model, batches, device)
     decision = None
     if gate:
-        if ridge_baseline_r1 is None:
-            raise ValueError("the gate needs the ridge baseline of PC2")
-        decision = GatePolicy().final(100 * scores.t2v[1], 100 * ridge_baseline_r1).value
+        if ridge_baseline is None:
+            raise ValueError("the gate needs the ridge baseline of PC2 in both directions")
+        decision = GatePolicy().final(scores.r1.scaled(100), ridge_baseline.scaled(100)).value
     tests = plausibility_tests(model, batches, device, masks) if physical else []
     features = _features(model, batches, device)
     probes = {

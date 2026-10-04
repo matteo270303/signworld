@@ -236,10 +236,13 @@ def video_probes(source: SourceArgument, config: AnalysisConfigOption = ANALYSIS
         hands = " · ".join(
             f"{part} {s.r2_position:.3f}/{s.r2_velocity:.3f}" for part, s in result.hands.items()
         )
+        recalls = " · ".join(
+            f"{label} R@1 {r.estimate:.3f} [{r.low:.3f}, {r.high:.3f}]"
+            for label, r in (("T2V", result.text.t2v_r1), ("V2T", result.text.v2t_r1))
+        )
         typer.echo(
-            f"{name}: {result.clips} clips; hands R² pos/vel {hands}; T2V R@1 "
-            f"{result.text.t2v[1]:.3f} [{result.text.t2v_r1.low:.3f}, "
-            f"{result.text.t2v_r1.high:.3f}] of {result.text.gallery}"
+            f"{name}: {result.clips} clips; hands R² pos/vel {hands}; {recalls} "
+            f"of {result.text.gallery}"
         )
         typer.echo(
             write_report(
@@ -286,10 +289,16 @@ def _video_decisions(
             {s.run: s.text for s in compared},
             video.seed,
         )
+        random, duration, floor = (
+            baseline.random_features.r1,
+            baseline.duration_only.r1,
+            baseline.floor_r1,
+        )
         typer.echo(
-            f"PC2: chance R@1 {baseline.chance_r1:.4f}, "
-            f"random {baseline.random_features.t2v[1]:.4f}, "
-            f"duration {baseline.duration_only.t2v[1]:.4f}; floor {baseline.floor_r1:.4f}"
+            f"PC2: chance R@1 {baseline.chance_r1:.4f}; R@1 T2V/V2T: "
+            f"random {random.t2v:.4f}/{random.v2t:.4f}, "
+            f"duration {duration.t2v:.4f}/{duration.v2t:.4f}, "
+            f"floor {floor.t2v:.4f}/{floor.v2t:.4f}"
         )
         typer.echo(
             write_report(result_path("pc2-baseline", f"{dataset.name}.json"), "PC2", baseline)

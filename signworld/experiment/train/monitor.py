@@ -10,8 +10,9 @@ Four cadences, in steps of 128 clips (the document's steps of 1,024 clips times 
   on its level (shares and conflicts);
 * **validation** (4,000): every measure of the validation clips that the test also reads
   (``measures``: retrieval, losses, physical read-outs, keypoint errors, geometry, alignment
-  and uniformity, noise test, hubness, modality gap, 2x2 table, leak test, attention), R@1
-  on as many training clips with the gap, and on a fixed probe batch the pose target's
+  and uniformity, noise test, hubness, modality gap, 2x2 table, leak test, attention; the
+  retrieval ones in both directions), R@1 both ways on as many training clips with the gap,
+  and on a fixed probe batch the pose target's
   isotropy, kinematic content per articulator and speed (CKA);
 * **rare** (16,000): temporal order ω, the plausibility tests and the drift of the video
   encoder.
@@ -36,6 +37,7 @@ from torch import Tensor
 from torch.nn import functional
 
 from signworld.loss.worldsign import POSE_TERMS
+from signworld.metrics.directions import DIRECTIONS
 from signworld.metrics.measures import collect, model_measures, pose_target_measures, split_measures
 from signworld.metrics.readings import (
     Spread,
@@ -61,7 +63,7 @@ from signworld.models.worldsign.readout import membership
 from .config import DiagnosticsSettings, WorldSignConfig
 from .curriculum import POSE, VIDEO_LORA, Stage, families
 from .distributed import SINGLE, Distributed
-from .validation import RetrievalScores, retrieval
+from .validation import R1_INTERVALS, RetrievalScores, retrieval
 
 PARTS = ("body", "left", "right", "face")
 
@@ -163,7 +165,7 @@ def _rules(s: DiagnosticsSettings) -> list[_Rule]:
             "lora_ratio_max", "above", s.lora_ratio_max, "a LoRA moves its layer by more than 10 %"
         ),
         _Rule("modality_gap", "above", s.modality_gap_max, "ŷ and ẽ live in separate spaces"),
-        _Rule("hubness", "above_ratio", s.hubness_growth_max, "predictions pulled to the centre"),
+        _Rule("hubness_*", "above_ratio", s.hubness_growth_max, "a few items attract the queries"),
         _Rule("noise_drop", "below", s.noise_drop_min, "the model does not look at the video"),
         _Rule("s_sigreg", "above_ratio", s.sigreg_growth_max, "the pose target leaves N(0, I)"),
         _Rule("pose_r2_drop_*", "above", s.pose_r2_drop_max, "the pose target loses kinematics"),
@@ -302,8 +304,8 @@ class Monitor:
     ) -> RetrievalScores:
         """Every validation measure; returns the scores that decide.
 
-        The measures of the test (``measures.split_measures``, with the bootstrap interval of
-        T2V R@1 and the physical read-outs as ``val_*``), the leak test and the attention on
+        The measures of the test (``measures.split_measures``, with the bootstrap intervals of
+        R@1 both ways and the physical read-outs as ``val_*``), the leak test and the attention on
         the first clips, R@1 both ways on ``train_batches`` with the gap to validation, and
         the probe readings.
         """
@@ -320,7 +322,7 @@ class Monitor:
             desc=f"[val] step {step}",
         )
         scores, readings = split_measures(
-            seen, languages, self.config, bootstrap=("t2v_r1",), physical_prefix="val_"
+            seen, languages, self.config, bootstrap=R1_INTERVALS, physical_prefix="val_"
         )
         if cached:
             readings |= model_measures(
@@ -339,7 +341,7 @@ class Monitor:
                 desc=f"[val train subset] step {step}",
             ).tensors
             subset = retrieval(train["predicted"], train["texts"], train["rows"])
-            for direction, value in (("t2v", subset.t2v[1]), ("v2t", subset.v2t[1])):
+            for direction, value in subset.r1.items():
                 readings[f"train_{direction}_r1"] = value
                 readings[f"gap_{direction}_r1"] = value - readings[f"{direction}_r1"]
         with torch.no_grad():
@@ -692,22 +694,28 @@ class Monitor:
     def _progress_criteria(
         self, add: Callable[[str, bool, str], None], extrapolated_r1: float | None
     ) -> None:
-        """F3, after the LoRA entered: retrieval on track, order, hubness, no conflict."""
+        """F3, after the LoRA entered: retrieval on track, order, hubness of both galleries,
+        no conflict. Retrieval is judged on the metric that decides, the mean R@1 of the two
+        directions, against the mean of the ridge baseline and of C²RL alike."""
         s = self.settings
         decision = self._latest("decision")
-        if s.ridge_baseline_r1 is not None:
+        if s.ridge_baseline is not None:
+            baseline = s.ridge_baseline.mean
             add(
-                "R@1 > ridge baseline",
-                decision > s.ridge_baseline_r1,
-                f"{decision:.4f} vs {s.ridge_baseline_r1:.4f}",
+                "mean R@1 > ridge baseline",
+                decision > baseline,
+                f"{decision:.4f} vs {baseline:.4f}",
             )
         order = self._latest("order_cosine")
         add("omega < 0.95", not order > s.order_max, f"{order:.3f}")
-        hub, start = (
-            self._latest("hubness"),
-            self.references.values.get("hubness", float("nan")),
-        )
-        add("hubness stable", not hub > s.hubness_growth_max * start, f"{hub:.2f} vs {start:.2f}")
+        for direction in DIRECTIONS:
+            name = f"hubness_{direction}"
+            hub, start = self._latest(name), self.references.values.get(name, math.nan)
+            add(
+                f"hubness stable ({direction.upper()})",
+                not hub > s.hubness_growth_max * start,
+                f"{hub:.2f} vs {start:.2f}",
+            )
         conflict = any(
             self.streaks[k] >= s.conflict_readings
             for k in ("video_cos_physical_semantic", "y_cos_sem_sigreg")
@@ -717,7 +725,7 @@ class Monitor:
             from ..evaluation.gate import GatePolicy  # noqa: PLC0415
 
             add(
-                "extrapolated R@1 compatible with X",
+                "extrapolated mean R@1 compatible with X",
                 GatePolicy().on_track(100 * extrapolated_r1),
                 f"{100 * extrapolated_r1:.1f} (held-out channel, proxy of OpenASL)",
             )

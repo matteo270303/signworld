@@ -16,6 +16,7 @@ import yaml
 from pydantic import Field, PositiveFloat, PositiveInt, model_validator
 
 from signworld.data.acquisition.config import FrozenModel
+from signworld.metrics.directions import Bidirectional
 
 Arm = Literal["A0", "A", "B0", "B", "C"]
 """Loss arms of ESP-1 (§4.14): alignment with or without SIGReg and L_unif, or InfoNCE."""
@@ -328,8 +329,10 @@ class DiagnosticsSettings(FrozenModel):
     duplicate_cosine: float = 0.95
     """Captions this close (EmbeddingGemma cosine) count as the same in the tolerant R@1."""
     chance_multiple: float = 5.0
-    ridge_baseline_r1: float | None = None
-    """R@1 of the ridge baseline of PC2 on the same split, for stop F3 [Aperto]."""
+    ridge_baseline: Bidirectional | None = None
+    """R@1 of the ridge baseline of PC2 on the same split, as fractions, in both directions
+    (``{t2v: …, v2t: …}``); stop F3 compares their mean with the metric that decides
+    [Aperto]."""
     gate_stops: bool = False
     """True only for the gate run: a failed stop F1-F3 ends the run (§4.13.5)."""
 

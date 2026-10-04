@@ -20,7 +20,7 @@ from typing import Any, TypeVar
 
 from tqdm import tqdm  # type: ignore[import-untyped]
 
-from .validation import KS
+from signworld.metrics.retrieval import KS
 
 T = TypeVar("T")
 
@@ -38,8 +38,7 @@ VALIDATION_COLUMNS: tuple[tuple[str, str], ...] = (
     *((f"{d}_MedR", f"{d.lower()}_medr") for d in _DIRECTIONS),
     *((f"{d}_MRR", f"{d.lower()}_mrr") for d in _DIRECTIONS),
     *((f"{d}_R@1_tolerant", f"tolerant_{d.lower()}_r1") for d in _DIRECTIONS),
-    ("T2V_R@1_low", "t2v_r1_low"),
-    ("T2V_R@1_high", "t2v_r1_high"),
+    *((f"{d}_R@1_{end}", f"{d.lower()}_r1_{end}") for d in _DIRECTIONS for end in ("low", "high")),
     ("chance", "chance"),
     *((f"train_{d}_R@1", f"train_{d.lower()}_r1") for d in _DIRECTIONS),
     *((f"gap_{d}_R@1", f"gap_{d.lower()}_r1") for d in _DIRECTIONS),
@@ -47,7 +46,8 @@ VALIDATION_COLUMNS: tuple[tuple[str, str], ...] = (
     ("uniformity_video", "uniformity_video"),
     ("uniformity_text", "uniformity_text"),
     ("modality_gap", "modality_gap"),
-    ("hubness", "hubness"),
+    *((f"hubness_{d}", f"hubness_{d.lower()}") for d in _DIRECTIONS),
+    *((f"noise_{d}_R@1", f"noise_{d.lower()}_r1") for d in _DIRECTIONS),
     ("noise_drop", "noise_drop"),
     *((f"{s}_{m}", f"{s}_{m}") for s in ("y", "text") for m in ("effective_rank", "isoscore")),
     ("y_sigreg", "y_sigreg"),

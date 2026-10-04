@@ -8,9 +8,11 @@ token, and for each step the mean token inside each articulator's box.
 The read-outs then answer four questions on the CPU:
 
 * **PC2** - the floor to beat: random features, the clip duration alone, and a ridge regression
-  from frozen features to the caption embeddings, all scored by text-to-video R@1;
-* **PC3** - which encoder: hand keypoints from the hand boxes (R²), ridge to text (R@1), and the
-  phonological probe, which needs isolated-sign datasets not acquired yet;
+  from frozen features to the caption embeddings, all scored in both retrieval directions
+  (R@k, Precision@k, Recall@k, MRR, MedR); the floor is the best R@1 of each direction;
+* **PC3** - which encoder: hand keypoints from the hand boxes (R²), ridge to text (the mean R@1
+  of the two directions), and the phonological probe, which needs isolated-sign datasets not
+  acquired yet;
 * **PC4** - which resolution: 384 only if the hand read-out gains more than 0.05 of R²;
 * **collaudo, selected against contiguous frames** - the motion-guided selection must not read
   the hands worse than 64 consecutive frames (tolerance 0.05 of R²).
@@ -31,8 +33,16 @@ from signworld.data.pose.tokens import articulator_columns
 from signworld.data.pose.wholebody import Articulator, PoseTrack
 from signworld.data.video import ClipReader
 from signworld.experiment.collaudo.analysis import VideoRun
+from signworld.metrics.directions import Bidirectional
 from signworld.metrics.probes import ProbeTask, video_split
-from signworld.metrics.retrieval import Interval, bootstrap_recall, grouped_relevance, recall_at_k
+from signworld.metrics.retrieval import (
+    Interval,
+    bidirectional_measures,
+    bootstrap_recall,
+    both_ways,
+    grouped_relevance,
+    recall_at_k,
+)
 from signworld.models.encoders.video_encoders import FrozenVideoEncoder, box_pool
 
 from .pose_teachers import LabelledClip, PoseCorpus
@@ -41,7 +51,6 @@ logger = logging.getLogger(__name__)
 
 HANDS: Final = (Articulator.LEFT_HAND, Articulator.RIGHT_HAND)
 TEXT_PENALTIES: Final = (1e-2, 1e-1, 1.0, 10.0, 100.0)
-KS: Final = (1, 5, 10)
 CONTIGUOUS: Final = "contiguous_"
 
 
@@ -158,12 +167,19 @@ class HandScores:
 
 @dataclass(frozen=True, slots=True)
 class TextScores:
-    t2v: dict[int, float]
-    v2t: dict[int, float]
     t2v_r1: Interval
     """Text-to-video R@1 with a bootstrap interval over the queries."""
+    v2t_r1: Interval
+    """Video-to-text R@1, likewise."""
+    measures: dict[str, float]
+    """R@k, Precision@k, Recall@k, MRR and MedR of both directions, keyed as validation logs
+    them (``t2v_r5``, ``v2t_mrr``, …)."""
     penalty: float
     gallery: int
+
+    @property
+    def r1(self) -> Bidirectional:
+        return Bidirectional(self.t2v_r1.estimate, self.v2t_r1.estimate)
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,9 +271,10 @@ def text_scores(
 ) -> TextScores:
     """Ridge from clip features to caption embeddings; retrieval among the held-out clips.
 
-    The penalty is the one with the best text-to-video R@1 on a validation share of the
-    training videos. Queries are captions, the gallery is the held-out clips, and every clip
-    with the same caption counts as a match.
+    The penalty is the one with the best mean R@1 of the two directions, the metric that
+    decides, on a validation share of the training videos. Text to video queries the held-out
+    clips with their captions, video to text the other way round, and every clip with the same
+    caption counts as a match.
     """
     test = video_split(videos)
     # The same hash orders both splits, so the validation videos are the next band after test.
@@ -267,24 +284,27 @@ def text_scores(
     candidates = _ridge(design[fitting], targets.embeddings[fitting], TEXT_PENALTIES)
     groups = targets.groups
     relevance = grouped_relevance(groups[validation].tolist(), groups[validation].tolist())
-    chosen = max(
-        range(len(TEXT_PENALTIES)),
-        key=lambda i: recall_at_k(
-            _similarity(
-                targets.embeddings[validation], _predict(design[validation], candidates[i])
-            ),
-            relevance,
-            (1,),
-        )[1],
-    )
+
+    def decision(index: int) -> float:
+        similarity = _similarity(
+            targets.embeddings[validation], _predict(design[validation], candidates[index])
+        )
+        recalls = [recall_at_k(s, r, (1,))[1] for s, r in both_ways(similarity, relevance).values()]
+        return float(np.mean(recalls))
+
+    chosen = max(range(len(TEXT_PENALTIES)), key=decision)
     weights = _ridge(design[~test], targets.embeddings[~test], (TEXT_PENALTIES[chosen],))[0]
     similarity = _similarity(targets.embeddings[test], _predict(design[test], weights))
     relevance = grouped_relevance(groups[test].tolist(), groups[test].tolist())
     generator = torch.Generator().manual_seed(seed)
+    intervals = {
+        direction: bootstrap_recall(s, r, 1, generator=generator)
+        for direction, (s, r) in both_ways(similarity, relevance).items()
+    }
     return TextScores(
-        t2v=recall_at_k(similarity, relevance, KS),
-        v2t=recall_at_k(similarity.T, relevance.T, KS),
-        t2v_r1=bootstrap_recall(similarity, relevance, 1, generator=generator),
+        t2v_r1=intervals["t2v"],
+        v2t_r1=intervals["v2t"],
+        measures=bidirectional_measures(similarity, relevance),
         penalty=TEXT_PENALTIES[chosen],
         gallery=int(test.sum()),
     )
@@ -314,18 +334,20 @@ def run_scores(
 
 @dataclass(frozen=True, slots=True)
 class BaselineReport:
-    """PC2: text-to-video retrieval that any trained model must beat."""
+    """PC2: retrieval, both ways, that any trained model must beat."""
 
     gallery: int
     chance_r1: float
-    """Expected R@1 of a random ranking, ties to duplicate captions included."""
+    """Expected R@1 of a random ranking, ties to duplicate captions included; the same in both
+    directions, which share the groups of identical captions."""
     random_features: TextScores
     duration_only: TextScores
     """[Our reading of «solo statistiche della didascalia»] The only thing a caption shares
     with an unseen clip without looking at it is length, so the video side is its duration."""
     frozen_features: dict[str, TextScores]
-    floor_r1: float
-    """The best of the above: the minimum a trained model has to exceed."""
+    floor_r1: Bidirectional
+    """The best R@1 of the above in each direction: the minimum a trained model has to exceed,
+    the ridge baseline of the gate and of stop F3."""
 
 
 def baseline_report(
@@ -343,9 +365,8 @@ def baseline_report(
     groups = targets.groups[test]
     _, inverse, counts = np.unique(groups, return_inverse=True, return_counts=True)
     chance = float(np.mean(counts[inverse] / len(groups)))
-    floor = max(
-        [random_scores.t2v[1], duration_scores.t2v[1], *(s.t2v[1] for s in frozen.values())]
-    )
+    every = [random_scores.r1, duration_scores.r1, *(s.r1 for s in frozen.values())]
+    floor = Bidirectional(max(r.t2v for r in every), max(r.v2t for r in every))
     return BaselineReport(int(test.sum()), chance, random_scores, duration_scores, frozen, floor)
 
 
@@ -355,6 +376,7 @@ class EncoderChoice:
 
     hand_r2: dict[str, float]
     text_r1: dict[str, float]
+    """Mean R@1 of the two directions of each encoder's ridge to text."""
     phonology: str
     wins: dict[str, int]
     chosen: str
@@ -363,7 +385,7 @@ class EncoderChoice:
 
 def choose_encoder(scores: Sequence[RunScores], default: str) -> EncoderChoice:
     hand = {s.run: s.hand_r2 for s in scores}
-    text = {s.run: s.text.t2v[1] for s in scores}
+    text = {s.run: s.text.r1.mean for s in scores}
     wins = dict.fromkeys(hand, 0)
     for probe in (hand, text):
         wins[max(probe, key=lambda run: probe[run])] += 1

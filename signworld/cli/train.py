@@ -47,8 +47,11 @@ def evaluate(  # noqa: PLR0913, PLR0917 (typer options)
     clips: Annotated[int | None, typer.Option(min=1, help="A fixed subset of the clips.")] = None,
     masks: Annotated[int, typer.Option(min=1, help="Masks per clip for Ē_fis.")] = 8,
     gate: Annotated[bool, typer.Option(help="Read the gate (F4): OpenASL test clips.")] = False,
-    ridge_baseline: Annotated[
-        float | None, typer.Option(help="R@1 T2V of the ridge baseline of PC2, as a fraction.")
+    ridge_t2v: Annotated[
+        float | None, typer.Option(help="T2V R@1 of the ridge baseline of PC2, as a fraction.")
+    ] = None,
+    ridge_v2t: Annotated[
+        float | None, typer.Option(help="V2T R@1 of the ridge baseline of PC2, as a fraction.")
     ] = None,
     device: Annotated[str, typer.Option()] = "cuda",
 ) -> None:
@@ -70,8 +73,15 @@ def evaluate(  # noqa: PLR0913, PLR0917 (typer options)
     from signworld.experiment.train.config import load_config
     from signworld.experiment.train.curriculum import trainable_names
     from signworld.experiment.train.run import STATISTICS, load_statistics
+    from signworld.metrics.directions import DIRECTIONS, Bidirectional
     from signworld.models.worldsign.model import build_worldsign
 
+    if (ridge_t2v is None) != (ridge_v2t is None):
+        raise typer.BadParameter(
+            "give the ridge baseline in both directions, or in neither",
+            param_hint="--ridge-t2v/--ridge-v2t",
+        )
+    ridge = None if ridge_t2v is None or ridge_v2t is None else Bidirectional(ridge_t2v, ridge_v2t)
     settings = load_config(*config)
     if settings.data.embeddings is None:
         raise ValueError("data.embeddings must name the caption embeddings of these clips")
@@ -108,16 +118,17 @@ def evaluate(  # noqa: PLR0913, PLR0917 (typer options)
         torch.tensor([names.index(str(s)) for s in signs]),
         table.column("video_id").to_pylist(),
         masks=masks,
-        ridge_baseline_r1=ridge_baseline,
+        ridge_baseline=ridge,
         gate=gate,
     )
     report.write(output)
     found = report.measures
-    typer.echo(
-        f"{output}: T2V R@1 {found['t2v_r1']:.4f} "
-        f"[{found['t2v_r1_low']:.4f}, {found['t2v_r1_high']:.4f}]"
-        + (f"; gate: {report.gate}" if report.gate else "")
+    recalls = " · ".join(
+        f"{d.upper()} R@1 {found[f'{d}_r1']:.4f} "
+        f"[{found[f'{d}_r1_low']:.4f}, {found[f'{d}_r1_high']:.4f}]"
+        for d in DIRECTIONS
     )
+    typer.echo(f"{output}: {recalls}" + (f"; gate: {report.gate}" if report.gate else ""))
 
 
 @train_app.command("overfit")

@@ -41,8 +41,21 @@ class LoRALinear(nn.Module):
         return self.base.out_features
 
     def forward(self, x: Tensor) -> Tensor:
-        update = torch.cat([(x @ a.T) @ b.T for a, b in zip(self.down, self.up, strict=True)], -1)
-        output: Tensor = self.base(x) + self.scale * update
+        """``base(x) + scale * [x A_i^T B_i^T]_i``, with the update added into the base output.
+
+        The adapters of a split layer share one product: the ``A_i`` are stacked into a single
+        matrix and the ``B_i`` laid on the diagonal of another, so the concatenation of the
+        per-slice updates is one matmul, accumulated in place by ``addmm_`` with the scale.
+        This is the same function as the per-adapter formula (the parameters are unchanged).
+        """
+        output: Tensor = self.base(x)
+        dtype = output.dtype
+        if len(self.down) == 1:
+            down, up = self.down[0], self.up[0]
+        else:
+            down, up = torch.cat(list(self.down), 0), torch.block_diag(*self.up)
+        hidden = (x @ down.to(dtype).T).reshape(-1, down.shape[0])
+        output.view(-1, output.shape[-1]).addmm_(hidden, up.to(dtype).T, alpha=self.scale)
         return output
 
     def adapter_parameters(self) -> list[nn.Parameter]:

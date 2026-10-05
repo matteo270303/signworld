@@ -193,6 +193,8 @@ class Trainer:
         self.stops = self._stop_steps()
         self.stage: Stage | None = None
         self.wrapped: nn.Module = model
+        self._pending: list[tuple[int, list[str], torch.Tensor]] = []
+        """Per step, not yet read: (step, names of the terms, [loss, *terms] on the GPU)."""
         self.energies: list[dict[str, list[Any]]] = []
         """This GPU's energies of every training clip since the last ``latest`` checkpoint."""
         self.at_epoch_end = config.diagnostics.cadence == "epoch"
@@ -305,7 +307,7 @@ class Trainer:
         row: dict[str, list[Any]] = {"clip_id": list(batch.clip_ids), "step": [step] * count}
         for name in ("e_sem", "e_fis"):
             value = samples.get(name)
-            row[name] = value.float().tolist() if value is not None else [None] * count
+            row[name] = value.detach().float() if value is not None else [None] * count
         self.energies.append(row)
 
     def _write_energies(self, state: TrainingState) -> None:
@@ -320,6 +322,10 @@ class Trainer:
                 ("e_fis", pa.float32()),
             ]
         )
+        for row in self.energies:  # the energies stayed on the GPU until now
+            for name in ("e_sem", "e_fis"):
+                if isinstance(row[name], torch.Tensor):
+                    row[name] = row[name].tolist()
         columns = {name: [v for row in self.energies for v in row[name]] for name in schema.names}
         path = (
             self.output
@@ -349,6 +355,7 @@ class Trainer:
                     return
         finally:
             bar.close()
+        self._drain()
         state.epoch += 1
         state.position = 0
         if state.cooldown_start is None:
@@ -356,6 +363,8 @@ class Trainer:
 
     def _after_step(self, state: TrainingState) -> bool:
         """Validation, checkpoints and phase changes; True when the order of clips changes."""
+        if self._pending and self._drain_due(state.step):
+            self._drain()
         if state.step % self.config.training.validation_every == 0:
             if not self.at_epoch_end:
                 self._validate(state, "periodic")
@@ -487,21 +496,70 @@ class Trainer:
         gradients = self.monitor.lora_gradients() if frequent else {}
         self.optimizer.step()
         self.optimizer.zero_grad(set_to_none=True)
-        total = float(terms.total.detach())
-        if self.collective.any(not math.isfinite(total)):
-            raise NonFiniteLossError(f"non-finite loss at step {state.step}: {total}")
         if frequent and state.step > 0:
+            self._drain()  # the history up to the previous step, as the readings expect
             self.monitor.frequent(state.step, batch, stage, gradients)
-        parts = {name: float(value.detach()) for name, value in terms.parts.items()}
-        self.monitor.after_step(state.step, total, parts)
-        self.epoch_steps += 1
-        for name, value in ({"loss": total} | parts).items():
-            self.epoch_sums[name] += value
+        self._queue(state.step, terms)
         self._keep_energies(batch, state.step, terms.samples)
         state.step += 1
         state.position += self.per_gpu
         if state.step % self.config.training.log_every == 0:
+            total = self._drain()
             self._log_step(state, stage, total, terms.parts | terms.diagnostics, began)
+
+    def _queue(self, step: int, terms: Any) -> None:
+        """Keep the step's loss and terms on the GPU; reading them would stall the pipeline."""
+
+        def scalar(value: Any) -> torch.Tensor:
+            tensor = value.detach() if isinstance(value, torch.Tensor) else torch.as_tensor(value)
+            return tensor.to(device=self.device, dtype=torch.float32).reshape(1)
+
+        names = list(terms.parts)
+        row = torch.cat([scalar(terms.total), *(scalar(terms.parts[name]) for name in names)])
+        self._pending.append((step, names, row))
+
+    def _drain(self) -> float:
+        """Read the queued steps with one transfer: the finite check, the monitor's per-step
+        reading and the epoch's sums, in step order. Returns the last loss.
+
+        Every GPU drains at the same steps (the log interval, the readings, the validations,
+        the end of an epoch), so the collective of the finite check is matched. A non-finite
+        loss is raised here, at most ``log_every`` steps after it happened.
+        """
+        if not self._pending:
+            return math.nan
+        values = torch.cat([row for _, _, row in self._pending]).tolist()
+        steps = [step for step, _, _ in self._pending]
+        decoded, at = [], 0
+        for step, names, row in self._pending:
+            size = row.numel()
+            decoded.append((step, names, values[at : at + size]))
+            at += size
+        self._pending.clear()
+        broken = next((step for step, _, row in decoded if not math.isfinite(row[0])), None)
+        if self.collective.any(broken is not None):
+            where = f"step {broken}" if broken is not None else "another GPU"
+            raise NonFiniteLossError(
+                f"non-finite loss at {where} (read within steps {steps[0]}-{steps[-1]})"
+            )
+        for step, names, row in decoded:
+            total, parts = row[0], dict(zip(names, row[1:], strict=True))
+            self.monitor.after_step(step, total, parts)
+            self.epoch_steps += 1
+            for name, value in ({"loss": total} | parts).items():
+                self.epoch_sums[name] += value
+        return float(decoded[-1][2][0])
+
+    def _drain_due(self, step: int) -> bool:
+        """Steps at which a reading, a checkpoint or the end of the constant phase needs the
+        queued losses."""
+        diagnostics = self.config.diagnostics
+        return bool(
+            step % self.config.training.validation_every == 0
+            or step % diagnostics.rare_every == 0
+            or step in self.stops
+            or step >= self.constant_end
+        )
 
     def _set_rates(self, state: TrainingState) -> None:
         """Every group's rate: its peak x its family's schedule x the cooldown."""

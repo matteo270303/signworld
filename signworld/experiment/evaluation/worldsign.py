@@ -132,9 +132,14 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
 ) -> EvaluationReport:
     """Every measurement of §4.12.3-§4.12.4 on one set of clips, on one GPU.
 
-    ``batches`` is read several times: a list, or a data loader that decodes again.
+    ``batches`` is read five times (the measures, the model's small readings, the order, the
+    plausibility tests, the features). A one-shot source, such as a data loader, is read once
+    into memory instead of decoding every clip five times;
+    a list or a tuple is used as it is.
     ``ridge_baseline``: R@1 of the ridge baseline of PC2 in both directions, as fractions.
     """
+    if not isinstance(batches, Sequence):
+        batches = list(batches)
     languages = model.text.centering.languages
     physical = model.pose is not None
     seen = collect(

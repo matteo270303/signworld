@@ -18,6 +18,7 @@ from torch import Tensor, nn
 from signworld.data.pose.wholebody import Articulator
 from signworld.experiment.train.config import WorldSignConfig
 from signworld.models.encoders.video_encoders import load_vjepa2_1
+from signworld.models.encoders.weights import VJEPA2_1_VITL_384_URL, ensure_encoder_files
 
 from .backbone import VideoBackbone
 from .fusion import build_fusion
@@ -114,6 +115,12 @@ def build_video_branch(config: WorldSignConfig, grid: TokenGrid | None = None) -
     """Load the released V-JEPA 2.1 encoder and predictor offline and adapt them."""
     grid = grid or TokenGrid()
     encoder_settings = config.encoder
+    ensure_encoder_files(
+        encoder_settings.hub_repo,
+        encoder_settings.checkpoint,
+        url=encoder_settings.checkpoint_url or VJEPA2_1_VITL_384_URL,
+        sha256=encoder_settings.checkpoint_sha256,
+    )
     encoder, predictor, reports = load_vjepa2_1(
         encoder_settings.hub_repo, encoder_settings.entrypoint, encoder_settings.checkpoint
     )

@@ -36,6 +36,8 @@ class EncoderSettings(FrozenModel):
     hub_repo: Path
     entrypoint: str = "vjepa2_1_vit_large_384"
     checkpoint: Path
+    checkpoint_url: str | None = None
+    """Where the weights are fetched from when ``checkpoint`` is missing; None: Meta's release."""
     checkpoint_sha256: str | None = None
     """Expected SHA-256 of ``checkpoint`` (P5); None: recorded at the first launch."""
     levels: tuple[int, ...] = (5, 11, 17, 23)

@@ -23,7 +23,8 @@ class WholebodyEstimator:
 
     def __init__(self, mode: Mode = STORED_POSE_MODE, device: str = "cpu") -> None:
         if device == "cuda":
-            # Load the CUDA and cuDNN libraries that come with torch, so onnxruntime finds them.
+            # Load the CUDA 12 and cuDNN libraries from the nvidia-*-cu12 wheels, so onnxruntime
+            # finds them (torch itself ships CUDA 13).
             onnxruntime.preload_dlls()
         self._model = Wholebody(mode=mode, backend="onnxruntime", device=device)
         if device == "cuda":

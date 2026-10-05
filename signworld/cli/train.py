@@ -35,6 +35,26 @@ def run(
         typer.echo(f"{output}: finished at step {state.step}, best at {state.best_step}")
 
 
+@train_app.command("fetch-models")
+@reports_user_errors
+def fetch_models(config: ConfigFiles) -> None:
+    """Download the V-JEPA 2.1 weights if absent (run on a node with internet access).
+
+    The hub code is never downloaded: it must already sit in ``encoder.hub_repo``.
+    """
+    from signworld.experiment.train.config import load_config
+    from signworld.models.encoders.weights import VJEPA2_1_VITL_384_URL, ensure_encoder_files
+
+    encoder = load_config(*config).encoder
+    ensure_encoder_files(
+        encoder.hub_repo,
+        encoder.checkpoint,
+        url=encoder.checkpoint_url or VJEPA2_1_VITL_384_URL,
+        sha256=encoder.checkpoint_sha256,
+    )
+    typer.echo(f"{encoder.checkpoint}: present")
+
+
 @train_app.command("evaluate")
 @reports_user_errors
 def evaluate(  # noqa: PLR0913, PLR0917 (typer options)

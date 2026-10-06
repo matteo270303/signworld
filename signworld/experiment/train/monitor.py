@@ -125,6 +125,12 @@ def _rules(s: DiagnosticsSettings) -> list[_Rule]:
         _Rule("s_std", "below_ratio", s.collapse_ratio, "the pose target shrinks"),
         _Rule("y_rank", "below_ratio", s.collapse_ratio, "ŷ collapses"),
         _Rule(
+            "text_effective_rank",
+            "below_ratio",
+            s.collapse_ratio,
+            "ẽ loses dimensions: a partial collapse SIGReg barely sees",
+        ),
+        _Rule(
             "encoder_rank", "below_ratio", s.collapse_ratio, "the video encoder's output collapses"
         ),
         _Rule("gamma_masked", "below", s.gamma_min, "the physical predictor answers the mean"),

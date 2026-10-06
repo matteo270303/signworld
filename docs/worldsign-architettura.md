@@ -38,8 +38,8 @@ Tre encoder, due predictor, tre livelli addestrati **per livello** (`worldsign-g
 
  ─── LIVELLO 2 · SEMANTICO ── clip intera, nessuna maschera ──────────────────────────────────────
   video ─► ENCODER VIDEO (lo stesso, senza gradiente) ─► sg(8.192 token normalizzati del blocco 24)
-        ─► PREDICTOR SEMANTICO (4 blocchi d=384, 8 query, da zero) ─► ŷ ∈ ℝ⁵¹²  ── E_sem ──► ẽ
-  didascalia ─► EmbeddingGemma (precalcolato, 768) ─► centratura per lingua ─► testa 768→512→512 ─► ẽ
+        ─► PREDICTOR SEMANTICO (4 blocchi d=384, 8 query, da zero) ─► ŷ ∈ ℝ²⁵⁶  ── E_sem ──► ẽ
+  didascalia ─► EmbeddingGemma (precalcolato, 768) ─► centratura per lingua ─► testa 768→512→256 ─► ẽ
 ```
 
 **Notazione delle forme.**
@@ -53,7 +53,7 @@ Tre encoder, due predictor, tre livelli addestrati **per livello** (`worldsign-g
 | `D` | 1.024 | larghezza dell'encoder video |
 | `d_p` | 384 | larghezza dei predictor |
 | `C` | 192 | larghezza del bersaglio di posa `s_t`, uno per passo |
-| `d` | 512 | spazio semantico di `ŷ` ed `ẽ` |
+| `d` | 256 | spazio semantico di `ŷ` ed `ẽ` |
 
 ---
 
@@ -242,7 +242,9 @@ Lo schema di VL-JEPA [Lett. 34], da zero (`semantic.py`).
 | 4 | **4 blocchi** pre-norm (sotto) | invariata | 4 × 1.775.232 |
 | 5 | `LayerNorm(384, ε = 1e-5)` sulle 8 uscite delle query | `(B, 8, 384)` | 768 |
 | 6 | **media delle 8 query** (in ESP-4: 4 gruppi da 2, una media per gruppo) | `(B, K, 384)` | — |
-| 7 | `outputs: Linear(384 → 512)` | `(B, K, 512)` = `ŷ` | 197.120 |
+| 7 | `outputs: Linear(384 → 256)` | `(B, K, 256)` = `ŷ` | 98.560 |
+
+**Perché 256 [6/10].** La media delle query normalizzate perde una direzione, quindi l'ingresso di `outputs` vive in 383 dimensioni. Con 512 uscite `ŷ` aveva rango al più 383 su 512: un collasso parziale che SIGReg vede appena (1,07 contro 1,04, `worldsign-loss.md` §8.4). Con 256 la proiezione è a rango pieno. Nell'ablation di LeWorldModel la dimensione migliore è 192 e oltre 96 le prestazioni sono già sature.
 
 **Un blocco del predictor semantico** (12 teste da 32):
 
@@ -260,7 +262,7 @@ x ─┬─► LayerNorm(384, ε=1e-5)
 
 - **RoPE 3D nostra** (`rope.py`): per testa 10 dimensioni per il passo, 10 per la riga, 12 per la colonna, base 10.000. **Le query non ruotano**: guardano il video per contenuto, mentre i token video conservano il loro ordine nel tempo. Senza posizione, attenzione e media sarebbero cieche all'ordine.
 - **DropPath** (stochastic depth): scarta l'intero ramo residuo per un campione, con probabilità 0,1, solo in addestramento. **LayerScale**: un fattore per canale, inizializzato a 1e-4, che parte vicino all'identità. Dropout, stochastic depth e LayerScale **[Aperto: PC7]**.
-- **Totale: 7.695.488**, tutti addestrabili.
+- **Totale: 7.596.928**, tutti addestrabili.
 
 ---
 
@@ -288,9 +290,9 @@ x ─┬─► LayerNorm(384, ε=1e-5)
 | 1 | `Linear(768 → 512)` | `(B, 512)` | 393.728 |
 | 2 | GELU | — | — |
 | 3 | `Dropout(0,1)` **[Aperto]** | — | — |
-| 4 | `Linear(512 → 512)` | `(B, 512)` = `ẽ` | 262.656 |
+| 4 | `Linear(512 → 256)` | `(B, 256)` = `ẽ` | 131.328 |
 
-Inizializzazione standard di PyTorch. **Totale: 656.384.** È l'unica parte addestrabile del ramo testuale.
+Inizializzazione standard di PyTorch. **Totale: 525.056.** È l'unica parte addestrabile del ramo testuale.
 
 ---
 
@@ -320,16 +322,16 @@ Le formule sono in `worldsign-loss.md`.
 | ├ LoRA r = 16 | — | 1.327.104 | vincolato |
 | ├ fusione multilivello (4 LN + MLP) | — | 4.597.120 | libero |
 | └ testa di lettura 1.536 → 192 | — | 295.104 | libero |
-| Predictor semantico | — | 7.695.488 | libero |
+| Predictor semantico | — | 7.596.928 | libero |
 | Encoder di posa (da zero) | — | 8.025.408 | libero |
 | Decoder dell'ancora | — | 26.634 | libero |
-| Testa testuale | — | 656.384 | libero |
+| Testa testuale | — | 525.056 | libero |
 | InfoNCE (solo braccio C) | — | 1 (temperatura) | libero |
 | EmbeddingGemma-300M | 0 in GPU (precalcolato) | — | — |
-| **Totale** | **≈ 326 M** | **29.799.434** | 8,50 M vincolati · 21,30 M liberi |
+| **Totale** | **≈ 326 M** | **29.569.546** | 8,50 M vincolati · 21,07 M liberi |
 
-- **Tetto: 30 M** (alzato da 22 M il 3/10 per l'encoder di posa, `worldsign-posa.md` §3): margine 200.566 parametri, dopo il passaggio a `C = 192` del 6/10. L'asserzione P3 lo verifica.
-- **ESP-2** (senza livello fisico): né encoder di posa né LoRA; restano predictor semantico e testa testuale, 8.351.872.
+- **Tetto: 30 M** (alzato da 22 M il 3/10 per l'encoder di posa, `worldsign-posa.md` §3): margine 430.454 parametri, dopo `C = 192` e `d = 256` del 6/10. L'asserzione P3 lo verifica.
+- **ESP-2** (senza livello fisico): né encoder di posa né LoRA; restano predictor semantico e testa testuale, 8.121.984.
 
 ---
 

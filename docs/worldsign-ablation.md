@@ -102,7 +102,7 @@ Con l'encoder di posa addestrato da zero, il regolarizzatore è ciò che impedis
 
 Da decidere prima del codice **[Aperto]**:
 - **l'invarianza:** VICReg ha tre termini. Sulla posa l'invarianza c'è già (`L_inv` fra le 4 viste, `worldsign-posa.md` §4.2); sul livello semantico il suo ruolo lo può svolgere `E_sem`. Proposta: varianza e covarianza in più dove oggi c'è SIGReg;
-- **i pesi:** VICReg usa 25 / 25 / 1 per invarianza, varianza e covarianza; va fissato il peso dei suoi termini rispetto a quelli predittivi (per SIGReg è λ = 0,05);
+- **i pesi:** VICReg usa 25 / 25 / 1 per invarianza, varianza e covarianza; va fissato il peso dei suoi termini rispetto a quelli predittivi (per SIGReg è λ = 0,04, tarato in `worldsign-loss.md` §8.5);
 - **l'espansore:** VICReg applica i termini all'uscita di un MLP espansore; qui si può usarlo oppure vincolare direttamente `s`, `ŷ` ed `ẽ`, come fa SIGReg.
 
 **Totale concordato: ≈ 6,85 L** (≈ 7,85 L con ESP-4; +1 L con ESP-8, rimandata), più il forward del target encoder di ESP-6, in due ondate: i cinque bracci in parallelo, poi le ablation su θ\*.

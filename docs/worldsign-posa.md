@@ -182,7 +182,7 @@ L_0 = (1 − λ_P)·( L_inv + L_anchor ) + λ_P·SIGReg_posa             λ_P = 
   - la statistica di ogni direzione non dipende da C;
   - l'ancora e le viste più miti di quelle su ImageNet spingono in direzioni opposte, senza una base quantitativa.
 - LeWorldModel, anch'esso con N = 128 per passo, usa 0,09 (circa 0,083 nella nostra forma) e su Push-T resta stabile fra 0,01 e 0,2. Il valore 0,04 sta dentro questa zona.
-- Il livello semantico resta a 0,05 finché non lo si rivede.
+- Il livello semantico, rivisto il 6/10 con lo stesso metodo, ha anch'esso λ = 0,04 (`worldsign-loss.md` §8.5).
 
 **Cosa aspettarsi.** Con viste che toccano solo i disturbi, l'astrazione resta vicina alla cinematica, ma la rappresentazione è robusta al rumore del rilevatore, al punto di vista e ai giunti persi, ed è distribuita su tutte le dimensioni.
 

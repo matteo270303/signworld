@@ -3,7 +3,7 @@
 EmbeddingGemma-300M is frozen and pre-computed (``text.embedding``): the branch receives its
 768-dimensional rows, whole, with no truncation. ``LanguageCentering`` subtracts the mean of
 the caption's language, ``e° = e - μ_l``, with the means computed once on the training clips;
-``TextHead`` is the two-layer MLP ``768 → 512 → 512`` with GELU and PyTorch's standard
+``TextHead`` is the two-layer MLP ``768 → 512 → 256`` with GELU and PyTorch's standard
 initialisation, the only trainable part of the branch.
 """
 
@@ -68,7 +68,7 @@ class LanguageCentering(nn.Module):
 
 
 class TextHead(nn.Sequential):
-    """``768 → 512 → 512``, GELU, dropout between the layers, standard initialisation."""
+    """``768 → 512 → 256``, GELU, dropout between the layers, standard initialisation."""
 
     def __init__(self, settings: TextSettings) -> None:
         super().__init__(
@@ -88,6 +88,6 @@ class TextBranch(nn.Module):
         self.head = TextHead(settings)
 
     def forward(self, embeddings: Tensor, language: Tensor) -> Tensor:
-        """(batch, 768) EmbeddingGemma rows and (batch,) language indices to ẽ (batch, 512)."""
+        """(batch, 768) EmbeddingGemma rows and (batch,) language indices to ẽ (batch, 256)."""
         target: Tensor = self.head(self.centering(embeddings, language))
         return target

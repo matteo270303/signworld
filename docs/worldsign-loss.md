@@ -40,13 +40,13 @@ Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 | Simbolo | Valore | Significato |
 |---|---|---|
 | `λ_ctx` | 0,5 | peso del termine sui token visibili in `E_fis` (V-JEPA 2.1) |
-| `λ_S` | 0,05 | peso di SIGReg nell'obiettivo dei livelli sopra la posa (LeJEPA) |
+| `λ_S` | 0,04 | peso di SIGReg nel livello semantico (§8.5) |
 | `λ_P` | 0,04 | peso di SIGReg nel livello di posa (`worldsign-posa.md` §4.2) |
 | `𝓑` | 128 clip | il batch effettivo, su tutte le GPU (64 per GPU) |
 | `m ∈ {brevi, lunghe}` | | le due maschere di ogni passo |
 | `t = 1 … 32` | | passo (2 frame) |
 | `a ∈ {corpo, sx, dx, volto}` | | articolatore: il suo riquadro nella lettura dal video |
-| `C = 192`, `d = 512` | | larghezza del bersaglio di posa e dello spazio semantico |
+| `C = 192`, `d = 256` | | larghezza del bersaglio di posa e dello spazio semantico |
 
 ---
 
@@ -61,8 +61,8 @@ Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 | `c_{t,j}` | peso del giunto `j` al passo `t`: 1 se presente in un frame del tubelet, altrimenti 0 | arch. §2.2 |
 | `c_t = (1/69) Σ_j c_{t,j}` | confidenza del passo | `step_confidence` |
 | `p̂_{t,j}` | keypoint medio del passo, in unità di spalla | arch. §2.2 |
-| `ŷ(v) ∈ ℝ^{K×512}` | predizione semantica (K = 1; K = 4 in ESP-4) | arch. §6 |
-| `ẽ(c) ∈ ℝ^{512}` | target testuale: testa MLP su EmbeddingGemma centrato per lingua | arch. §7 |
+| `ŷ(v) ∈ ℝ^{K×256}` | predizione semantica (K = 1; K = 4 in ESP-4) | arch. §6 |
+| `ẽ(c) ∈ ℝ^{256}` | target testuale: testa MLP su EmbeddingGemma centrato per lingua | arch. §7 |
 
 ---
 
@@ -290,13 +290,48 @@ SIGReg_posa  =  media su v = 0…3 e t = 1…32 di  SIGReg({ z_{v,b,t} : c_{b,t}
 
 **Il modality gap.** Se `ŷ` ed `ẽ` sono entrambe ≈ `N(0, I)` hanno la stessa distribuzione marginale: stessa media (0), nessun classificatore le distingue.
 
+**Il limite delle direzioni casuali [Nostra misura, 6/10].** SIGReg vede male un collasso dimensionale **parziale e compensato**. Il caso misurato (N = 128, 512 dimensioni):
+- una distribuzione gaussiana in sole 384 dimensioni, con la varianza gonfiata a 1,33, vale 1,07;
+- una gaussiana piena vale 1,04.
+
+Una direzione casuale in 512 dimensioni vede circa il 75 % di qualsiasi sottospazio di 384, quindi il gonfiamento compensa le dimensioni mancanti. Per questo:
+- `ŷ` ed `ẽ` sono a **256** dimensioni: `Linear(384 → 256)` è a rango pieno, mentre con 512 il rango di `ŷ` restava al più 383;
+- il rango effettivo di `ẽ` in validazione ha un allarme sotto 0,5 volte la prima lettura (`text_effective_rank`).
+
+### 8.5 La taratura di λ [6/10]
+
+Entrambi i paper danno λ per una loss diversa dalla nostra. La conversione si fa in due passi, entrambi verificati su dati sintetici.
+
+1. **`E_sem` = m/2.** Dove SIGReg porta le norme a √d vale `1 − cos(ŷ, ẽ) = ‖ŷ − ẽ‖²/2d = m/2`, con m la MSE per dimensione. Misurato: rapporto 1,003 sui valori, 0,501 sulle componenti utili dei gradienti.
+2. **SIGReg cresce con N.** Meno il suo valore di riferimento (≈ 1,06), cresce come N: 0,088, 0,085 e 0,085 per campione a N = 128, 256 e 512. I coefficienti si confrontano quindi a parità di N.
+
+Divisa per (1 − λ)/2, la loss semantica diventa:
+
+```
+m  +  c · SIGReg        con        c = 2λ / (1 − λ)
+```
+
+| Riferimento | Loss del paper | Conversione | λ_S |
+|---|---|---|---|
+| LeWorldModel (codice: λ_W = 0,09, N = 128 come noi) | `m + λ_W · SIGReg` | c = λ_W | **0,043** (0,048 con lo 0,1 del paper; la zona stabile 0,01–0,2 dà 0,005–0,091) |
+| LeJEPA, 2 viste | `(1 − λ_J) · m/4 + λ_J · SIGReg` | c · 128 = 4λ_J/(1 − λ_J) · N_J | **0,039** |
+
+**Il dato di LeJEPA.**
+- **Batch non dichiarato.** La tabella di λ (ottimo 0,01 con 2 viste) non riporta il batch: gli script usano da 256 a 640 clip per processo, con un numero di GPU non indicato.
+- **Valore assoluto.** Viene dall'esempio minimo, l'unico con N noto: 4 viste, λ = 0,02, N = 256.
+- **Rapporto fra viste.** La tabella serve solo a questo: l'ottimo con 2 viste è la metà di quello con 4, cioè 0,01 a N = 256.
+
+**Risultato: λ_S = 0,04.** Non dipende da d, perché entrambi i termini sono medie per dimensione o per direzione, e quasi non dipende dalla quadratura: oltre |t| = 3 cade meno dell'1 % dell'integrale. Vale per i bracci con `E_sem`; nei bracci B e C si tiene lo stesso valore per confrontarli a parità di λ.
+
+**La posa, con lo stesso metodo** (`worldsign-posa.md` §4.2). L'invarianza è già nella forma di LeJEPA con 4 viste: 0,02 a N = 256 diventa λ_P/(1 − λ_P) = 2 · 0,0204, cioè λ_P = 0,04.
+
 ---
 
 ## 9. L'obiettivo completo
 
 ```
 L  =  (1 − λ_P) · ( L_inv + L_anchor )  +  λ_P · SIGReg_posa                    λ_P = 0,04
-   +  (1 − λ_S) · ( E_fis + L_pred_sem )   +  λ_S · SIGReg_sem                     λ_S = 0,05
+   +  (1 − λ_S) · ( E_fis + L_pred_sem )   +  λ_S · SIGReg_sem                     λ_S = 0,04
 ```
 
 Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: la posa (`L_inv`, `L_anchor`, `SIGReg_posa`), il fisico (`E_fis`), il semantico (`L_pred_sem`, `SIGReg_sem`). Con Adam i pesi **fra** livelli non contano; contano solo i rapporti dentro ciascun livello (`worldsign-gerarchia.md` §3). Per questo ogni livello può avere il suo λ (`Objective.weights`).
@@ -312,7 +347,7 @@ Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: l
 | **ESP-4** (su θ\*, facoltativa) | sì | sì | `L_F` (§5.2) | `{ŷ_k}` tutte le ipotesi |
 
 **Pesi presi dalla letteratura, nessuna calibrazione:**
-- `λ_S = 0,05`: la forma di LeJEPA, *«default robusto»*, prestazioni *«stabili al variare di λ»* [Lett. 35]; nel paper vale per 8–10 viste, da rivedere con il livello semantico;
+- `λ_S = 0,04`: tarato su LeWorldModel (0,043) e su LeJEPA (0,039) per due viste, `E_sem` e 128 campioni (§8.5); lo stesso valore in tutti i bracci, perché il confronto di ESP-1 resti a parità di λ;
 - `λ_P = 0,04`: lo 0,02 di LeJEPA per 4 viste con 256 campioni, raddoppiato per i ≤ 128 campioni di ogni passo; dentro la zona stabile di LeWorldModel, da 0,01 a 0,2 (`worldsign-posa.md` §4.2);
 - pesi uguali fra i termini predittivi di un livello: sommare con pesi uguali *«eguaglia o supera gli ottimizzatori multi-task complessi»* [Lett. 96]. Le scale sono confrontabili per costruzione: `L_inv` di ordine 1 (s vicino a `N(0, I)`), `L_anchor` = 1 per la media.
 
@@ -330,7 +365,7 @@ Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: l
 
 | Regolarizzazione | Dove | Valore | Cosa impedisce |
 |---|---|---|---|
-| **SIGReg** | `ŷ`, `ẽ`; le 4 viste della posa, passo per passo | `λ_S = 0,05`, `λ_P = 0,04`, 1.024 direzioni, 17 nodi | collasso; anisotropia; modality gap |
+| **SIGReg** | `ŷ`, `ẽ`; le 4 viste della posa, passo per passo | `λ_S = 0,04`, `λ_P = 0,04`, 1.024 direzioni, 17 nodi | collasso; anisotropia; modality gap |
 | **Stop-gradient fra i livelli** | `sg(s)` in `E_fis`; `sg(Enc(x))` nel passaggio semantico | — | che il video sposti il proprio bersaglio; che il semantico deformi l'encoder adattato dalla fisica |
 | **Congelamento + LoRA** | encoder video, predictor fisico (r = 16) | `B = 0` all'inizio, scala `α/r = 1` **[Aperto: α]** | allontanarsi dai pesi pre-addestrati: i pesi congelati non memorizzano il corpus, gli aggiornamenti restano a basso rango |
 | **Weight decay** (AdamW, disaccoppiato) | matrici addestrabili, LoRA comprese | 0,04 costante, come V-JEPA 2.1 | pesi grandi; 0 su norme, bias, scalari, posizioni e query apprese |

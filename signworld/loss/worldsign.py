@@ -2,7 +2,7 @@
 
 ``L = (1 - λ_P) · (L_inv + L_anchor) + λ_P · SIGReg_posa
     + (1 - λ) · (E_fis + L_pred_sem) + λ · SIGReg_sem``,
-λ_P = 0.04 for the pose (posa §4.2) and λ = 0.05 above it, with ``L_pred_sem`` and
+λ_P = 0.04 for the pose (posa §4.2) and λ = 0.04 above it (loss §8.5), with ``L_pred_sem`` and
 ``SIGReg_sem`` set by the arm of ESP-1:
 
     A₀   E_sem                —

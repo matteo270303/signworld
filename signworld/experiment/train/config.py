@@ -117,7 +117,9 @@ class SemanticSettings(FrozenModel):
     """K of the latent variable: 1 in every run, 4 in the optional ESP-4 (§4.5.9)."""
     relaxation: float = 0.05
     """ε: share of the gradient the losing hypotheses receive in ESP-4 [Aperto: PC7]."""
-    output_dim: PositiveInt = 512
+    output_dim: PositiveInt = 256
+    """d of ŷ: below the width (384), so ``Linear(384 → d)`` can fill it. At 512 its rank was
+    at most 383, a partial collapse SIGReg barely sees (LeWM's best size is 192)."""
     mlp_ratio: float = 4.0
     dropout: float = 0.1
     """[Aperto: PC7] §4.11 asks for dropout without a value."""
@@ -140,8 +142,10 @@ class LossSettings(FrozenModel):
     """Objective of §4.5.7: ``(1 - λ)·(predictive terms) + λ·(SIGReg terms)``, level by level."""
 
     arm: Arm = "A"
-    sigreg_weight: float = 0.05
-    """λ of the levels above the pose."""
+    sigreg_weight: float = Field(default=0.04, gt=0.0, lt=1.0)
+    """λ of the semantic level: E_sem = m/2 for N(0, I) vectors (m the MSE per dimension),
+    so the loss is ``m + 2λ/(1-λ)·SIGReg``; LeWM (m + 0.09·SIGReg, N = 128) gives 0.043,
+    LeJEPA (two views 0.01 at N = 256, invariance m/4) gives 0.039 (loss §8.5)."""
     pose_sigreg_weight: float = Field(default=0.04, gt=0.0, lt=1.0)
     """λ of the pose level (posa §4.2): LeJEPA's 0.02 for four views at 256 samples per
     SIGReg, doubled for the ≤ 128 clips of each step, since the statistic grows with N."""
@@ -248,7 +252,8 @@ class TextSettings(FrozenModel):
     input_dim: PositiveInt = 768
     """EmbeddingGemma's whole vector: no truncation (29/9)."""
     hidden: PositiveInt = 512
-    output_dim: PositiveInt = 512
+    output_dim: PositiveInt = 256
+    """d of ẽ, the same as ŷ's: E_sem compares them."""
     dropout: float = 0.1
     """Between the two layers of the head: «dropout nelle teste» of §4.11 [Aperto: PC7]."""
 

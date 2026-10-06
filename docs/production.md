@@ -78,7 +78,7 @@ Decoder R (query agli istanti chiesti, frequenza f) ──► frame 256 × 256
 B · GENERATORE  (coppie testo–video)
 
 didascalia ──► EmbeddingGemma ❄ ──► token del testo  L × 768 ──────────── cross-attention ─┐
-          └──► centratura + testa ❄ ──► ẽ (512) ──┐                                         │
+          └──► centratura + testa ❄ ──► ẽ (256) ──┐                                         │
 durata T ─────────────────────────────────────────┼──► adaLN-single ───────────────────────┤
 lingua dei segni ─────────────────────────────────┤                                         │
 tempo del flusso ─────────────────────────────────┘                                         │
@@ -109,7 +109,7 @@ testo ─► EmbeddingGemma ─► token + ẽ ─► durata T̂ (regressore)
 | `f` | scalare | frequenza dei frame in uscita da R, in fps |
 | `s_m` | n | istanti dei frame in uscita: `s_m = (m + ½) / f` |
 | `e_tok` | L × 768 | stati per token di EmbeddingGemma (prima della media) |
-| `ẽ` | 512 | vettore del testo della gerarchia (centratura + testa) |
+| `ẽ` | 256 | vettore del testo della gerarchia (centratura + testa; 512 fino al 6/10) |
 | `ℓ` | indice | lingua dei segni da produrre |
 
 ---
@@ -249,7 +249,7 @@ I gate partono da zero e anche lo strato d'uscita parte da zero (adaLN-Zero di D
 ### 5.8 Regressore di durata
 
 - **Ingresso.** `ẽ` concatenato a `log(1 + numero di parole)`.
-- **Struttura.** MLP 513 → 256 → 2, che dà media e log-deviazione del **logaritmo della durata**.
+- **Struttura.** MLP 257 → 256 → 2, che dà media e log-deviazione del **logaritmo della durata**.
 - **Perdita.** NLL gaussiana.
 - **All'inferenza.** `T̂ = exp(μ)`, limitato all'intervallo delle durate di addestramento **[Nostra scelta]**.
 
@@ -406,9 +406,9 @@ NLL gaussiana sul logaritmo della durata (§5.8).
 |---|---|---|
 | **Proiettore P** | proiezione d'ingresso 1.024 → 384 (0,39 M) + 8 blocchi (18,93 M) + uscita 384 → 64 (0,02 M) | **19,3 M** |
 | **Decoder R** | ingresso 64 → 384 (0,02 M) + embedding di `f` (0,10 M) + 12 blocchi (28,39 M) + deconvoluzione 384 → 3 × 4 × 16 × 16 (1,18 M) | **29,7 M** |
-| **Generatore G** | 12 blocchi (31,95 M) + componenti globali (1,63 M: embedding del tempo, proiezione di `ẽ`, embedding di durata e lingua, MLP di adaLN-single, ingresso e uscita, segmento, token nulli) | **33,6 M** |
-| **Regressore di durata** | MLP 513 → 256 → 2 | **0,1 M** |
-| **Totale usato all'inferenza** | | **≈ 82,7 M** |
+| **Generatore G** | 12 blocchi (31,95 M) + componenti globali (1,53 M: embedding del tempo, proiezione di `ẽ` 256 → 384, embedding di durata e lingua, MLP di adaLN-single, ingresso e uscita, segmento, token nulli) | **33,5 M** |
+| **Regressore di durata** | MLP 257 → 256 → 2 | **0,07 M** |
+| **Totale usato all'inferenza** | | **≈ 82,5 M** |
 | Testa REPA (solo addestramento) | MLP 384 → 768 → 1.024 | 1,1 M |
 | Discriminatore (solo addestramento) | PatchGAN 3D | ≈ 5,1 M |
 | **Totale in addestramento** | | **≈ 88,9 M** |
@@ -425,7 +425,7 @@ NLL gaussiana sul logaritmo della durata (§5.8).
 |---|---|---|
 | Proiettore | «small»: 512, 8 strati, ≈ 34 M | 384, 8 strati, 19,3 M |
 | Decoder | «base»: 768, 12 strati, ≈ 113 M | 384, 12 strati, 29,7 M |
-| Generatore | 2 B | 33,6 M |
+| Generatore | 2 B | 33,5 M |
 | Dati del generatore | 1,09 M clip, circa 3.800 h | OpenASL 98 k coppie (288 h); corpus circa 4 M (circa 6.650 h) |
 
 **Lunghezze delle sequenze:**
@@ -444,7 +444,7 @@ NLL gaussiana sul logaritmo della durata (§5.8).
 |---|---|
 | **Fedeltà delle mani** dopo la ricostruzione | il rischio principale; lo misura il test d'ingresso (§10.1). VideoRAE ha ricostruito bene UCF-101 (rFVD 13, PSNR 29,4), ma senza segnato |
 | **Decoder piccolo** (29,7 M contro i circa 113 M di VideoRAE) | se il test d'ingresso fallisce, la prima leva è R: più strati, poi più teste da 64 |
-| **Generatore piccolo** (33,6 M) | taglia da prova di fattibilità; se non basta, si cresce prima in profondità |
+| **Generatore piccolo** (33,5 M) | taglia da prova di fattibilità; se non basta, si cresce prima in profondità |
 | **Risoluzione temporale delle frasi lunghe** (§6.4) | **[Aperto]**: da misurare sulle durate |
 | **Segnante fisso fuori dai dati** | B3 consigliato |
 | **Lingua dei segni** sul corpus multilingue | condizione `ℓ` (§5.7); con solo OpenASL è costante |

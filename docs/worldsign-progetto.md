@@ -60,7 +60,7 @@ Il tutto è formulato come **energy-based model** [Lett. 28]: l'energia è l'err
 ### 1.4 Contributi attesi
 
 - **Una verifica controllata** del fatto che, nel retrieval cross-modale, l'uniformity possa venire da un vincolo sulla distribuzione degli embedding invece che da negativi contrastivi, a parità di dati visti **[Nostra ipotesi, §5.1 H1]**.
-- **Un world model a due livelli di astrazione** (fisico e semantico) per la lingua dei segni continua: tre encoder, due predictor, circa 29,8 M di parametri addestrabili **[Nostra proposta]**.
+- **Un world model a due livelli di astrazione** (fisico e semantico) per la lingua dei segni continua: tre encoder, due predictor, circa 29,6 M di parametri addestrabili **[Nostra proposta]**.
 - **Una batteria di diagnostiche e di test di plausibilità basati sull'energia**, costruibili senza annotazione **[Nostra proposta]**.
 - **Un'analisi della condivisione fra lingue dei segni** nelle diverse rappresentazioni del modello (ipotesi «a clessidra») **[Nostra ipotesi, §5.1 H5]**.
 
@@ -472,7 +472,7 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
 ```
  ═══════════ RAMO TESTUALE (precalcolato, fuori dal grafo di addestramento) ═══════════
   didascalia ─► EmbeddingGemma-300M (congelato) ─► 768-d, intero (nessun troncamento)
-            ─► centratura per lingua parlata ─► testa MLP  768 → 512 → 512  ─► ẽ ∈ ℝ⁵¹²
+            ─► centratura per lingua parlata ─► testa MLP  768 → 512 → 256  ─► ẽ ∈ ℝ²⁵⁶
  ═══════════════════════════════════════════════════════════════════════════════════════
 
  VIDEO  crop 256² · 64 frame · tubelet 2×16×16  →  8.192 token
@@ -505,7 +505,7 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
                │ PREDICTOR SEMANTICO  4 blocchi · d = 384 · da zero   │
                └─────────────────────────────────────────────────────┘
                               ▼
-                  media delle 8 query ─► ŷ ∈ ℝ⁵¹² ──── D ────► E_sem ◄──── ẽ
+                  media delle 8 query ─► ŷ ∈ ℝ²⁵⁶ ──── D ────► E_sem ◄──── ẽ
 
  ═══════════════════════════════════════════════════════════════════════════════════════
    SIGReg sulla posa per vista e per modalità su { ŷ } e { ẽ }  ·  un solo λ  ·  addestramento per livello
@@ -518,7 +518,7 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
 | **Encoder** | 3 | video (congelato + LoRA, adattato dal solo livello fisico) · posa (da zero, `worldsign-posa.md`) · testo (congelato, precalcolato) |
 | **Predictor** | 2 | fisico (riuso di V-JEPA 2.1 + LoRA, con fusione multi-livello) · semantico (da zero, schema VL-JEPA) |
 | **Vettore di retrieval** | — | `ŷ`, l'uscita del predictor semantico |
-| **Parametri addestrabili** | ≈ 29,8 M | dettaglio in §4.8 |
+| **Parametri addestrabili** | ≈ 29,6 M | dettaglio in §4.8 |
 
 ### 4.3 Notazione
 
@@ -531,8 +531,8 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
 | `p̂_{t,j}`, `c_{t,j}` | keypoint `j` normalizzato al tempo `t`, e sua confidenza |
 | `s_t ∈ ℝ^C` | bersaglio di posa per passo, `C = 192` (`worldsign-posa.md`) |
 | `ŝ_t ∈ ℝ^C` | la stessa quantità, predetta dal video mascherato |
-| `ŷ ∈ ℝ⁵¹²` | embedding semantico predetto dal video (vettore di retrieval) |
-| `ẽ ∈ ℝ⁵¹²` | target testuale della didascalia |
+| `ŷ ∈ ℝ²⁵⁶` | embedding semantico predetto dal video (vettore di retrieval) |
+| `ẽ ∈ ℝ²⁵⁶` | target testuale della didascalia |
 | `q_1 … q_8` | query apprese del predictor semantico |
 | `sg(·)` | stop-gradient: il valore passa, il gradiente no (`worldsign-gerarchia.md` §2) |
 | `z`, `K` | variabile latente discreta e sua cardinalità (**solo nell'ablation facoltativa ESP-4**, §4.5.9) |
@@ -612,7 +612,7 @@ Gli embedding multilingue tendono a raggrupparsi **per lingua anziché per signi
 - non c'è una relazione stabilita fra anisotropia e prestazioni [Lett. 50];
 - il whitening è sconsigliato per la classificazione [Lett. 52].
 
-**Al suo posto, una testa MLP a due layer** (`768 → 512 → 512`, GELU, **inizializzazione standard**, che entra nello stadio P con il suo warm-up, §4.10), addestrata insieme alle altre loss. È un *whitening durante l'addestramento*: WhitenedCSE mostra che integrarlo nel training evita il degrado dell'allineamento del post-processing [Lett. 49]; un whitening appreso è preferibile a quello PCA nel retrieval di immagini [Lett. 55]; e in LLaVA-1.5 un proiettore MLP su encoder congelati supera quello lineare [Lett. 70] **[Nostra scelta]**.
+**Al suo posto, una testa MLP a due layer** (`768 → 512 → 256`, GELU, **inizializzazione standard**, che entra nello stadio P con il suo warm-up, §4.10), addestrata insieme alle altre loss. È un *whitening durante l'addestramento*: WhitenedCSE mostra che integrarlo nel training evita il degrado dell'allineamento del post-processing [Lett. 49]; un whitening appreso è preferibile a quello PCA nel retrieval di immagini [Lett. 55]; e in LLaVA-1.5 un proiettore MLP su encoder congelati supera quello lineare [Lett. 70] **[Nostra scelta]**.
 
 **Nota di parsimonia.** Le varianti «senza testa», «testa lineare» e «whitening fisso» **non saranno testate**: la decisione di non usare il whitening fisso si basa sulla letteratura citata, non su un nostro esperimento **[Nostra scelta]**.
 
@@ -681,7 +681,7 @@ L'attivazione della fusione si prende dalla configurazione ufficiale di V-JEPA 2
 - proiezione d'ingresso `1024 → 384`;
 - **3D-RoPE sui token video**: senza informazione di posizione, attenzione e pooling sono invarianti alle permutazioni, cioè ciechi all'ordine temporale **[Nostra argomentazione]**;
 - attenzione bidirezionale congiunta su token video e query [Lett. 34];
-- uscita: **media dei token d'uscita delle 8 query**, poi proiezione `384 → 512`. VL-JEPA fa la media sui token non di padding [Lett. 34]; noi la limitiamo alle query, che hanno la stessa lunghezza per ogni clip.
+- uscita: **media dei token d'uscita delle 8 query**, poi proiezione `384 → 256`, a rango pieno: con 512 il rango restava al più 383 (6/10, `worldsign-architettura.md` §6). VL-JEPA fa la media sui token non di padding [Lett. 34]; noi la limitiamo alle query, che hanno la stessa lunghezza per ogni clip.
 
 **Perché serve un predictor anche senza maschera.**
 
@@ -882,7 +882,7 @@ per M direzioni casuali  v_m  (‖v_m‖ = 1), ricampionate a ogni passo:
 
 ```
 L  =  (1 − λ_P) · ( L_inv + L_anchor )  +  λ_P · SIGReg_posa                    λ_P = 0,04
-   +  (1 − λ) · ( E_fis  +  L_pred_sem )  +  λ · SIGReg_sem                    λ = 0,05
+   +  (1 − λ) · ( E_fis  +  L_pred_sem )  +  λ · SIGReg_sem                    λ = 0,04
 ```
 
 `L_pred_sem` e `SIGReg_sem` dipendono dal braccio di ESP-1:
@@ -902,7 +902,7 @@ Tutti i bracci usano lo stesso batch effettivo di 128 clip, InfoNCE compreso (§
 
 | Scelta | Evidenza |
 |---|---|
-| λ = 0,05 fra termini predittivi e SIGReg | è la forma della loss di LeJEPA; λ = 0,05 è un *«default robusto»* e le prestazioni sono *«stabili al variare di λ»* [Lett. 35]; nel paper vale per 8–10 viste, da rivedere con il livello semantico |
+| λ = 0,04 fra termini predittivi e SIGReg | è la forma della loss di LeJEPA; lo 0,05 del paper vale per 8–10 viste. Per le nostre loss la taratura su LeWorldModel e su LeJEPA dà 0,043 e 0,039 (`worldsign-loss.md` §8.5); le prestazioni restano *«stabili al variare di λ»* [Lett. 35] |
 | λ_P = 0,04 sulla posa | lo 0,02 di LeJEPA per 4 viste a 256 campioni, raddoppiato per i ≤ 128 campioni per passo; dentro la zona stabile di LeWorldModel (`worldsign-posa.md` §4.2) |
 | Pesi dentro `E_fis` | quelli di V-JEPA 2.1 (§4.5.2) [Lett. 32] |
 | Pesi uguali fra i termini predittivi | sommare le loss con pesi uguali *«eguaglia o supera gli ottimizzatori multi-task complessi»* [Lett. 96] |
@@ -914,7 +914,7 @@ Il livello della posa e quello fisico sono **identici in tutti i bracci**: i bra
 
 #### 4.5.8 Perché i termini non si ostacolano
 
-- **Allineamento contro SIGReg [Nostra argomentazione].** `E_sem` riduce la varianza *dentro* le coppie, SIGReg controlla la varianza della distribuzione *marginale*. Sono compatibili perché le coppie semanticamente distinte sono molte più delle dimensioni (~4·10⁶ ≫ 512).
+- **Allineamento contro SIGReg [Nostra argomentazione].** `E_sem` riduce la varianza *dentro* le coppie, SIGReg controlla la varianza della distribuzione *marginale*. Sono compatibili perché le coppie semanticamente distinte sono molte più delle dimensioni (~4·10⁶ ≫ 256).
 - **L'unico conflitto reale è l'anisotropia del target [Nostra argomentazione].** Se il target non è isotropo, i due termini hanno ottimi diversi. I modelli contrastivi moderni sono già isotropi [Lett. 51]; lo verifica PC1, e se il conflitto c'è lo segnala in addestramento il coseno fra i gradienti (§4.13).
 - **Livello fisico contro livello semantico sull'encoder condiviso [Nostra argomentazione].** I due gradienti arrivano alla stessa LoRA da passaggi separati, quindi il loro coseno si misura a costo nullo. Un coseno stabilmente negativo indicherebbe che la posa e il significato chiedono all'encoder cose incompatibili (§4.13).
 - Il testo resta **precalcolato e congelato**: il suo contributo passa solo dalla testa MLP.
@@ -1046,13 +1046,13 @@ Stime con formule standard: un blocco transformer con MLP 4× ha ≈ `12·d²` p
 | ├ LoRA r = 16 (12 blocchi) | — | — | 1,33 M | vincolato |
 | ├ fusione multi-livello: 4 LayerNorm, Linear 4.096 → 1.024, Linear 1.024 → 384 | da zero, inizializzazione in §4.10 | — | 4,60 M | libero |
 | └ testa di lettura per passo (`4·384 → C`, `C = 192`) | da zero | — | 0,30 M | libero |
-| Predictor semantico: 4 blocchi d = 384, proiezioni `1024 → 384` e `384 → 512`, 8 query | da zero | — | 7,67 M | libero |
+| Predictor semantico: 4 blocchi d = 384, proiezioni `1024 → 384` e `384 → 256`, 8 query | da zero | — | 7,60 M | libero |
 | Decoder dell'ancora `D` (`192 → 138`) | da zero | — | 0,03 M | libero |
-| Testa testuale MLP, `768 → 512 → 512` | standard (stadio P) | — | 0,66 M | libero |
+| Testa testuale MLP, `768 → 512 → 256` | standard (stadio P) | — | 0,53 M | libero |
 | EmbeddingGemma-300M | — | 0 in GPU (precalcolato) | 0 | — |
-| **Totale** | | **≈ 326 M** | **≈ 29,8 M** | **8,5 vincolati · 21,3 liberi** |
+| **Totale** | | **≈ 326 M** | **≈ 29,6 M** | **8,5 vincolati · 21,1 liberi** |
 
-**Margine di ~0,2 M rispetto al tetto di 30 M** (conteggio misurato in `worldsign-architettura.md` §9: 29.799.434, con `C = 192` dal 6/10). Conseguenze:
+**Margine di ~0,43 M rispetto al tetto di 30 M** (conteggio misurato in `worldsign-architettura.md` §9: 29.569.546, con `C = 192` e `d = 256` dal 6/10). Conseguenze:
 
 | Eventualità | Effetto sul totale |
 |---|---|
@@ -1108,7 +1108,7 @@ Valori **di partenza**, da calibrare nella dry run **[Nostra scelta]**:
 | Precisione | bf16, pesi master in fp32 per le LoRA |
 | Clipping del gradiente | nessuno, come V-JEPA 2.1 [Lett. 32] |
 | Media esponenziale dei pesi | **nessuna**, né come target né per la valutazione |
-| λ | **λ = 0,05** fra termini predittivi e SIGReg, come LeJEPA [Lett. 35], e **λ_P = 0,04** sulla posa (`worldsign-posa.md` §4.2); **pesi uguali** fra i termini predittivi [Lett. 96] (§4.5.7) |
+| λ | **λ_S = 0,04** sul semantico e **λ_P = 0,04** sulla posa, tarati sulle nostre loss a partire da LeJEPA [Lett. 35] e LeWorldModel (`worldsign-loss.md` §8.5); **pesi uguali** fra i termini predittivi [Lett. 96] (§4.5.7) |
 | Braccio InfoNCE | temperatura apprendibile (init 0,07); batch 128, come gli altri bracci |
 | ESP-4 (facoltativa) | frazione ε del rilassamento **[Aperto: PC7]** |
 
@@ -1137,7 +1137,7 @@ Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-
 | Misura | Motivo |
 |---|---|
 | Encoder video e predictor fisico congelati + LoRA | il vincolo più forte sulla capacità |
-| Tetto di 30 M di parametri addestrabili (≈ 29,8 M usati) | §3.4, `worldsign-posa.md` §3 |
+| Tetto di 30 M di parametri addestrabili (≈ 29,6 M usati) | §3.4, `worldsign-posa.md` §3 |
 | Stop-gradient fra i livelli; coseno sul learning rate della posa | il video non sposta il suo bersaglio, che rallenta mentre il video lo insegue |
 | Ancora di ricostruzione dei keypoint, invarianza fra viste | il target resta fedele al corpo e robusto al rumore del rilevatore |
 | Stochastic depth e dropout nel predictor semantico e nelle teste | regolarizzazione standard dei moduli da zero |
@@ -1250,7 +1250,7 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 |---|---|
 | P1 | nessun canale in comune fra addestramento e validazione |
 | P2 | nessun segmento di YouTube-SL-25 sovrapposto a una clip di validazione o di test di OpenASL; nessun video dei test set di PHOENIX-2014T e CSL-Daily nel corpus (§3.9) |
-| P3 | parametri addestrabili tutti nel budget e sotto il tetto di 30 M (≈ 29,8 M) |
+| P3 | parametri addestrabili tutti nel budget e sotto il tetto di 30 M (≈ 29,6 M) |
 | P4 | i pesi congelati sono davvero congelati |
 | P5 | checksum dei pesi pre-addestrati |
 | P6 | i token mascherati sono **rimossi** dall'input dell'encoder; indici di contesto e di target disgiunti |
@@ -1635,7 +1635,7 @@ Proponiamo un **world model a energia con due livelli di astrazione** per la lin
 - **predice il significato** dal video intero, con lo schema di VL-JEPA, verso l'embedding della didascalia;
 - **allinea senza negativi**, imponendo l'uniformity con SIGReg;
 - usa l'**energia** — l'errore di predizione — per il retrieval e come misura di plausibilità;
-- **resta sotto i 30 M di parametri addestrabili** (≈ 29,8 M, di cui 8,06 M nell'encoder di posa con il decoder), perché il corpus conta ~6.650 ore ma solo ~41.000 video e il rischio di overfitting è alto.
+- **resta sotto i 30 M di parametri addestrabili** (≈ 29,6 M, di cui 8,06 M nell'encoder di posa con il decoder), perché il corpus conta ~6.650 ore ma solo ~41.000 video e il rischio di overfitting è alto.
 
 ### 6.2 Perché il progetto è informativo in ogni caso
 

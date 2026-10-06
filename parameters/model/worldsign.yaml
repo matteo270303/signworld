@@ -42,7 +42,7 @@ semantic:                     # §4.4.6: VL-JEPA's scheme, 4 blocks at 384, from
   queries: 8
   hypotheses: 1               # 4 only in ESP-4
   relaxation: 0.05            # ε of ESP-4 [Aperto: PC7]
-  output_dim: 512
+  output_dim: 256             # ŷ: Linear(384 -> 256) at full rank (512 left it at 383)
   mlp_ratio: 4.0
   dropout: 0.1                # [Aperto: PC7]
   drop_path: 0.1              # [Aperto: PC7]
@@ -51,7 +51,7 @@ semantic:                     # §4.4.6: VL-JEPA's scheme, 4 blocks at 384, from
 
 losses:                       # §4.5.7
   arm: A
-  sigreg_weight: 0.05         # λ of the semantic level (to be reviewed with it)
+  sigreg_weight: 0.04         # λ of the semantic level: LeWM 0.043, LeJEPA 0.039 (loss §8.5)
   pose_sigreg_weight: 0.04    # λ of the pose: LeJEPA's 0.02 for 4 views at N = 256, x2 for N <= 128
   sigreg_directions: 1024     # LeJEPA's recommendation
   sigreg_knots: 17
@@ -97,8 +97,8 @@ pose_encoder:                 # docs/worldsign-posa.md: worldSign's encoder, fro
 
 text:                         # §4.4.4: EmbeddingGemma pre-computed, centred per language
   input_dim: 768              # whole vector, no truncation
-  hidden: 512                 # head 768 -> 512 -> 512, GELU, standard initialisation
-  output_dim: 512
+  hidden: 512                 # head 768 -> 512 -> 256, GELU, standard initialisation
+  output_dim: 256             # ẽ, the same width as ŷ
   dropout: 0.1                # [Aperto: PC7]
 
 training:                     # §4.10 and docs/worldsign-gerarchia.md §6

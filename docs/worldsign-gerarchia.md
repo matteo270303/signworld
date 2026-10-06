@@ -67,7 +67,7 @@ In pratica la loss è **una sola**, `L = L_0 + E_fis + L_2`, con un solo backwar
 - in `L_0`: invarianza, ancora e SIGReg sulla posa;
 - in `L_2`: `E_sem` e SIGReg semantico.
 
-La composizione resta quella del progetto, `(1 − λ)·(termini predittivi) + λ·(SIGReg)`, livello per livello: λ = 0,04 sulla posa (`worldsign-posa.md` §4.2), λ = 0,05 sul semantico.
+La composizione resta quella del progetto, `(1 − λ)·(termini predittivi) + λ·(SIGReg)`, livello per livello: λ = 0,04 sulla posa (`worldsign-posa.md` §4.2) e λ = 0,04 sul semantico (`worldsign-loss.md` §8.5), ciascuno tarato per la sua loss.
 
 **Verifica prima di lanciare (P17).** Su un batch piccolo:
 - `E_fis` non deve dare gradiente al modello di posa;
@@ -131,7 +131,7 @@ Ogni token nascosto dentro i riquadri conta 1, ogni token visibile λ_ctx = 0,5,
 
 - **Input:** `h = sg(Enc_θ^{24}(x))`, l'uscita normalizzata dell'ultimo blocco sulla clip intera, come VL-JEPA.
 - **Forward senza gradiente:** il passaggio semantico non conserva le attivazioni del ViT-L.
-- **Cosa addestra la predizione video → testo:** il predictor semantico (7,67 M) e la testa testuale. L'encoder cambia solo per opera della fisica: è la scommessa di H3.
+- **Cosa addestra la predizione video → testo:** il predictor semantico (7,60 M) e la testa testuale. L'encoder cambia solo per opera della fisica: è la scommessa di H3.
 - **Configurazione:** `semantic.trains_encoder: false`. Con `true` si ha l'ablation «globale» (§8).
 
 ---

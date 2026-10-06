@@ -1,7 +1,9 @@
 """Energies and regularisers of the objective (§4.5.3-§4.5.9), and their per-arm composition.
 
-``L = (1 - λ) · (L_inv + L_anchor + E_fis + L_pred_sem) + λ · (SIGReg_posa + SIGReg_sem)``,
-λ = 0.05, with ``L_pred_sem`` and ``SIGReg_sem`` set by the arm of ESP-1:
+``L = (1 - λ_P) · (L_inv + L_anchor) + λ_P · SIGReg_posa
+    + (1 - λ) · (E_fis + L_pred_sem) + λ · SIGReg_sem``,
+λ_P = 0.04 for the pose (posa §4.2) and λ = 0.05 above it, with ``L_pred_sem`` and
+``SIGReg_sem`` set by the arm of ESP-1:
 
     A₀   E_sem                —
     A    E_sem                ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
@@ -10,15 +12,16 @@
     C    InfoNCE              ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
 
 SIGReg is applied to each modality apart, as LeJEPA applies it to each view, with the same
-random directions for both; on the pose to the clean sequence and to its view
-(``SIGReg_posa``, posa §4.2). ``L_inv`` and ``SIGReg_posa`` train the pose encoder with
+random directions for both. On the pose it is applied to each of the four views at each step
+apart, over the clips present there (``SIGReg_posa``, posa §4.2), as LeWM does: the steps of
+one clip are not independent samples. ``L_inv`` and ``SIGReg_posa`` train the pose encoder with
 ``L_anchor``, which comes from the pose branch. The hierarchy is trained level by level
 (gerarchia §3): ``E_fis`` reads the pose target with its gradient stopped, so each term reaches
 only its own level and λ matters only between the terms of one level. With the physical level
 off (ESP-2) every pose and physical term is absent.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 import torch
@@ -81,12 +84,15 @@ def physical_energy_per_clip(
     return torch.stack(energies).mean(dim=0)
 
 
-def invariance(clean: Tensor, view: Tensor, present: Tensor) -> Tensor:
-    """``L_inv``: mean over the present steps of ``‖s_t - s̃_t‖² / C`` (posa §4.2).
+def invariance(views: Tensor, present: Tensor) -> Tensor:
+    """``L_inv`` in LeJEPA's form: each view's squared distance from the views' centre,
+    averaged over the channels and the views, then over the present steps (posa §4.2).
 
-    ``clean`` and ``view`` (batch, steps, C); ``present`` (batch, steps) bool.
+    ``views`` (V, batch, steps, C); ``present`` (batch, steps) bool. With two views it is
+    ``‖s_t - s̃_t‖² / 4C``.
     """
-    squared = (clean.float() - view.float()).pow(2).mean(dim=-1)
+    z = views.float()
+    squared = (z - z.mean(dim=0)).pow(2).mean(dim=(0, -1))
     weights = present.float()
     return (squared * weights).sum() / weights.sum().clamp_min(1.0)
 
@@ -158,8 +164,30 @@ class SIGRegLoss:
         rows = [view.reshape(-1, view.shape[-1]).float() for view in views]
         slices = random_directions(rows[0].shape[1], self.directions, generator=generator)
         slices = slices.to(rows[0].device)
-        reduce = self.collective.all_sum if self.collective.active else None
-        return torch.stack([self.statistic(view, slices, reduce=reduce) for view in rows]).mean()
+        statistics = [self.statistic(view, slices, reduce=self._reduce) for view in rows]
+        return torch.stack(statistics).mean()
+
+    def per_step(self, views: Tensor, present: Tensor, generator: torch.Generator) -> Tensor:
+        """SIGReg of each view at each step over the clips present there, averaged (LeWM).
+
+        ``views`` (V, batch, steps, C); ``present`` (batch, steps) bool. The steps of one clip
+        are not independent: together they would read their correlation as non-Gaussianity.
+        A view at a step counts once at least two clips are present there over all the GPUs;
+        with none it is 0. One set of directions serves every view and step.
+        """
+        count, batch, steps, width = views.shape
+        rows = views.float().transpose(1, 2).reshape(count * steps, batch, width)
+        members = present.T.expand(count, steps, batch).reshape(count * steps, batch)
+        slices = random_directions(width, self.directions, generator=generator)
+        statistics, samples = self.statistic.per_group(
+            rows, members, slices.to(views.device), reduce=self._reduce
+        )
+        counted = (samples >= 2).float()  # noqa: PLR2004 (a distribution needs two samples)
+        return (statistics * counted).sum() / counted.sum().clamp_min(1.0)
+
+    @property
+    def _reduce(self) -> Callable[[Tensor], Tensor] | None:
+        return self.collective.all_sum if self.collective.active else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,25 +255,28 @@ class Objective(nn.Module):
             terms["sigreg_sem"] = self.sigreg([predicted.flatten(0, 1), text], generator)
         return terms
 
-    def pose_sigreg(
-        self, latents: Sequence[Tensor], present: Tensor, generator: torch.Generator
-    ) -> Tensor:
-        """``SIGReg_posa = ½ [SIGReg({s_t}) + SIGReg({s̃_t})]`` over the present steps.
+    def pose_sigreg(self, views: Tensor, present: Tensor, generator: torch.Generator) -> Tensor:
+        """``SIGReg_posa``: the mean over the views and the steps of SIGReg of
+        ``{z_{v,b,t} : c_{b,t} > 0}_b`` (posa §4.2).
 
-        ``latents`` are the views, each (batch, steps, C); ``present`` (batch, steps) bool.
-        With fewer than two present steps in the whole batch, on every GPU alike, it is 0.
+        ``views`` (V, batch, steps, C), the clean sequence first; ``present`` (batch, steps)
+        bool. With no step holding two present clips over all the GPUs, it is 0.
         """
-        count = self.collective.all_sum(present.sum().float())
-        if float(count) < 2:  # noqa: PLR2004 (a distribution needs two samples)
-            return latents[0].new_zeros(())
-        return self.sigreg([latent[present] for latent in latents], generator)
+        return self.sigreg.per_step(views, present, generator)
+
+    def weights(self, names: Iterable[str]) -> dict[str, float]:
+        """Each term's weight in the total: ``1 - λ`` if predictive, ``λ`` if SIGReg, with the
+        pose level's own λ on its terms."""
+        out = {}
+        for name in names:
+            pose = name in POSE_TERMS
+            weight = self.settings.pose_sigreg_weight if pose else self.settings.sigreg_weight
+            out[name] = weight if name.startswith("sigreg") else 1.0 - weight
+        return out
 
     def combine(self, terms: dict[str, Tensor]) -> LossTerms:
-        """``(1 - λ)·(predictive) + λ·(SIGReg)`` over whichever terms are present."""
-        weight = self.settings.sigreg_weight
-        predictive = [v for k, v in terms.items() if not k.startswith("sigreg")]
-        regular = [v for k, v in terms.items() if k.startswith("sigreg")]
-        total = (1.0 - weight) * torch.stack(predictive).sum()
-        if regular:
-            total = total + weight * torch.stack(regular).sum()
+        """``(1 - λ)·(predictive) + λ·(SIGReg)`` level by level, over whichever terms are
+        present (``weights``)."""
+        weights = self.weights(terms)
+        total = torch.stack([weights[k] * v.float() for k, v in terms.items()]).sum()
         return LossTerms(total, terms)

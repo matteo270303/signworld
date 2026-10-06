@@ -20,7 +20,7 @@ Tre encoder, due predictor, tre livelli addestrati **per livello** (`worldsign-g
 ```
  ─── LIVELLO 0 · POSA ── sequenza pulita e una vista (rotazione, rumore) ─────────────────────────
   posa 32×69×6 ─► ENCODER DI POSA (da zero: 4 parti 128 → concatenazione 512 → temporale 512
-                  → LayerNorm + Linear 512→256) ─► s_t ∈ ℝ²⁵⁶      L_inv · L_anchor · SIGReg_posa
+                  → LayerNorm + Linear 512→192) ─► s_t ∈ ℝ¹⁹²      L_inv · L_anchor · SIGReg_posa
 
  ─── LIVELLO 1 · FISICO ── due maschere a tubi per passo (brevi e lunghe) ────────────────────────
   video 64×256×256 ─► token visibili ─► ENCODER VIDEO (V-JEPA 2.1 ViT-L, congelato + LoRA r=16)
@@ -32,9 +32,9 @@ Tre encoder, due predictor, tre livelli addestrati **per livello** (`worldsign-g
                    ingresso: token visibili fusi + mask token nelle posizioni nascoste
                    uscita: un token per ogni posizione, visibile o nascosta
                                           ▼
-                 LETTURA PER PASSO  media nei 4 riquadri → concatenazione 4×384 → Linear 1.536→256
+                 LETTURA PER PASSO  media nei 4 riquadri → concatenazione 4×384 → Linear 1.536→192
                                           ▼
-                                ŝ_t ∈ ℝ²⁵⁶ ── E_fis ──► target LN(sg(s_t))
+                                ŝ_t ∈ ℝ¹⁹² ── E_fis ──► target LN(sg(s_t))
 
  ─── LIVELLO 2 · SEMANTICO ── clip intera, nessuna maschera ──────────────────────────────────────
   video ─► ENCODER VIDEO (lo stesso, senza gradiente) ─► sg(8.192 token normalizzati del blocco 24)
@@ -52,7 +52,7 @@ Tre encoder, due predictor, tre livelli addestrati **per livello** (`worldsign-g
 | `N` | 8.192 | token per clip, `32 × 16 × 16` |
 | `D` | 1.024 | larghezza dell'encoder video |
 | `d_p` | 384 | larghezza dei predictor |
-| `C` | 256 | larghezza del bersaglio di posa `s_t`, uno per passo |
+| `C` | 192 | larghezza del bersaglio di posa `s_t`, uno per passo |
 | `d` | 512 | spazio semantico di `ŷ` ed `ẽ` |
 
 ---
@@ -202,7 +202,7 @@ Il target è un vettore per passo, non per token (`readout.py`, `worldsign-gerar
 1. **Appartenenza:** ogni riquadro visibile `(x0, y0, x1, y1)` si proietta sulla griglia 16×16 (floor dell'angolo in alto a sinistra, ceil di quello in basso a destra); il riquadro copre ogni patch che tocca.
 2. **Media per riquadro:** al passo `t`, la media dei token predetti, **visibili e nascosti**, dentro il riquadro di ciascun articolatore; un riquadro vuoto dà zeri.
 3. **Concatenazione** delle 4 medie nell'ordine corpo, mano sinistra, mano destra, volto: `(B, 32, 1.536)`.
-4. **Testa:** `Linear(1.536 → 256)` = `ŝ_t`; 393.472 parametri, da zero.
+4. **Testa:** `Linear(1.536 → 192)` = `ŝ_t`; 295.104 parametri, da zero.
 5. Per la loss si contano, sommati sui riquadri del passo, i token nascosti `n^m_t`, i visibili e la somma dei pesi dei visibili `w^v_t` (1 ciascuno nel cooldown di V-JEPA 2.1, che seguiamo).
 
 ---
@@ -214,17 +214,17 @@ L'encoder di worldSign adattato al tubelet di V-JEPA (`pose_features.py`, `pose_
 | # | Layer | Forma | Parametri |
 |---|---|---|---|
 | 1 | `JointFeatures`: frame ricanonicalizzati fra le spalle; 9 canali per giunto e frame (globale, locale, osso, velocità, valido); i 2 frame del passo concatenati | `(B, 32, 69, 6) → (B, 32, 69, 18)` | — |
-| 2 | **4 encoder spaziali**, uno per articolatore (9, 21, 21, 18 giunti), pesi non condivisi: `Linear(18 → 128)` + tipo di giunto, 2 `TransformerEncoderLayer` pre-norm (d = 128, 8 teste, FFN 512, dropout 0,1), media sui giunti | 4 × `(B, 32, 128)` | 1.604.736 |
+| 2 | **4 encoder spaziali**, uno per articolatore (9, 21, 21, 18 giunti), pesi non condivisi: `Linear(18 → 128)` + tipo di giunto, 2 `TransformerEncoderLayer` pre-norm (d = 128, 8 teste, FFN 512, senza dropout), media sui giunti | 4 × `(B, 32, 128)` | 1.604.736 |
 | 3 | **concatenazione** dei 4 articolatori | `(B, 32, 512)` | — |
 | 4 | posizione temporale appresa `(32, 512)` | invariata | 16.384 |
-| 5 | **transformer temporale**: 2 `TransformerEncoderLayer` pre-norm (d = 512, 8 teste, FFN 2.048, dropout 0,1) | `(B, 32, 512)` | 6.304.768 |
-| 6 | `LayerNorm(512)` + `Linear(512 → 256)` | `(B, 32, 256)` = `s_t` | 132.352 |
+| 5 | **transformer temporale**: 2 `TransformerEncoderLayer` pre-norm (d = 512, 8 teste, FFN 2.048, senza dropout) | `(B, 32, 512)` | 6.304.768 |
+| 6 | `LayerNorm(512)` + `Linear(512 → 192)` | `(B, 32, 192)` = `s_t` | 99.520 |
 
-**Totale: 8.058.240**, tutti addestrabili, gruppo proprio con learning rate di picco 3e-4, warm-up sul 20 % della run e coseno fino a 0.
+**Totale: 8.025.408**, tutti addestrabili, gruppo proprio con learning rate di picco 3e-4, warm-up sul 20 % della run e coseno fino a 0. In addestramento l'encoder gira in un solo passaggio sulle 4 viste (4B sequenze, `worldsign-posa.md` §4.1).
 
 ### 5.1 Decoder dell'ancora `D`
 
-Un solo `Linear(256 → 138)` da `s_t` alle coordinate `(x, y)` dei 69 giunti del passo: 35.466 parametri. Uscita `D(s)` di forma `(B, 32, 69, 2)`.
+Un solo `Linear(192 → 138)` da `s_t` alle coordinate `(x, y)` dei 69 giunti del passo: 26.634 parametri. Uscita `D(s)` di forma `(B, 32, 69, 2)`.
 
 ---
 
@@ -297,9 +297,9 @@ Inizializzazione standard di PyTorch. **Totale: 656.384.** È l'unica parte adde
 | Uscita | Uso |
 |---|---|
 | `ŝ_t` contro `LN(sg(s_t))` | energia fisica `E_fis`; mediata su più maschere, plausibilità `Ē_fis` |
-| `s` contro `s̃` (la vista) | invarianza `L_inv` |
+| le 4 viste `z_v` contro il loro centro | invarianza `L_inv` |
 | `D(s)` contro `p̂` | ancora `L_anchor` |
-| `s` e `s̃` per passo | `SIGReg_posa` |
+| le 4 viste `z_v`, passo per passo | `SIGReg_posa` |
 | `ŷ` contro `ẽ` | energia semantica `E_sem = 1 − cos` (o InfoNCE nel braccio C); retrieval, riconoscimento e profilo temporale come `argmin` dell'energia |
 | `ŷ` ed `ẽ` separatamente | `SIGReg_sem` |
 
@@ -317,16 +317,16 @@ Le formule sono in `worldsign-loss.md`.
 | Predictor fisico (12 blocchi, d = 384) | 21.298.176 | — | — |
 | ├ LoRA r = 16 | — | 1.327.104 | vincolato |
 | ├ fusione multilivello (4 LN + MLP) | — | 4.597.120 | libero |
-| └ testa di lettura 1.536 → 256 | — | 393.472 | libero |
+| └ testa di lettura 1.536 → 192 | — | 295.104 | libero |
 | Predictor semantico | — | 7.695.488 | libero |
-| Encoder di posa (da zero) | — | 8.058.240 | libero |
-| Decoder dell'ancora | — | 35.466 | libero |
+| Encoder di posa (da zero) | — | 8.025.408 | libero |
+| Decoder dell'ancora | — | 26.634 | libero |
 | Testa testuale | — | 656.384 | libero |
 | InfoNCE (solo braccio C) | — | 1 (temperatura) | libero |
 | EmbeddingGemma-300M | 0 in GPU (precalcolato) | — | — |
-| **Totale** | **≈ 326 M** | **29.939.466** | 8,50 M vincolati · 21,44 M liberi |
+| **Totale** | **≈ 326 M** | **29.799.434** | 8,50 M vincolati · 21,30 M liberi |
 
-- **Tetto: 30 M** (alzato da 22 M il 3/10 per l'encoder di posa, `worldsign-posa.md` §3): margine 60.534 parametri. L'asserzione P3 lo verifica.
+- **Tetto: 30 M** (alzato da 22 M il 3/10 per l'encoder di posa, `worldsign-posa.md` §3): margine 200.566 parametri, dopo il passaggio a `C = 192` del 6/10. L'asserzione P3 lo verifica.
 - **ESP-2** (senza livello fisico): né encoder di posa né LoRA; restano predictor semantico e testa testuale, 8.351.872.
 
 ---

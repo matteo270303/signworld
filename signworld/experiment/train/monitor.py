@@ -51,7 +51,7 @@ from signworld.metrics.readings import (
     ridge_r2,
     semantic_readings,
     shares_and_cosines,
-    sigreg_ratio,
+    stepwise_sigreg_ratio,
     term_gradients,
     text_head_spearman,
 )
@@ -404,8 +404,7 @@ class Monitor:
         """Shares and cosines of every term's gradient on the weights of its level: the video
         LoRA (the physical level, and the semantic one in the «global» ablation) and the pose
         encoder; the conflict between alignment and SIGReg on ŷ."""
-        weight = self.config.losses.sigreg_weight
-        weights = {k: (weight if k.startswith("sigreg") else 1 - weight) for k in parts}
+        weights = self.model.objective.weights(parts)
         found = families(self.model)
         video = [p for p in found[VIDEO_LORA] if p.requires_grad]
         pose = [p for p in found[POSE] if p.requires_grad]
@@ -455,7 +454,7 @@ class Monitor:
             spread = Spread.of(rows)
             out["s_rank"], out["s_std"] = spread.effective_rank, spread.std
             out["s_isoscore"] = spread.isoscore
-            out["s_sigreg"] = sigreg_ratio(rows)
+            out["s_sigreg"] = stepwise_sigreg_ratio(latent, confidence > 0)
             pose = self.model.pose
             if "physical" in record and pose is not None:
                 predictions = record["physical"].predictions

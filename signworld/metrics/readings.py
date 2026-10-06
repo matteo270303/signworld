@@ -77,11 +77,15 @@ def linear_cka(x: Tensor, y: Tensor) -> float:
     return float(cross / denominator) if float(denominator) > 0 else float("nan")
 
 
+_GAUSSIAN_SIGREG = math.sqrt(2 * math.pi) - math.sqrt(2 * math.pi / 3)
+"""The expected SIGReg of independent samples of N(0, I), ≈ 1.06."""
+
+
 def sigreg_ratio(rows: Tensor, directions: int = 256, seed: int = 0) -> float:
     """SIGReg of the rows, as the loss computes it, over its value for N(0, I) (≈ 1.06).
 
     No standardisation: SIGReg also judges the mean and the scale, and subtracting the sample
-    mean would lower a Gaussian's value below 1.06.
+    mean would lower a Gaussian's value below 1.06. The rows must be independent samples.
     """
     if len(rows) < 2:  # noqa: PLR2004
         return float("nan")
@@ -89,7 +93,27 @@ def sigreg_ratio(rows: Tensor, directions: int = 256, seed: int = 0) -> float:
     slices = random_directions(
         x.shape[1], directions, generator=torch.Generator().manual_seed(seed)
     ).to(x.device)
-    return float(SIGReg()(x, slices)) / (math.sqrt(2 * math.pi) - math.sqrt(2 * math.pi / 3))
+    return float(SIGReg()(x, slices)) / _GAUSSIAN_SIGREG
+
+
+def stepwise_sigreg_ratio(
+    latent: Tensor, present: Tensor, directions: int = 256, seed: int = 0
+) -> float:
+    """``sigreg_ratio`` of each step over the clips present there, averaged over the steps with
+    two at least: the form of ``SIGReg_posa`` (posa §4.2). Pooled, the steps of a clip would
+    read their correlation as non-Gaussianity.
+
+    ``latent`` (clips, steps, C); ``present`` (clips, steps) bool.
+    """
+    x = latent.float()
+    slices = random_directions(
+        x.shape[-1], directions, generator=torch.Generator().manual_seed(seed)
+    ).to(x.device)
+    statistics, counts = SIGReg().per_group(x.transpose(0, 1), present.T, slices)
+    counted = counts >= 2  # noqa: PLR2004
+    if not bool(counted.any()):
+        return float("nan")
+    return float(statistics[counted].mean()) / _GAUSSIAN_SIGREG
 
 
 def ridge_r2(

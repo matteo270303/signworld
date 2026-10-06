@@ -5,8 +5,8 @@ model, the keypoint decoder of the anchor and the views of the invariance term:
 
 * ``target`` gives ``s``, (batch, 32, C), one vector per step; the physical level reads it
   with the gradient stopped;
-* ``view`` gives the second view of ``L_inv``: an in-plane rotation and keypoint noise, the
-  nuisances only (``PoseViews``);
+* ``encode_views`` gives the four views of ``L_inv`` and ``SIGReg_posa``: the clean sequence
+  and three draws of nuisances (``PoseViews``), in one pass of the encoder;
 * ``anchor`` is ``L_anchor``: one linear decoder from ``s_t`` to the (x, y) of the 69 joints,
   divided by the keypoint variance so that predicting each joint's mean is worth 1.
 
@@ -18,7 +18,9 @@ import math
 import torch
 from torch import Tensor, nn
 
+from signworld.data.pose.skeleton import PARTS
 from signworld.data.pose.tokens import FRAMES_PER_STEP, JOINTS, STEPS
+from signworld.data.pose.wholebody import Articulator
 from signworld.experiment.train.config import PoseEncoderSettings, PoseViewSettings
 
 from .pose_encoder import PoseEncoder
@@ -27,29 +29,91 @@ _VALUES_PER_FRAME = 3
 
 
 class PoseViews:
-    """A second view of the same signing: in-plane rotation and noise on the present joints.
+    """Views of the same signing that differ by nuisances only (posa §4.1).
 
-    The rotation turns about the origin between the shoulders, uniform in
-    ``±rotation_degrees`` per clip; the noise is Gaussian with ``noise`` standard deviation in
-    shoulder units. Missing joints stay missing. Draws come from ``generator`` (on the CPU),
-    so a step's views are reproducible.
+    Each draw, per clip:
+
+    * the camera: a rotation about the origin between the shoulders, uniform in
+      ``±rotation_degrees``; with probability ``affine_probability`` each, a horizontal scale
+      uniform in ``1 ± aspect`` and a shear ``x ← x + h·y`` with ``|h| ≤ shear``;
+    * Gaussian noise on the present joints, with each articulator's standard deviation;
+    * with probability ``mask_probability``, ``mask_joints`` joints of the fingers and the
+      face (roots excluded: a missing root would void its whole part's local positions)
+      hidden over ``mask_steps`` consecutive steps.
+
+    Missing joints stay missing. Draws come from ``generator`` (on the CPU), so a step's views
+    are reproducible.
     """
 
     def __init__(self, settings: PoseViewSettings) -> None:
         self.settings = settings
+        spread = {
+            Articulator.BODY: settings.noise_body,
+            Articulator.LEFT_HAND: settings.noise_hands,
+            Articulator.RIGHT_HAND: settings.noise_hands,
+            Articulator.FACE: settings.noise_face,
+        }
+        self.noise = torch.tensor([spread[p.articulator] for p in PARTS for _ in range(p.size)])
+        self.maskable = torch.tensor(
+            [
+                column
+                for p in PARTS
+                if p.root is not None
+                for column in range(p.start, p.stop)
+                if column != p.root
+            ]
+        )
+        if settings.mask_joints > len(self.maskable):
+            raise ValueError(f"only {len(self.maskable)} joints can be hidden")
 
-    def __call__(self, tokens: Tensor, generator: torch.Generator) -> Tensor:
-        """(batch, steps, joints, 6) tokens to tokens of the same shape."""
+    @property
+    def count(self) -> int:
+        return self.settings.count
+
+    def __call__(self, tokens: Tensor, generator: torch.Generator) -> list[Tensor]:
+        """``count`` independent views of (batch, steps, joints, 6) tokens, each that shape."""
+        return [self.draw(tokens, generator) for _ in range(self.count)]
+
+    def draw(self, tokens: Tensor, generator: torch.Generator) -> Tensor:
+        """One view of (batch, steps, joints, 6) tokens."""
         frames = tokens.reshape(*tokens.shape[:-1], FRAMES_PER_STEP, _VALUES_PER_FRAME)
         position, present = frames[..., :2], frames[..., 2:]
-        half = math.radians(self.settings.rotation_degrees)
-        angle = (torch.rand(len(tokens), generator=generator) * 2 - 1) * half
+        camera = self._camera(len(tokens), generator).to(tokens.device, tokens.dtype)
+        noise = torch.randn(position.shape, generator=generator) * self.noise[:, None, None]
+        moved = torch.einsum("bij,bsnfj->bsnfi", camera, position) + noise.to(position)
+        hidden = self._hidden(len(tokens), tokens.shape[1], generator).to(tokens.device)
+        kept = present * ~hidden[..., None, None]
+        return torch.cat([moved * kept, kept], dim=-1).reshape(tokens.shape)
+
+    def _camera(self, batch: int, generator: torch.Generator) -> Tensor:
+        """(batch, 2, 2): rotation · horizontal scale · shear, one per clip."""
+        s = self.settings
+        uniform = torch.rand(batch, 3, generator=generator) * 2 - 1
+        chosen = torch.rand(batch, 2, generator=generator) < s.affine_probability
+        angle = uniform[:, 0] * math.radians(s.rotation_degrees)
+        scale = 1 + uniform[:, 1] * s.aspect * chosen[:, 0]
+        shear = uniform[:, 2] * s.shear * chosen[:, 1]
         cos, sin = angle.cos(), angle.sin()
         rotation = torch.stack([torch.stack([cos, -sin], -1), torch.stack([sin, cos], -1)], -2)
-        rotation = rotation.to(tokens.device, tokens.dtype)
-        noise = torch.randn(position.shape, generator=generator) * self.settings.noise
-        moved = torch.einsum("bij,bsnfj->bsnfi", rotation, position) + noise.to(position)
-        return torch.cat([moved * present, present], dim=-1).reshape(tokens.shape)
+        one, zero = torch.ones(batch), torch.zeros(batch)
+        affine = torch.stack(
+            [torch.stack([scale, scale * shear], -1), torch.stack([zero, one], -1)], -2
+        )
+        return rotation @ affine
+
+    def _hidden(self, batch: int, steps: int, generator: torch.Generator) -> Tensor:
+        """(batch, steps, joints) bool: the joints this draw hides."""
+        s = self.settings
+        span = min(s.mask_steps, steps)
+        on = torch.rand(batch, generator=generator) < s.mask_probability
+        start = (torch.rand(batch, generator=generator) * (steps - span + 1)).long()
+        order = torch.rand(batch, len(self.maskable), generator=generator).argsort(dim=1)
+        chosen = torch.zeros(batch, len(JOINTS), dtype=torch.bool)
+        chosen.scatter_(1, self.maskable[order[:, : s.mask_joints]], value=True)
+        step = torch.arange(steps)
+        during = (step >= start[:, None]) & (step < start[:, None] + span)
+        hidden: Tensor = on[:, None, None] & during[:, :, None] & chosen[:, None, :]
+        return hidden
 
 
 class KeypointDecoder(nn.Module):
@@ -118,9 +182,12 @@ class PoseBranch(nn.Module):
         latent: Tensor = self.encoder(tokens)
         return latent
 
-    def view(self, tokens: Tensor, generator: torch.Generator) -> Tensor:
-        """The second view's tokens for ``L_inv``."""
-        return self.views(tokens, generator)
+    def encode_views(self, tokens: Tensor, generator: torch.Generator) -> Tensor:
+        """(views, batch, steps, C): the clean sequence first, then the drawn views, encoded
+        in one pass (the encoder has no batch statistics, so the clips do not mix)."""
+        everything = torch.cat([tokens, *self.views(tokens, generator)])
+        latent: Tensor = self.encoder(everything)
+        return latent.reshape(1 + self.views.count, len(tokens), *latent.shape[1:])
 
     def anchor(self, latent: Tensor, keypoints: Tensor, weights: Tensor) -> Tensor:
         if bool(torch.isnan(self.keypoint_variance)):

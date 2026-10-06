@@ -40,12 +40,13 @@ Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 | Simbolo | Valore | Significato |
 |---|---|---|
 | `λ_ctx` | 0,5 | peso del termine sui token visibili in `E_fis` (V-JEPA 2.1) |
-| `λ_S` | 0,05 | peso di SIGReg nell'obiettivo (LeJEPA) |
+| `λ_S` | 0,05 | peso di SIGReg nell'obiettivo dei livelli sopra la posa (LeJEPA) |
+| `λ_P` | 0,04 | peso di SIGReg nel livello di posa (`worldsign-posa.md` §4.2) |
 | `𝓑` | 128 clip | il batch effettivo, su tutte le GPU (64 per GPU) |
 | `m ∈ {brevi, lunghe}` | | le due maschere di ogni passo |
 | `t = 1 … 32` | | passo (2 frame) |
 | `a ∈ {corpo, sx, dx, volto}` | | articolatore: il suo riquadro nella lettura dal video |
-| `C = 256`, `d = 512` | | larghezza del bersaglio di posa e dello spazio semantico |
+| `C = 192`, `d = 512` | | larghezza del bersaglio di posa e dello spazio semantico |
 
 ---
 
@@ -54,8 +55,8 @@ Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 | Quantità | Definizione | Dove |
 |---|---|---|
 | `s_t = G_ω(p)_t` | bersaglio di posa: l'encoder di posa sulla sequenza pulita, un vettore per passo | arch. §5 |
-| `s̃_t = G_ω(A(p))_t` | lo stesso sulla vista (rotazione, rumore) | `worldsign-posa.md` §4.1 |
-| `ŝ_t(v, m)` | lettura per passo: medie dei token predetti (visibili e nascosti) nei 4 riquadri, concatenate, `Linear(1.536 → 256)` | arch. §4.4 |
+| `z_{v,t} = G_ω(v_v)_t`, `v = 0…3` | lo stesso sulle 4 viste: la pulita (`z_0 = s`) e tre estrazioni di disturbi (camera, rumore, giunti nascosti) | `worldsign-posa.md` §4.1 |
+| `ŝ_t(v, m)` | lettura per passo: medie dei token predetti (visibili e nascosti) nei 4 riquadri, concatenate, `Linear(1.536 → 192)` | arch. §4.4 |
 | `n^m_t(m)`, `w^v_t(m)` | token nascosti nei riquadri del passo e somma dei pesi dei visibili | arch. §4.4 |
 | `c_{t,j}` | peso del giunto `j` al passo `t`: 1 se presente in un frame del tubelet, altrimenti 0 | arch. §2.2 |
 | `c_t = (1/69) Σ_j c_{t,j}` | confidenza del passo | `step_confidence` |
@@ -136,17 +137,18 @@ L_anchor  =  ──────────────────────�
 σ²  =  Σ_{t,j} c_{t,j} · ‖ p̂_{t,j} − μ_j ‖²  /  Σ_{t,j} c_{t,j}          μ_j = media pesata del giunto j
 ```
 
-- `D` è un solo `Linear(256 → 138)` dal vettore del passo ai 69 giunti (arch. §5.1).
+- `D` è un solo `Linear(192 → 138)` dal vettore del passo ai 69 giunti (arch. §5.1), sulla sola vista pulita.
 - **`σ²` fissa la scala:** è la varianza dei keypoint attorno alla media di ciascun giunto, calcolata **una volta sulle clip di training** (20.000 clip, `statistics_clips`), un buffer salvato con il checkpoint. **Predire la media di ogni giunto vale esattamente 1.**
 - **A cosa serve:** tiene la cinematica nel bersaglio, che senza di essa potrebbe ridursi a ciò che è invariante alle viste; dà un errore in keypoint interpretabile.
 
 ### 4.2 Invarianza `L_inv`
 
 ```
-L_inv  =  Σ_(b,t) [c_{b,t} > 0] · (1/C) ‖ s_{b,t} − s̃_{b,t} ‖²  /  Σ_(b,t) [c_{b,t} > 0]
+μ_{b,t} =  ¼ Σ_v z_{v,b,t}
+L_inv   =  Σ_(b,t) [c_{b,t} > 0] · ¼ Σ_v (1/C) ‖ μ_{b,t} − z_{v,b,t} ‖²  /  Σ_(b,t) [c_{b,t} > 0]
 ```
 
-`s̃` è il bersaglio calcolato su una vista della stessa sequenza: rotazione nel piano (±10°) e rumore sui giunti (σ = 0,01 unità di spalla). È il termine predittivo di LeJEPA con due viste.
+È il termine predittivo di LeJEPA **nella sua forma**: ogni vista si avvicina al centro delle quattro, con la media sui canali. Con due viste varrebbe `‖s − s̃‖²/4C`. La pipeline delle viste è in `worldsign-posa.md` §4.1.
 
 ---
 
@@ -255,7 +257,9 @@ Per un campione davvero gaussiano il valore atteso è **costante**, qualunque si
 E[ SIGReg ]  =  ∫ (1 − e^{−τ²}) e^{−τ²/2} dτ  =  √(2π) − √(2π/3)  ≈  1,06
 ```
 
-Per ogni altra distribuzione cresce **proporzionalmente a `N`**. È la forma di LeJEPA, a cui si riferisce `λ_S = 0,05`.
+Per ogni altra distribuzione cresce **proporzionalmente a `N`**. È la forma di LeJEPA, a cui si riferiscono `λ_S` e `λ_P`.
+
+**Vale solo per campioni indipendenti.** Con campioni correlati il valore minimo sale anche se la distribuzione è esattamente `N(0, I)`, e il gradiente spinge a separarli. Su dati sintetici: con correlazione 0,9 fra passi consecutivi di una clip, SIGReg sui 32 passi insieme vale 10; calcolato per passo resta 1,04. Per questo `SIGReg_posa` si calcola passo per passo (§8.4).
 
 ### 8.3 Su più GPU
 
@@ -267,16 +271,18 @@ Le direzioni sono le stesse su tutte le GPU: vengono da un generatore con lo ste
 
 ```
 SIGReg_sem   =  ½ · [ SIGReg({ŷ}) + SIGReg({ẽ}) ]                         bracci A, B, C
-SIGReg_posa  =  ½ · [ SIGReg({ s_t : c_t > 0 }) + SIGReg({ s̃_t : c_t > 0 }) ]   tutti i bracci
+SIGReg_posa  =  media su v = 0…3 e t = 1…32 di  SIGReg({ z_{v,b,t} : c_{b,t} > 0 }_b)   tutti i bracci
 ```
 
 | Termine | Campioni `N` per valutazione | Direzioni | Nota |
 |---|---|---|---|
 | `SIGReg({ŷ})` | 128 (128·K in ESP-4) | condivise con `{ẽ}` | ogni modalità separatamente, come LeJEPA fa con le viste |
 | `SIGReg({ẽ})` | 128 | condivise con `{ŷ}` | spinge la testa testuale, l'unica parte mobile del ramo |
-| `SIGReg({s_t})`, `SIGReg({s̃_t})` | ≈ 128 × 32 passi con qualche giunto presente | condivise fra le due viste | con meno di due campioni nell'intero batch vale 0, su ogni GPU |
+| `SIGReg({z_{v,·,t}})`, per vista e passo | ≤ 128: le clip presenti al passo t | condivise fra viste e passi | come LeWorldModel; un passo conta se ha almeno due clip presenti su tutte le GPU; tutti i 128 gruppi in un solo calcolo e una sola `all_reduce` |
 
 **Perché per modalità e per vista [Nostra argomentazione].** SIGReg garantisce qualcosa solo sull'insieme su cui è calcolato. Sull'unione di più gruppi, uno può perdere varianza lungo alcune direzioni ed essere compensato dagli altri senza che il test se ne accorga. Separatamente, ogni insieme ha la garanzia piena. Sulla posa il bersaglio è un vettore per passo che concatena i quattro articolatori (`worldsign-posa.md` §3): non ci sono più insiemi per articolatore.
+
+**Perché per passo sulla posa [revisione del 6/10].** I 32 passi di una clip non sono campioni indipendenti (§8.2). LeJEPA applica SIGReg a ogni vista sui campioni del batch, e LeWorldModel a ogni istante separatamente.
 
 **Cosa SIGReg non fa.** Non allinea: se `z ~ N(0, I)` allora anche `R·z` lo è, per ogni rotazione `R`. Quale clip corrisponda a quale frase lo decidono solo i termini predittivi.
 
@@ -287,10 +293,11 @@ SIGReg_posa  =  ½ · [ SIGReg({ s_t : c_t > 0 }) + SIGReg({ s̃_t : c_t > 0 }) 
 ## 9. L'obiettivo completo
 
 ```
-L  =  (1 − λ_S) · ( L_inv + L_anchor + E_fis + L_pred_sem )  +  λ_S · ( SIGReg_posa + SIGReg_sem )          λ_S = 0,05
+L  =  (1 − λ_P) · ( L_inv + L_anchor )  +  λ_P · SIGReg_posa                    λ_P = 0,04
+   +  (1 − λ_S) · ( E_fis + L_pred_sem )   +  λ_S · SIGReg_sem                     λ_S = 0,05
 ```
 
-Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: la posa (`L_inv`, `L_anchor`, `SIGReg_posa`), il fisico (`E_fis`), il semantico (`L_pred_sem`, `SIGReg_sem`). Con Adam i pesi **fra** livelli non contano; contano solo i rapporti dentro ciascun livello (`worldsign-gerarchia.md` §3).
+Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: la posa (`L_inv`, `L_anchor`, `SIGReg_posa`), il fisico (`E_fis`), il semantico (`L_pred_sem`, `SIGReg_sem`). Con Adam i pesi **fra** livelli non contano; contano solo i rapporti dentro ciascun livello (`worldsign-gerarchia.md` §3). Per questo ogni livello può avere il suo λ (`Objective.weights`).
 
 | Braccio / ablation | termini della posa | `E_fis` | `L_pred_sem` | `SIGReg_sem` |
 |---|---|---|---|---|
@@ -303,7 +310,8 @@ Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: l
 | **ESP-4** (su θ\*, facoltativa) | sì | sì | `L_F` (§5.2) | `{ŷ_k}` tutte le ipotesi |
 
 **Pesi presi dalla letteratura, nessuna calibrazione:**
-- `λ_S = 0,05`: la forma di LeJEPA, *«default robusto»*, prestazioni *«stabili al variare di λ»* [Lett. 35];
+- `λ_S = 0,05`: la forma di LeJEPA, *«default robusto»*, prestazioni *«stabili al variare di λ»* [Lett. 35]; nel paper vale per 8–10 viste, da rivedere con il livello semantico;
+- `λ_P = 0,04`: lo 0,02 di LeJEPA per 4 viste con 256 campioni, raddoppiato per i ≤ 128 campioni di ogni passo; dentro la zona stabile di LeWorldModel, da 0,01 a 0,2 (`worldsign-posa.md` §4.2);
 - pesi uguali fra i termini predittivi di un livello: sommare con pesi uguali *«eguaglia o supera gli ottimizzatori multi-task complessi»* [Lett. 96]. Le scale sono confrontabili per costruzione: `L_inv` di ordine 1 (s vicino a `N(0, I)`), `L_anchor` = 1 per la media.
 
 **Per stadio del curriculum** (`worldsign-gerarchia.md` §6) entrano solo i termini dei livelli eseguiti, con la stessa formula:
@@ -320,15 +328,15 @@ Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: l
 
 | Regolarizzazione | Dove | Valore | Cosa impedisce |
 |---|---|---|---|
-| **SIGReg** | `ŷ`, `ẽ`, `s` e `s̃` per passo | `λ_S = 0,05`, 1.024 direzioni, 17 nodi | collasso; anisotropia; modality gap |
+| **SIGReg** | `ŷ`, `ẽ`; le 4 viste della posa, passo per passo | `λ_S = 0,05`, `λ_P = 0,04`, 1.024 direzioni, 17 nodi | collasso; anisotropia; modality gap |
 | **Stop-gradient fra i livelli** | `sg(s)` in `E_fis`; `sg(Enc(x))` nel passaggio semantico | — | che il video sposti il proprio bersaglio; che il semantico deformi l'encoder adattato dalla fisica |
 | **Congelamento + LoRA** | encoder video, predictor fisico (r = 16) | `B = 0` all'inizio, scala `α/r = 1` **[Aperto: α]** | allontanarsi dai pesi pre-addestrati: i pesi congelati non memorizzano il corpus, gli aggiornamenti restano a basso rango |
 | **Weight decay** (AdamW, disaccoppiato) | matrici addestrabili, LoRA comprese | 0,04 costante, come V-JEPA 2.1 | pesi grandi; 0 su norme, bias, scalari, posizioni e query apprese |
-| **Dropout** | predictor semantico (attenzione, residui, MLP), testa testuale | 0,1 **[Aperto: PC7]** | co-adattamento nei moduli da zero |
+| **Dropout** | predictor semantico (attenzione, residui, MLP), testa testuale; **non** nell'encoder di posa, il cui `sg(s)` è un bersaglio | 0,1 **[Aperto: PC7]** | co-adattamento nei moduli da zero |
 | **Stochastic depth** (DropPath) | rami residui del predictor semantico | 0,1 **[Aperto: PC7]** | dipendenza da singoli blocchi |
 | **LayerScale** | rami residui del predictor semantico | init 1e-4 **[Aperto: PC7]** | aggiornamenti grandi all'inizio: ogni blocco parte vicino all'identità |
 | **Ancora** | `s` → keypoint | peso uguale agli altri termini della posa | perdita di informazione cinematica nel target |
-| **Invarianza fra viste** | `s` contro `s̃` | peso uguale | dipendenza dal rumore del rilevatore e dall'inquadratura |
+| **Invarianza fra viste** | le 4 viste della posa contro il loro centro | peso uguale | dipendenza dal rumore del rilevatore, dal punto di vista e dai giunti persi |
 | **Schedule della posa** | encoder di posa | picco 3e-4, warm-up 20 % della run, coseno a 0 | un target che continua a muoversi mentre il video lo insegue |
 | **Aumentazioni** | video e keypoint | jitter ±10 %, colore ±0,2 **[Aperto]**, niente flip | scorciatoie su inquadratura e colore |
 | **Curriculum** | stadi P e F₀ | un'epoca ciascuno; warm-up di 2 epoche per ogni gruppo che entra | che la LoRA insegua un bersaglio casuale; che le teste casuali distorcano le feature pre-addestrate [Lett. 95] |

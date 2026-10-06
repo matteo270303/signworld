@@ -53,6 +53,7 @@ from .readings import (
     physical_readings,
     ridge_r2,
     sigreg_ratio,
+    stepwise_sigreg_ratio,
 )
 
 PARTS = ("body", "left", "right", "face")
@@ -318,10 +319,10 @@ def model_measures(
 def pose_target_measures(latent: Tensor, keypoints: Tensor, weights: Tensor) -> dict[str, float]:
     """The pose target ``s`` on a set of clips (posa §6).
 
-    IsoScore, effective rank and SIGReg of ``s`` over the steps with some joint present, and
-    for every articulator the R² of a ridge from ``s`` to its joints' positions and velocities
-    (fit on the first half of the clips, read on the second): ``r2_position_{part}``,
-    ``r2_velocity_{part}``.
+    IsoScore and effective rank of ``s`` over the steps with some joint present, its SIGReg
+    step by step as the loss computes it, and for every articulator the R² of a ridge from
+    ``s`` to its joints' positions and velocities (fit on the first half of the clips, read on
+    the second): ``r2_position_{part}``, ``r2_velocity_{part}``.
 
     ``latent`` (clips, steps, C), ``keypoints`` (clips, steps, 69, 2), ``weights``
     (clips, steps, 69).
@@ -331,13 +332,13 @@ def pose_target_measures(latent: Tensor, keypoints: Tensor, weights: Tensor) -> 
     fit = torch.arange(clips) < clips // 2
     velocity = keypoints[:, 1:] - keypoints[:, :-1]
     moving = weights[:, 1:] * weights[:, :-1]
-    present = weights.mean(-1).flatten() > 0
+    present = weights.mean(-1) > 0
     rows = latent.flatten(0, 1)
-    spread = Spread.of(rows[present])
+    spread = Spread.of(rows[present.flatten()])
     out = {
         "isoscore": spread.isoscore,
         "rank": spread.effective_rank,
-        "sigreg": sigreg_ratio(rows[present]),
+        "sigreg": stepwise_sigreg_ratio(latent, present),
     }
     for index, name in enumerate(PARTS):
         joints = groups == index

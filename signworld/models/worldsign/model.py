@@ -111,7 +111,7 @@ class StepRandomness:
     directions: torch.Generator
     """The same on every GPU: SIGReg's slices must agree for its statistic to be one."""
     views: torch.Generator
-    """This GPU's own: the second view of the pose's invariance term."""
+    """This GPU's own: the drawn views of the pose's invariance term."""
 
     @classmethod
     def at(cls, seed: int, step: int, rank: int = 0) -> "StepRandomness":
@@ -159,19 +159,18 @@ class WorldSign(nn.Module):
     ) -> tuple[dict[str, Tensor], Tensor]:
         """Level 0: ``L_inv``, ``L_anchor`` and ``SIGReg_posa``, and the target ``sg(s)``.
 
-        The clean sequence gives ``s``; a view (rotation and noise) gives ``s̃`` (posa §4).
+        The clean sequence gives ``s``, the anchor's input and the target; three draws of
+        nuisances give the other views of ``L_inv`` and ``SIGReg_posa`` (posa §4).
         """
         pose = self._pose()
-        latent = pose.target(batch.pose_tokens)
-        view = pose.target(pose.view(batch.pose_tokens, randomness.views))
+        views = pose.encode_views(batch.pose_tokens, randomness.views)
+        latent = views[0]
         confidence = step_confidence(batch.keypoint_weights)
         present = confidence > 0
         terms = {
-            "inv_posa": invariance(latent, view, present),
+            "inv_posa": invariance(views, present),
             "anchor": pose.anchor(latent, batch.keypoints, batch.keypoint_weights),
-            "sigreg_posa": self.objective.pose_sigreg(
-                [latent, view], present, randomness.directions
-            ),
+            "sigreg_posa": self.objective.pose_sigreg(views, present, randomness.directions),
         }
         target = latent.detach()
         if record is not None:

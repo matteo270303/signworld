@@ -84,7 +84,7 @@ class PhysicalSettings(FrozenModel):
     enabled: bool = True
     """False for ESP-2: no pose encoder, physical predictor, anchor or pose SIGReg."""
     lora: LoRASettings = Field(default_factory=LoRASettings)
-    target_dim: PositiveInt = 256
+    target_dim: PositiveInt = 192
     """C, the width of the pose target s_t (``pose_encoder.output_dim``)."""
     mask_index: int = 0
     """Only the first mask token of the released predictor is trained (PC6)."""
@@ -134,10 +134,14 @@ class SemanticSettings(FrozenModel):
 
 
 class LossSettings(FrozenModel):
-    """Objective of §4.5.7: ``(1 - λ)·(predictive terms) + λ·(SIGReg terms)``."""
+    """Objective of §4.5.7: ``(1 - λ)·(predictive terms) + λ·(SIGReg terms)``, level by level."""
 
     arm: Arm = "A"
     sigreg_weight: float = 0.05
+    """λ of the levels above the pose."""
+    pose_sigreg_weight: float = Field(default=0.04, gt=0.0, lt=1.0)
+    """λ of the pose level (posa §4.2): LeJEPA's 0.02 for four views at 256 samples per
+    SIGReg, doubled for the ≤ 128 clips of each step, since the statistic grows with N."""
     sigreg_directions: PositiveInt = 1024
     """Random directions per SIGReg evaluation, redrawn at every step (LeJEPA recommends 1,024)."""
     sigreg_knots: PositiveInt = 17
@@ -171,12 +175,34 @@ class AugmentationSettings(FrozenModel):
 
 
 class PoseViewSettings(FrozenModel):
-    """The second view of the pose's invariance term: nuisances only (posa §4.1)."""
+    """The views of the pose's invariance term besides the clean sequence (posa §4.1).
 
+    ``count`` independent draws of one pipeline of nuisances, as LeJEPA's views: one linear
+    map of the camera per clip, Gaussian noise on the present joints at the detector's jitter,
+    and joints hidden over a span of steps.
+    """
+
+    count: PositiveInt = 3
+    """Draws besides the clean sequence: four views in all, LeJEPA's minimal example."""
     rotation_degrees: float = Field(default=10.0, ge=0.0)
     """Half-width of the uniform in-plane rotation about the origin between the shoulders."""
-    noise: float = Field(default=0.01, ge=0.0)
-    """Standard deviation of the Gaussian noise on the present joints, in shoulder units."""
+    aspect: float = Field(default=0.15, ge=0.0, lt=1.0)
+    """Half-width of the uniform horizontal scale around 1 (SPOTER's squeeze, up to 15 %)."""
+    shear: float = Field(default=0.1, ge=0.0)
+    """Half-width of the uniform shear ``x ← x + h·y`` [our choice]."""
+    affine_probability: float = Field(default=0.5, ge=0.0, le=1.0)
+    """Chance of the aspect and, apart, of the shear; the rotation is always drawn."""
+    noise_body: float = Field(default=0.003, ge=0.0)
+    noise_hands: float = Field(default=0.01, ge=0.0)
+    noise_face: float = Field(default=0.002, ge=0.0)
+    """Standard deviations of the noise, in shoulder units: the jitter measured on OpenASL from
+    three consecutive frames (an upper bound: body 0.003, hands 0.008-0.009, face 0.002)."""
+    mask_probability: float = Field(default=0.5, ge=0.0, le=1.0)
+    """Chance that a draw hides joints."""
+    mask_steps: PositiveInt = 8
+    """Consecutive steps over which they are hidden."""
+    mask_joints: int = Field(default=9, ge=0)
+    """Joints hidden, among the fingers and the face without their roots (57): PSTL's 9."""
 
 
 class PoseEncoderSettings(FrozenModel):
@@ -194,9 +220,11 @@ class PoseEncoderSettings(FrozenModel):
     """Blocks of the temporal transformer, at the width of the four parts concatenated (512)."""
     heads: PositiveInt = 8
     mlp_ratio: PositiveFloat = 4.0
-    dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
-    output_dim: PositiveInt = 256
-    """C, the width of the target s_t, after the final projection."""
+    dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
+    """0: the target sg(s) the physical level reads must not change with a dropout draw."""
+    output_dim: PositiveInt = 192
+    """C, the width of the target s_t, after the final projection: LeWM's best embedding size,
+    above the 125 linear components of 99.9 % of a step's pose on OpenASL."""
     learning_rate: PositiveFloat = 3e-4
     """Peak learning rate of the pose family (worldSign's value)."""
     warmup_fraction: float = Field(default=0.2, gt=0.0, lt=1.0)

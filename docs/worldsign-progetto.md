@@ -60,7 +60,7 @@ Il tutto è formulato come **energy-based model** [Lett. 28]: l'energia è l'err
 ### 1.4 Contributi attesi
 
 - **Una verifica controllata** del fatto che, nel retrieval cross-modale, l'uniformity possa venire da un vincolo sulla distribuzione degli embedding invece che da negativi contrastivi, a parità di dati visti **[Nostra ipotesi, §5.1 H1]**.
-- **Un world model a due livelli di astrazione** (fisico e semantico) per la lingua dei segni continua: tre encoder, due predictor, circa 29,9 M di parametri addestrabili **[Nostra proposta]**.
+- **Un world model a due livelli di astrazione** (fisico e semantico) per la lingua dei segni continua: tre encoder, due predictor, circa 29,8 M di parametri addestrabili **[Nostra proposta]**.
 - **Una batteria di diagnostiche e di test di plausibilità basati sull'energia**, costruibili senza annotazione **[Nostra proposta]**.
 - **Un'analisi della condivisione fra lingue dei segni** nelle diverse rappresentazioni del modello (ipotesi «a clessidra») **[Nostra ipotesi, §5.1 H5]**.
 
@@ -518,7 +518,7 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
 | **Encoder** | 3 | video (congelato + LoRA, adattato dal solo livello fisico) · posa (da zero, `worldsign-posa.md`) · testo (congelato, precalcolato) |
 | **Predictor** | 2 | fisico (riuso di V-JEPA 2.1 + LoRA, con fusione multi-livello) · semantico (da zero, schema VL-JEPA) |
 | **Vettore di retrieval** | — | `ŷ`, l'uscita del predictor semantico |
-| **Parametri addestrabili** | ≈ 29,9 M | dettaglio in §4.8 |
+| **Parametri addestrabili** | ≈ 29,8 M | dettaglio in §4.8 |
 
 ### 4.3 Notazione
 
@@ -529,7 +529,7 @@ Nessun lavoro del settore usa lo stesso corpus di pretraining: Uni-Sign ha costr
 | `m`, `𝓜` | maschera multi-blocco; insieme dei token mascherati |
 | `a ∈ {LH, RH, corpo, volto}` | articolatore |
 | `p̂_{t,j}`, `c_{t,j}` | keypoint `j` normalizzato al tempo `t`, e sua confidenza |
-| `s_t ∈ ℝ^C` | bersaglio di posa per passo, `C = 256` (`worldsign-posa.md`) |
+| `s_t ∈ ℝ^C` | bersaglio di posa per passo, `C = 192` (`worldsign-posa.md`) |
 | `ŝ_t ∈ ℝ^C` | la stessa quantità, predetta dal video mascherato |
 | `ŷ ∈ ℝ⁵¹²` | embedding semantico predetto dal video (vettore di retrieval) |
 | `ẽ ∈ ℝ⁵¹²` | target testuale della didascalia |
@@ -583,8 +583,8 @@ W'  =  W  +  (α / r) · B · A
 **Scelta [Nostra scelta, 3/10]: l'encoder di posa di worldSign, adattato al tubelet di V-JEPA e addestrato da zero insieme al resto.** Tutti i dettagli sono in `worldsign-posa.md`; qui la sintesi.
 
 - **Ingresso:** i token di posa (69 giunti × 32 passi, x, y e presenza dei due frame), ricanonicalizzati frame per frame fra le spalle; 9 canali per giunto e frame (globale, locale rispetto alla radice della parte, osso, velocità, valido), i due frame del passo concatenati.
-- **Architettura:** un transformer spaziale per articolatore (corpo, mani, volto; pesi non condivisi), media sui giunti; i 4 token **concatenati** (512); un transformer temporale a 512 sui 32 passi; `LayerNorm` e `Linear(512 → 256)`. **8,06 M parametri.** Il bersaglio è **un vettore per passo**, `s_t ∈ ℝ²⁵⁶`.
-- **Addestramento:** invarianza fra la sequenza e una vista (rotazione ±10°, rumore σ = 0,01), SIGReg su entrambe, ancora di ricostruzione dei keypoint: la forma di LeJEPA [Lett. 35], senza maschera e senza EMA. Learning rate 3e-4, warm-up sul 20 % della run e coseno.
+- **Architettura:** un transformer spaziale per articolatore (corpo, mani, volto; pesi non condivisi), media sui giunti; i 4 token **concatenati** (512); un transformer temporale a 512 sui 32 passi; `LayerNorm` e `Linear(512 → 192)`, senza dropout. **8,03 M parametri.** Il bersaglio è **un vettore per passo**, `s_t ∈ ℝ¹⁹²`.
+- **Addestramento:** invarianza fra 4 viste (la sequenza pulita e tre estrazioni di disturbi: camera, rumore del rilevatore, giunti nascosti) nella forma di LeJEPA [Lett. 35]; SIGReg su ogni vista passo per passo, come LeWorldModel; ancora di ricostruzione dei keypoint; λ = 0,04; senza EMA. Learning rate 3e-4, warm-up sul 20 % della run e coseno (`worldsign-posa.md` §4).
 - **Rapporto con il livello fisico:** `E_fis` legge `LN(sg(s))`. Il video non può spostare il bersaglio.
 - **S-JEPA** [Lett. 99] è replicato a parte, sui dati del paper (`signworld/models/sjepa/`), per un adattamento futuro; non è collegato al modello. Le misure di PC5 riguardavano un S-JEPA pre-addestrato che non fa più parte del piano.
 
@@ -800,7 +800,7 @@ E_fis(v, p ; m)  =  ────────────────────
 **I termini della posa** (`worldsign-posa.md` §4): l'encoder di posa si addestra con la sua invarianza, l'ancora di ricostruzione e SIGReg (§4.5.6).
 
 ```
-L_inv     =  media sui passi validi di  (1/C) ‖ s_t − s̃_t ‖²                    s̃: la stessa sequenza in una vista (rotazione, rumore)
+L_inv     =  media sui passi validi di  ¼ Σ_v (1/C) ‖ μ_t − z_{v,t} ‖²            z_v: le 4 viste (pulita e tre di disturbi); μ_t: il loro centro
 
                Σ_t Σ_j  c_{t,j} · ‖ D( s_t )_j − p̂_{t,j} ‖²
 L_anchor  =  ──────────────────────────────────────
@@ -870,18 +870,19 @@ per M direzioni casuali  v_m  (‖v_m‖ = 1), ricampionate a ogni passo:
 ```
 
 - `φ̂_u(τ) = (1/N) Σ_n e^{iτu_n}` è la funzione caratteristica empirica; `e^{−τ²/2}` è quella della normale standard, ed è anche il peso dell'integrale. L'integrale si calcola con la regola dei trapezi su 17 nodi in `[−5, 5]`; `M = 1.024` direzioni, come raccomanda LeJEPA [Lett. 35].
-- **Il fattore N** è quello di LeJEPA: per un campione davvero gaussiano il valore atteso resta ≈ 1,06 (`√(2π) − √(2π/3)`) qualunque sia `N`, mentre per ogni altra distribuzione cresce con `N`. È la scala a cui si riferisce λ = 0,05 [Lett. 35]. Con più GPU, `N` conta i campioni di tutte le GPU.
-- **Applicato con un solo λ** **[Nostra scelta]**:
-  - al bersaglio di posa, **separatamente per vista**, in **tutti** i bracci: `SIGReg_posa = ½ · [ SIGReg({s_t}) + SIGReg({s̃_t}) ]`, sui passi con qualche giunto presente (`worldsign-posa.md` §4.2);
+- **Il fattore N** è quello di LeJEPA: per un campione davvero gaussiano il valore atteso resta ≈ 1,06 (`√(2π) − √(2π/3)`) qualunque sia `N`, mentre per ogni altra distribuzione cresce con `N`. Vale per campioni indipendenti. È la scala a cui si riferisce λ [Lett. 35]. Con più GPU, `N` conta i campioni di tutte le GPU.
+- **Applicato con un λ per livello** **[Nostra scelta]**:
+  - al bersaglio di posa, **separatamente per vista e per passo**, come LeWorldModel, in **tutti** i bracci: `SIGReg_posa` = media sulle 4 viste e sui 32 passi di SIGReg delle clip presenti a quel passo, con λ = 0,04 (`worldsign-posa.md` §4.2);
   - a **ciascuna modalità separatamente**, con le stesse direzioni: `SIGReg_sem = ½ · [ SIGReg({ŷ}) + SIGReg({ẽ}) ]`, nei bracci **A, B e C** di ESP-1 (non in A₀ e B₀, §4.5.7). È come LeJEPA lo applica, a ogni vista separatamente [Lett. 35].
 
 **Perché per modalità e per vista [Nostra argomentazione].** SIGReg garantisce qualcosa solo sulla distribuzione su cui è calcolato [Lett. 35]: sull'unione, `ŷ` ed `ẽ` potrebbero compensarsi a vicenda; separatamente, ciascuna ha la garanzia piena. Il bersaglio di posa è un vettore per passo che concatena i quattro articolatori (§4.4.3): non ci sono più insiemi per articolatore.
-- **Tutto il batch effettivo per valutazione**, raccolto su tutte le GPU: 128 campioni per modalità in `SIGReg_sem`, fino a 128 × 32 passi per vista in `SIGReg_posa`. Il bias di minibatch è `O(1/N)`; 128 è il batch più piccolo testato da LeJEPA, ancora competitivo [Lett. 35] **[Nostra scelta]**.
+- **Tutto il batch effettivo per valutazione**, raccolto su tutte le GPU: 128 campioni per modalità in `SIGReg_sem`, fino a 128 clip per vista e passo in `SIGReg_posa`. Il bias di minibatch è `O(1/N)`; 128 è il batch più piccolo testato da LeJEPA, ancora competitivo [Lett. 35] **[Nostra scelta]**.
 
 #### 4.5.7 Obiettivo complessivo e bracci di ESP-1
 
 ```
-L  =  (1 − λ) · ( L_inv + L_anchor  +  E_fis  +  L_pred_sem )  +  λ · ( SIGReg_posa  +  SIGReg_sem )          λ = 0,05
+L  =  (1 − λ_P) · ( L_inv + L_anchor )  +  λ_P · SIGReg_posa                    λ_P = 0,04
+   +  (1 − λ) · ( E_fis  +  L_pred_sem )  +  λ · SIGReg_sem                    λ = 0,05
 ```
 
 `L_pred_sem` e `SIGReg_sem` dipendono dal braccio di ESP-1:
@@ -901,7 +902,8 @@ Tutti i bracci usano lo stesso batch effettivo di 128 clip, InfoNCE compreso (§
 
 | Scelta | Evidenza |
 |---|---|
-| λ = 0,05 fra termini predittivi e SIGReg | è la forma della loss di LeJEPA; λ = 0,05 è un *«default robusto»* e le prestazioni sono *«stabili al variare di λ»* [Lett. 35] |
+| λ = 0,05 fra termini predittivi e SIGReg | è la forma della loss di LeJEPA; λ = 0,05 è un *«default robusto»* e le prestazioni sono *«stabili al variare di λ»* [Lett. 35]; nel paper vale per 8–10 viste, da rivedere con il livello semantico |
+| λ_P = 0,04 sulla posa | lo 0,02 di LeJEPA per 4 viste a 256 campioni, raddoppiato per i ≤ 128 campioni per passo; dentro la zona stabile di LeWorldModel (`worldsign-posa.md` §4.2) |
 | Pesi dentro `E_fis` | quelli di V-JEPA 2.1 (§4.5.2) [Lett. 32] |
 | Pesi uguali fra i termini predittivi | sommare le loss con pesi uguali *«eguaglia o supera gli ottimizzatori multi-task complessi»* [Lett. 96] |
 
@@ -1039,18 +1041,18 @@ Stime con formule standard: un blocco transformer con MLP 4× ha ≈ `12·d²` p
 | Encoder video ViT-L | V-JEPA 2.1 | 300 M | — | — |
 | ├ LoRA r = 16, 24 blocchi (attenzione e MLP) | — | — | 7,08 M | vincolato |
 | └ LayerNorm e bias | — | — | 0,10 M | vincolato |
-| Encoder di posa: 4 parti a 128, temporale a 512, `Linear(512 → 256)` | da zero (§4.4.3) | — | 8,06 M | libero |
+| Encoder di posa: 4 parti a 128, temporale a 512, `Linear(512 → 192)` | da zero (§4.4.3) | — | 8,03 M | libero |
 | Predictor fisico, 12 blocchi, d = 384 | V-JEPA 2.1 **[Aperto: PC6]** | ~22 M | — | — |
 | ├ LoRA r = 16 (12 blocchi) | — | — | 1,33 M | vincolato |
 | ├ fusione multi-livello: 4 LayerNorm, Linear 4.096 → 1.024, Linear 1.024 → 384 | da zero, inizializzazione in §4.10 | — | 4,60 M | libero |
-| └ testa di lettura per passo (`4·384 → C`, `C = 256`) | da zero | — | 0,39 M | libero |
+| └ testa di lettura per passo (`4·384 → C`, `C = 192`) | da zero | — | 0,30 M | libero |
 | Predictor semantico: 4 blocchi d = 384, proiezioni `1024 → 384` e `384 → 512`, 8 query | da zero | — | 7,67 M | libero |
-| Decoder dell'ancora `D` (`256 → 138`) | da zero | — | 0,04 M | libero |
+| Decoder dell'ancora `D` (`192 → 138`) | da zero | — | 0,03 M | libero |
 | Testa testuale MLP, `768 → 512 → 512` | standard (stadio P) | — | 0,66 M | libero |
 | EmbeddingGemma-300M | — | 0 in GPU (precalcolato) | 0 | — |
-| **Totale** | | **≈ 326 M** | **≈ 29,9 M** | **8,5 vincolati · 21,4 liberi** |
+| **Totale** | | **≈ 326 M** | **≈ 29,8 M** | **8,5 vincolati · 21,3 liberi** |
 
-**Margine di ~0,06 M rispetto al tetto di 30 M** (conteggio misurato in `worldsign-architettura.md` §9: 29.939.466). Conseguenze:
+**Margine di ~0,2 M rispetto al tetto di 30 M** (conteggio misurato in `worldsign-architettura.md` §9: 29.799.434, con `C = 192` dal 6/10). Conseguenze:
 
 | Eventualità | Effetto sul totale |
 |---|---|
@@ -1106,7 +1108,7 @@ Valori **di partenza**, da calibrare nella dry run **[Nostra scelta]**:
 | Precisione | bf16, pesi master in fp32 per le LoRA |
 | Clipping del gradiente | nessuno, come V-JEPA 2.1 [Lett. 32] |
 | Media esponenziale dei pesi | **nessuna**, né come target né per la valutazione |
-| λ | **λ = 0,05** fra termini predittivi e SIGReg, come LeJEPA [Lett. 35]; **pesi uguali** fra i termini predittivi [Lett. 96]; nessuna calibrazione (§4.5.7) |
+| λ | **λ = 0,05** fra termini predittivi e SIGReg, come LeJEPA [Lett. 35], e **λ_P = 0,04** sulla posa (`worldsign-posa.md` §4.2); **pesi uguali** fra i termini predittivi [Lett. 96] (§4.5.7) |
 | Braccio InfoNCE | temperatura apprendibile (init 0,07); batch 128, come gli altri bracci |
 | ESP-4 (facoltativa) | frazione ε del rilassamento **[Aperto: PC7]** |
 
@@ -1135,7 +1137,7 @@ Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-
 | Misura | Motivo |
 |---|---|
 | Encoder video e predictor fisico congelati + LoRA | il vincolo più forte sulla capacità |
-| Tetto di 30 M di parametri addestrabili (≈ 29,9 M usati) | §3.4, `worldsign-posa.md` §3 |
+| Tetto di 30 M di parametri addestrabili (≈ 29,8 M usati) | §3.4, `worldsign-posa.md` §3 |
 | Stop-gradient fra i livelli; coseno sul learning rate della posa | il video non sposta il suo bersaglio, che rallenta mentre il video lo insegue |
 | Ancora di ricostruzione dei keypoint, invarianza fra viste | il target resta fedele al corpo e robusto al rumore del rilevatore |
 | Stochastic depth e dropout nel predictor semantico e nelle teste | regolarizzazione standard dei moduli da zero |
@@ -1248,7 +1250,7 @@ Nessuna ora-GPU di addestramento reale finché tutti i test non passano **[Nostr
 |---|---|
 | P1 | nessun canale in comune fra addestramento e validazione |
 | P2 | nessun segmento di YouTube-SL-25 sovrapposto a una clip di validazione o di test di OpenASL; nessun video dei test set di PHOENIX-2014T e CSL-Daily nel corpus (§3.9) |
-| P3 | parametri addestrabili tutti nel budget e sotto il tetto di 30 M (≈ 29,9 M) |
+| P3 | parametri addestrabili tutti nel budget e sotto il tetto di 30 M (≈ 29,8 M) |
 | P4 | i pesi congelati sono davvero congelati |
 | P5 | checksum dei pesi pre-addestrati |
 | P6 | i token mascherati sono **rimossi** dall'input dell'encoder; indici di contesto e di target disgiunti |
@@ -1603,7 +1605,7 @@ Per ogni ipotesi riportiamo l'enunciato, la base in letteratura, il test previst
 | Encoder: V-JEPA 2.1-L distillato o V-JEPA 2-L | **chiuso il 29/9: V-JEPA 2.1-L** (PC3, §4.4.1) | — |
 | Risoluzione: 256² o 384² | **chiuso il 29/9: 256² con crop** (PC4, §4.4.1) | — |
 | Dimensione di troncamento MRL | **chiuso il 29/9: nessun troncamento**, il vettore si usa a 768 (§4.4.4) | — |
-| Encoder di posa | **chiuso il 3/10**: l'encoder di worldSign adattato, da zero, `C = 256`, 8,06 M (`worldsign-posa.md`) | — |
+| Encoder di posa | **chiuso il 3/10, rivisto il 6/10**: l'encoder di worldSign adattato, da zero, senza dropout, `C = 192`, 8,03 M; 4 viste, SIGReg per passo, λ = 0,04 (`worldsign-posa.md`) | — |
 | Gerarchia e stadi | **chiuso il 3/10**: per livello, stadi P/F₀/F a confini di epoca, 15 epoche, pazienza 3 nello stadio F (`worldsign-gerarchia.md`) | — |
 | Soglie della fermata F1 sulla posa | proposta: IsoScore ≥ 0,8, R² di posizione delle mani ≥ 0,9, caduta dal massimo ≤ 0,02 | PC7 |
 | Probe della lingua separato dall'identità del canale | split per canale implementato; **non calcolabile** finché l'ASL delle clip di test viene da un solo canale | nuove clip di test dopo il download con l'ordine mescolato |
@@ -1633,7 +1635,7 @@ Proponiamo un **world model a energia con due livelli di astrazione** per la lin
 - **predice il significato** dal video intero, con lo schema di VL-JEPA, verso l'embedding della didascalia;
 - **allinea senza negativi**, imponendo l'uniformity con SIGReg;
 - usa l'**energia** — l'errore di predizione — per il retrieval e come misura di plausibilità;
-- **resta sotto i 30 M di parametri addestrabili** (≈ 29,9 M, di cui 8,1 M nell'encoder di posa), perché il corpus conta ~6.650 ore ma solo ~41.000 video e il rischio di overfitting è alto.
+- **resta sotto i 30 M di parametri addestrabili** (≈ 29,8 M, di cui 8,06 M nell'encoder di posa con il decoder), perché il corpus conta ~6.650 ore ma solo ~41.000 video e il rischio di overfitting è alto.
 
 ### 6.2 Perché il progetto è informativo in ogni caso
 

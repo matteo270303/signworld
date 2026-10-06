@@ -70,16 +70,48 @@ class SIGReg:
                 f"embedding dimension {embeddings.shape[1]} differs from the directions' "
                 f"{directions.shape[1]}"
             )
-        t = self._t.to(embeddings.device)
-        target = self._target.to(embeddings.device)
         projections = embeddings.float() @ directions.float().T
-        phase = projections[..., None] * t
+        phase = projections[..., None] * self._t.to(embeddings.device)
         sums = torch.stack([phase.cos().sum(dim=0), phase.sin().sum(dim=0)])
         count = torch.tensor(float(embeddings.shape[0]), device=embeddings.device)
         if reduce is not None:
             sums, count = reduce(sums), reduce(count)
-        real, imaginary = sums / count
-        integrand = ((real - target).pow(2) + imaginary.pow(2)) * target
         factor = count if samples is None else torch.tensor(float(samples))
-        per_direction = torch.trapezoid(integrand, t, dim=-1) * factor
+        per_direction = self._distance(sums, count) * factor
         return per_direction.mean()
+
+    def per_group(
+        self,
+        embeddings: Tensor,
+        members: Tensor,
+        directions: Tensor,
+        reduce: Callable[[Tensor], Tensor] | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        """The statistic of several groups of samples at once, and each group's sample count.
+
+        ``embeddings`` (groups, rows, dimensions); ``members`` (groups, rows) bool marks the
+        rows that are samples of each group, so groups of different sizes share one
+        computation. ``reduce`` sums over the GPUs, as in ``__call__``. Returns (groups,)
+        statistics, averaged over ``directions``, and (groups,) counts; a group with no
+        sample has a finite, meaningless value that the caller leaves out.
+        """
+        if embeddings.ndim != 3 or members.shape != embeddings.shape[:2]:  # noqa: PLR2004
+            raise ValueError("expected (groups, rows, dimensions) and (groups, rows) members")
+        projections = embeddings.float() @ directions.float().T
+        phase = projections[..., None] * self._t.to(embeddings.device)
+        weight = members.float()[..., None, None]
+        sums = torch.stack([(phase.cos() * weight).sum(dim=1), (phase.sin() * weight).sum(dim=1)])
+        count = members.float().sum(dim=1)
+        if reduce is not None:
+            sums, count = reduce(sums), reduce(count)
+        per_direction = self._distance(sums, count) * count[:, None]
+        return per_direction.mean(dim=-1), count
+
+    def _distance(self, sums: Tensor, count: Tensor) -> Tensor:
+        """``∫ |φ̂ - φ|² w`` by the trapezoidal rule, (..., directions), from the cosine and sine
+        sums (2, ..., directions, knots) of ``count`` samples (shape ``...``)."""
+        t = self._t.to(sums.device)
+        target = self._target.to(sums.device)
+        real, imaginary = sums / count.clamp_min(1.0)[..., None, None]
+        integrand = ((real - target).pow(2) + imaginary.pow(2)) * target
+        return torch.trapezoid(integrand, t, dim=-1)

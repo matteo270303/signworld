@@ -96,12 +96,12 @@ Con l'encoder di posa addestrato da zero, il regolarizzatore è ciò che impedis
 | — | **SIGReg** (θ\*) | vincolo sull'intera distribuzione: gaussiana isotropa, test di Epps–Pulley su direzioni casuali [Lett. 35] | è θ\* | 0 | Concordata |
 | 9 | **VICReg** | vincolo sui momenti del secondo ordine: **varianza** (deviazione standard di ogni dimensione sopra una soglia γ) e **covarianza** (penalità sui termini fuori diagonale) [VICReg, Bardes, Ponce e LeCun, ICLR 2022, https://arxiv.org/abs/2105.04906] | `esp8_vicreg.yaml` (da creare; serve codice) | ≈ 1 L | **Rimandata** (3/10) |
 
-**Dove si applica.** VICReg prende il posto di SIGReg **sugli stessi tensori** di θ\*: il bersaglio di posa `s` e la sua vista `s̃`, per passo, al posto di `SIGReg_posa`, e `ŷ` ed `ẽ`, al posto di `SIGReg_sem`, se il braccio scelto come θ\* lo prevede. La variabile è una sola: la famiglia del regolarizzatore.
+**Dove si applica.** VICReg prende il posto di SIGReg **sugli stessi tensori** di θ\*: le 4 viste del bersaglio di posa, passo per passo, al posto di `SIGReg_posa`, e `ŷ` ed `ẽ`, al posto di `SIGReg_sem`, se il braccio scelto come θ\* lo prevede. La variabile è una sola: la famiglia del regolarizzatore.
 
 **Domanda.** Quale dei due tiene informativo il target di posa addestrato da zero e disperso lo spazio semantico?
 
 Da decidere prima del codice **[Aperto]**:
-- **l'invarianza:** VICReg ha tre termini. Sulla posa l'invarianza c'è già (`L_inv` fra `s` e `s̃`, `worldsign-posa.md` §4.4); sul livello semantico il suo ruolo lo può svolgere `E_sem`. Proposta: varianza e covarianza in più dove oggi c'è SIGReg;
+- **l'invarianza:** VICReg ha tre termini. Sulla posa l'invarianza c'è già (`L_inv` fra le 4 viste, `worldsign-posa.md` §4.2); sul livello semantico il suo ruolo lo può svolgere `E_sem`. Proposta: varianza e covarianza in più dove oggi c'è SIGReg;
 - **i pesi:** VICReg usa 25 / 25 / 1 per invarianza, varianza e covarianza; va fissato il peso dei suoi termini rispetto a quelli predittivi (per SIGReg è λ = 0,05);
 - **l'espansore:** VICReg applica i termini all'uscita di un MLP espansore; qui si può usarlo oppure vincolare direttamente `s`, `ŷ` ed `ẽ`, come fa SIGReg.
 

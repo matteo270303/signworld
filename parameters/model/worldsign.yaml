@@ -26,7 +26,7 @@ fusion:                       # §4.4.5: mlp (V-JEPA 2.1) | linear | residual  [
 physical:
   enabled: true
   lora: {rank: 16, alpha: 16.0, targets: [qkv, proj, fc1, fc2]}
-  target_dim: 256             # C, width of the pose target s_t (pose_encoder.output_dim)
+  target_dim: 192             # C, width of the pose target s_t (pose_encoder.output_dim)
   mask_index: 0               # the only trained mask token (PC6)
   context_lambda: 0.5         # λ of the visible tokens (V-JEPA 2.1)
   lambda_progressive: false   # V-JEPA 2.1 cooldown: λ from the first step
@@ -50,7 +50,8 @@ semantic:                     # §4.4.6: VL-JEPA's scheme, 4 blocks at 384, from
 
 losses:                       # §4.5.7
   arm: A
-  sigreg_weight: 0.05         # λ, as LeJEPA
+  sigreg_weight: 0.05         # λ of the semantic level (to be reviewed with it)
+  pose_sigreg_weight: 0.04    # λ of the pose: LeJEPA's 0.02 for 4 views at N = 256, x2 for N <= 128
   sigreg_directions: 1024     # LeJEPA's recommendation
   sigreg_knots: 17
   uniformity_t: 2.0
@@ -76,11 +77,22 @@ pose_encoder:                 # docs/worldsign-posa.md: worldSign's encoder, fro
   depth: 2                    # temporal transformer at 4 x 128 = 512
   heads: 8
   mlp_ratio: 4.0
-  dropout: 0.1
-  output_dim: 256             # C: LayerNorm(512) + Linear(512 -> 256)
+  dropout: 0.0                # the target sg(s) must not depend on a dropout draw
+  output_dim: 192             # C: LayerNorm(512) + Linear(512 -> 192), LeWM's best size
   learning_rate: 3.0e-4       # worldSign's value
   warmup_fraction: 0.2        # warm-up over 20 % of the run, then a cosine to 0
-  views: {rotation_degrees: 10.0, noise: 0.01}   # the view of L_inv: nuisances only
+  views:                      # 3 draws of nuisances + the clean sequence: 4 views (posa §4.1)
+    count: 3
+    rotation_degrees: 10.0    # always, per clip
+    aspect: 0.15              # horizontal scale in [0.85, 1.15] (SPOTER), with probability 0.5
+    shear: 0.1                # x <- x + h·y, |h| <= 0.1, with probability 0.5
+    affine_probability: 0.5
+    noise_body: 0.003         # Gaussian noise at the jitter measured on OpenASL
+    noise_hands: 0.01
+    noise_face: 0.002
+    mask_probability: 0.5     # 9 finger or face joints hidden over 8 steps (PSTL)
+    mask_steps: 8
+    mask_joints: 9
 
 text:                         # §4.4.4: EmbeddingGemma pre-computed, centred per language
   input_dim: 768              # whole vector, no truncation

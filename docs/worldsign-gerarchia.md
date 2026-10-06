@@ -18,7 +18,7 @@ Stato: 3/10/2026. Decisioni della revisione del 2–3/10 **[Nostra scelta]**.
 | Struttura | **H-JEPA addestrato per livello**: il livello alto legge la rappresentazione del livello basso, senza modificarla |
 | Livello semantico | legge `sg(Enc_θ(x))`, l'uscita dell'ultimo blocco dell'encoder video sulla clip intera; **nessun condizionamento** sulla predizione fisica |
 | Livello fisico | unico a modificare l'encoder video (LoRA); bersaglio `sg(s)` |
-| Lettura fisica | per passo: le medie dei 4 riquadri concatenate, poi Linear(1536 → 256) |
+| Lettura fisica | per passo: le medie dei 4 riquadri concatenate, poi Linear(1536 → 192) |
 | Calendario | 15 epoche; stadi **P** (epoca 1), **F₀** (epoca 2), **F** (dall'epoca 3) |
 | Learning rate | warm-up di **2 epoche** per ogni gruppo dalla sua entrata; posa: warm-up del 20 % e coseno |
 | Early stopping | pazienza **3** epoche, contata solo nello stadio F |
@@ -66,7 +66,7 @@ In pratica la loss è **una sola**, `L = L_0 + E_fis + L_2`, con un solo backwar
 - in `L_0`: invarianza, ancora e SIGReg sulla posa;
 - in `L_2`: `E_sem` e SIGReg semantico.
 
-La composizione resta quella del progetto, `(1 − λ)·(termini predittivi) + λ·(SIGReg)` con λ = 0,05.
+La composizione resta quella del progetto, `(1 − λ)·(termini predittivi) + λ·(SIGReg)`, livello per livello: λ = 0,04 sulla posa (`worldsign-posa.md` §4.2), λ = 0,05 sul semantico.
 
 **Verifica prima di lanciare (P17).** Su un batch piccolo:
 - `E_fis` non deve dare gradiente al modello di posa;
@@ -85,7 +85,7 @@ Se una di queste condizioni fallisce, la run non parte.
 
 ```
 m_{t,a} = media dei token predetti (visibili e nascosti) nel riquadro dell'articolatore a     (0 se il riquadro è vuoto)
-ŝ_t     = Linear(4·384 → 256)( [ m_{t,corpo}, m_{t,sx}, m_{t,dx}, m_{t,volto} ] )
+ŝ_t     = Linear(4·384 → 192)( [ m_{t,corpo}, m_{t,sx}, m_{t,dx}, m_{t,volto} ] )
 ```
 
 Rispecchia il lato posa: una media per articolatore, poi la concatenazione.
@@ -97,7 +97,7 @@ n^m_{b,t} = Σ_a |riquadro a ∩ nascosti al passo t|          w^v_{b,t} = Σ_a 
 ω_{b,t}   = c_{b,t} · ( n^m_{b,t} + λ_ctx · w^v_{b,t} )       λ_ctx = 0,5;  peso del token visibile = 1 (o 1/√d)
 c_{b,t}   = media della presenza dei 69 giunti al passo t
 
-E_fis^k = Σ_{b,t} ω_{b,t} · (1/256)‖ ŝ^k_{b,t} − LN(sg(s_{b,t})) ‖₁  /  Σ_{b,t} ω_{b,t}
+E_fis^k = Σ_{b,t} ω_{b,t} · (1/192)‖ ŝ^k_{b,t} − LN(sg(s_{b,t})) ‖₁  /  Σ_{b,t} ω_{b,t}
 E_fis   = media sui 2 tipi di maschera k
 ```
 

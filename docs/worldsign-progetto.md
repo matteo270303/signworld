@@ -584,7 +584,7 @@ W'  =  W  +  (α / r) · B · A
 
 - **Ingresso:** i token di posa (69 giunti × 32 passi, x, y e presenza dei due frame), ricanonicalizzati frame per frame fra le spalle; 9 canali per giunto e frame (globale, locale rispetto alla radice della parte, osso, velocità, valido), i due frame del passo concatenati.
 - **Architettura:** un transformer spaziale per articolatore (corpo, mani, volto; pesi non condivisi), media sui giunti; i 4 token **concatenati** (512); un transformer temporale a 512 sui 32 passi; `LayerNorm` e `Linear(512 → 192)`, senza dropout. **8,03 M parametri.** Il bersaglio è **un vettore per passo**, `s_t ∈ ℝ¹⁹²`.
-- **Addestramento:** invarianza fra 4 viste (la sequenza pulita e tre estrazioni di disturbi: camera, rumore del rilevatore, giunti nascosti) nella forma di LeJEPA [Lett. 35]; SIGReg su ogni vista passo per passo, come LeWorldModel; ancora di ricostruzione dei keypoint; λ = 0,04; senza EMA. Learning rate 3e-4, warm-up sul 20 % della run e coseno (`worldsign-posa.md` §4).
+- **Addestramento:** invarianza fra 4 viste (la sequenza pulita e tre estrazioni di disturbi: camera, rumore del rilevatore, giunti nascosti) nella forma di LeJEPA [Lett. 35]; SIGReg su ogni vista passo per passo, come LeWorldModel; ancora di ricostruzione dei keypoint; λ = 0,04; senza EMA. Learning rate 3e-4, warm-up di 2 epoche (lo stadio P) e coseno (`worldsign-posa.md` §4).
 - **Rapporto con il livello fisico:** `E_fis` legge `LN(sg(s))`. Il video non può spostare il bersaglio.
 - **S-JEPA** [Lett. 99] è replicato a parte, sui dati del paper (`signworld/models/sjepa/`), per un adattamento futuro; non è collegato al modello. Le misure di PC5 riguardavano un S-JEPA pre-addestrato che non fa più parte del piano.
 
@@ -1101,9 +1101,9 @@ Valori **di partenza**, da calibrare nella dry run **[Nostra scelta]**:
 | Micro-batch per SIGReg | 128 clip, uguale in tutti i bracci: 128 campioni per modalità (`{ŷ}` e `{ẽ}` separatamente) e fino a 128 × 32 passi per vista della posa |
 | **Passi** | al massimo, senza early stopping: 15 × ~3,2 M ≈ 48 M clip viste → **≈ 375.000 passi** a batch 128 **[Nostra stima, da ricalcolare quando la cardinalità del dataset è definitiva]** |
 | Learning rate | ricerca su {1e-4, 2e-4, 5e-4} nella dry run (PC7), a batch 128; **3e-4 per l'encoder di posa** (`worldsign-posa.md` §4.3) |
-| **Schedule** | **un gruppo per famiglia** (`worldsign-gerarchia.md` §6.2): ogni famiglia tranne la posa sale linearmente per **2 epoche** dalla sua entrata, poi resta costante; la posa sale sul **20 %** della run, poi scende con un **coseno** a 0. Su tutto, il **cooldown di V-JEPA 2** [Lett. 31]: lineare a 0 sul 5 % dei passi. **Con l'early stopping** il cooldown non resta fissato in fondo: si riparte dal checkpoint migliore e si fa lì; lo schedule lo consente, perché *«si possono avviare più cooldown da checkpoint diversi della fase costante»* [Lett. 31] |
+| **Schedule** | **un gruppo per famiglia** (`worldsign-gerarchia.md` §6.2): ogni famiglia tranne la posa sale linearmente per **2 epoche** dalla sua entrata, poi resta costante; la posa sale per **2 epoche** (lo stadio P), poi scende con un **coseno** a 0. Su tutto, il **cooldown di V-JEPA 2** [Lett. 31]: lineare a 0 sul 5 % dei passi. **Con l'early stopping** il cooldown non resta fissato in fondo: si riparte dal checkpoint migliore e si fa lì; lo schedule lo consente, perché *«si possono avviare più cooldown da checkpoint diversi della fase costante»* [Lett. 31] |
 | Peso λ della loss sui token visibili | 0,5 con warm-up progressivo, come V-JEPA 2.1 [Lett. 32] |
-| **Durata degli stadi** | P = epoca 1 · F₀ = epoca 2 · F = dall'epoca 3 **[Nostra scelta, 3/10]** |
+| **Durata degli stadi** | P = epoche 1–2 · F₀ = epoca 3 · F = dall'epoca 4 **[Nostra scelta, 3/10; P allungato il 6/10, `worldsign-gerarchia.md` §6.1]** |
 | Validazione e checkpoint | ogni ~500.000 clip viste (4.000 passi a batch 128), su 2.000 clip dello split held-out channel |
 | Precisione | bf16, pesi master in fp32 per le LoRA |
 | Clipping del gradiente | nessuno, come V-JEPA 2.1 [Lett. 32] |
@@ -1116,13 +1116,13 @@ Valori **di partenza**, da calibrare nella dry run **[Nostra scelta]**:
 
 ```
 Stadio 0    precalcolo: selezione dei 64 frame, pose, embedding testuali, medie per lingua
-Stadio P    epoca 1         posa + semantico: encoder di posa, predictor semantico, testa del testo; LoRA ferme
-Stadio F₀   epoca 2         + livello fisico: fusione e testa di lettura; LoRA ancora ferme
-Stadio F    dall'epoca 3    tutto: anche la LoRA del predictor fisico e dell'encoder video
+Stadio P    epoche 1–2      posa + semantico: encoder di posa, predictor semantico, testa del testo; LoRA ferme
+Stadio F₀   epoca 3         + livello fisico: fusione e testa di lettura; LoRA ancora ferme
+Stadio F    dall'epoca 4    tutto: anche la LoRA del predictor fisico e dell'encoder video
 Stadio 3    solo sul modello finale: fine-tuning su OpenASL, PHOENIX-2014T, CSL-Daily; poi SLT, SLR, SLP
 ```
 
-**Perché lo stadio P [Nostra argomentazione].** La LoRA non deve inseguire un bersaglio di posa ancora casuale; il semantico parte subito, su V-JEPA 2.1 pre-addestrato, come VL-JEPA [Lett. 34].
+**Perché lo stadio P [Nostra argomentazione].** La LoRA non deve inseguire un bersaglio di posa ancora casuale; il semantico parte subito, su V-JEPA 2.1 pre-addestrato, come VL-JEPA [Lett. 34]. Dura quanto il warm-up della posa (2 epoche): quando entra il livello fisico il bersaglio ha già cominciato a rallentare.
 
 **Perché lo stadio F₀** [Lett. 95]. Addestrare insieme una testa casuale e il corpo pre-addestrato *«distorce le feature pre-addestrate»*; addestrare prima la sola testa dà +1 % in distribuzione e +10 % fuori distribuzione rispetto al fine-tuning completo. Stadi da un'epoca hanno precedenti in ULMFiT e LLaVA (`worldsign-gerarchia.md` §6.1).
 
@@ -1319,9 +1319,9 @@ La run di gate (§4.12.2) si ferma in quattro punti fissati in anticipo; a ogni 
 
 | Fermata | Criteri (devono passare tutti) | Se uno fallisce |
 |---|---|---|
-| **F1 · fine dello stadio P** (epoca 1) | **posa:** `L_anchor` e `SIGReg_posa` in calo · effective rank di `s` > 0,5× il passo 0 · IsoScore di `s` ≥ 0,8 · R² di posizione delle mani da `s` ≥ 0,9. **Semantico:** `γ_sem` > 0,3 · `SIGReg_sem` in calo · R@1 held-out > 5× il caso · test col rumore superato · query non collassate | stop → triage della posa o del semantico |
-| **F2 · fine dello stadio F₀** (epoca 2) | `E_fis` in calo · R² dei passi soprattutto visibili > 0,9 · la dinamica batte la baseline · nessun leak | stop → triage del livello fisico |
-| **F3 · fine della prima epoca di F** (epoca 3) | `E_fis` in calo · nessuna LoRA sposta il suo strato oltre il 10 % · deriva dell'encoder ≥ 0,5 · media di R@1 T2V e V2T > media della baseline ridge · `ω` < 0,95 · hubness stabile in entrambe le gallerie · curva estrapolata della media di R@1 compatibile con la soglia `X` (calcolata sulla media di C²RL, §4.12.2) · nessun conflitto stabile fra gradienti | stop o correzione |
+| **F1 · fine dello stadio P** (epoca 2) | **posa:** `L_anchor` e `SIGReg_posa` in calo · effective rank di `s` > 0,5× il passo 0 · IsoScore di `s` ≥ 0,8 · R² di posizione delle mani da `s` ≥ 0,9. **Semantico:** `γ_sem` > 0,3 · `SIGReg_sem` in calo · R@1 held-out > 5× il caso · test col rumore superato · query non collassate | stop → triage della posa o del semantico |
+| **F2 · fine dello stadio F₀** (epoca 3) | `E_fis` in calo · R² dei passi soprattutto visibili > 0,9 · la dinamica batte la baseline · nessun leak | stop → triage del livello fisico |
+| **F3 · fine della prima epoca di F** (epoca 4) | `E_fis` in calo · nessuna LoRA sposta il suo strato oltre il 10 % · deriva dell'encoder ≥ 0,5 · media di R@1 T2V e V2T > media della baseline ridge · `ω` < 0,95 · hubness stabile in entrambe le gallerie · curva estrapolata della media di R@1 compatibile con la soglia `X` (calcolata sulla media di C²RL, §4.12.2) · nessun conflitto stabile fra gradienti | stop o correzione |
 | **F4 · fine** | tabella del gate su OpenASL | come da gate |
 
 Una correzione che tocca solo componenti **successivi** alla fermata riparte dall'ultimo checkpoint valido; una che tocca componenti **precedenti** riparte da zero **[Nostra proposta]**.

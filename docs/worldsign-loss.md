@@ -70,6 +70,8 @@ Il braccio C di ESP-1 (InfoNCE) è il confronto contrastivo, a parità di batch.
 
 È la loss di V-JEPA 2.1 [Lett. 32], portata dal token al passo (`worldsign-gerarchia.md` §4). Seguiamo il **cooldown** di V-JEPA 2.1 (`cooldown-256px-64f.yaml`): clip da 64 frame, partendo da un modello già addestrato, come facciamo noi.
 
+**Nessuna SIGReg a questo livello** (`worldsign-gerarchia.md` §4.1): agisce solo attraverso il bersaglio `s`. La MSE senza LayerNorm di LeWorldModel è un'ablation facoltativa (F8, `worldsign-ablation.md` §3.2).
+
 **Target normalizzato e stoppato.** Come V-JEPA 2.1 fa con i token del teacher, il target si normalizza sui suoi canali, **senza parametri affini**, e arriva con il gradiente fermato:
 
 ```
@@ -318,9 +320,9 @@ Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: l
 
 | Stadio | Epoche | Livelli | Termini |
 |---|---|---|---|
-| P | 1 | posa, semantico | posa, `L_pred_sem`, `SIGReg_sem` |
-| F₀ | 2 | + fisico (teste nuove) | tutti |
-| F e cooldown | 3 → fine | tutti (con le LoRA) | tutti |
+| P | 1–2 | posa, semantico | posa, `L_pred_sem`, `SIGReg_sem` |
+| F₀ | 3 | + fisico (teste nuove) | tutti |
+| F e cooldown | 4 → fine | tutti (con le LoRA) | tutti |
 
 ---
 
@@ -337,9 +339,9 @@ Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: l
 | **LayerScale** | rami residui del predictor semantico | init 1e-4 **[Aperto: PC7]** | aggiornamenti grandi all'inizio: ogni blocco parte vicino all'identità |
 | **Ancora** | `s` → keypoint | peso uguale agli altri termini della posa | perdita di informazione cinematica nel target |
 | **Invarianza fra viste** | le 4 viste della posa contro il loro centro | peso uguale | dipendenza dal rumore del rilevatore, dal punto di vista e dai giunti persi |
-| **Schedule della posa** | encoder di posa | picco 3e-4, warm-up 20 % della run, coseno a 0 | un target che continua a muoversi mentre il video lo insegue |
+| **Schedule della posa** | encoder di posa | picco 3e-4, warm-up di 2 epoche (lo stadio P), coseno a 0 | un target che accelera o continua a muoversi mentre il video lo insegue |
 | **Aumentazioni** | video e keypoint | jitter ±10 %, colore ±0,2 **[Aperto]**, niente flip | scorciatoie su inquadratura e colore |
-| **Curriculum** | stadi P e F₀ | un'epoca ciascuno; warm-up di 2 epoche per ogni gruppo che entra | che la LoRA insegua un bersaglio casuale; che le teste casuali distorcano le feature pre-addestrate [Lett. 95] |
+| **Curriculum** | stadi P e F₀ | P 2 epoche (il warm-up della posa), F₀ un'epoca; warm-up di 2 epoche per ogni gruppo che entra | che la LoRA insegua un bersaglio casuale; che le teste casuali distorcano le feature pre-addestrate [Lett. 95] |
 | **Early stopping** | metrica held-out channel | pazienza 3 epoche, contata nello stadio F, poi cooldown dal checkpoint migliore | overfitting sui canali |
 | **Split per canale** | dati | 10 % dei canali per lingua dei segni **[Aperto]** | misurare la generalizzazione su clip dello stesso segnante |
 
@@ -347,7 +349,7 @@ Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: l
 
 **Ottimizzazione** (`worldsign-gerarchia.md` §6.2).
 - AdamW `β = (0,9; 0,999)`, bf16 con pesi in fp32, batch effettivo 128; un gruppo per famiglia del curriculum.
-- Ogni famiglia tranne la posa: warm-up lineare di 2 epoche dalla sua entrata, poi costante; la posa: warm-up sul 20 % della run, poi coseno a 0. Su tutto, il cooldown di V-JEPA 2: lineare a 0 sul 5 % dei passi, dal checkpoint migliore.
+- Ogni famiglia tranne la posa: warm-up lineare di 2 epoche dalla sua entrata, poi costante; la posa: warm-up di 2 epoche (lo stadio P), poi coseno a 0. Su tutto, il cooldown di V-JEPA 2: lineare a 0 sul 5 % dei passi, dal checkpoint migliore.
 - Learning rate base **[Aperto: PC7, {1e-4, 2e-4, 5e-4}]**; posa 3e-4.
 
 ---

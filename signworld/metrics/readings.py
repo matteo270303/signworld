@@ -116,6 +116,47 @@ def stepwise_sigreg_ratio(
     return float(statistics[counted].mean()) / _GAUSSIAN_SIGREG
 
 
+@dataclass(frozen=True, slots=True)
+class BasisDrift:
+    """How a representation changed between two readings of the same rows.
+
+    ``correlation``: the mean, over the channels, of the correlation of each channel with
+    itself. ``aligned``: the same once the earlier reading is turned onto the later by the best
+    rotation (orthogonal Procrustes). A large ``rotation``, their gap, says the basis turned: a
+    rotation leaves SIGReg, the invariance and the anchor unchanged, so nothing pins it, and
+    CKA does not see it. The rotation is fitted on some rows and both correlations are read on
+    the others: fitted and read on the same rows, it would align even unrelated readings
+    (0.18 for 4,000 rows of 192 independent channels).
+    """
+
+    correlation: float
+    aligned: float
+
+    @property
+    def rotation(self) -> float:
+        return self.aligned - self.correlation
+
+    @classmethod
+    def between(cls, earlier: Tensor, later: Tensor, fit: Tensor) -> "BasisDrift":
+        """``earlier`` and ``later`` (rows, channels): the same rows, read twice; ``fit``
+        (rows,) bool: the rows the rotation is fitted on, the rest are read."""
+        if earlier.shape != later.shape or earlier.ndim != 2:  # noqa: PLR2004
+            raise ValueError("expected two readings (rows, channels) of the same rows")
+        if bool(fit.all()) or not bool(fit.any()):
+            raise ValueError("the rotation needs rows to fit on and rows to be read on")
+        x, y = earlier.double(), later.double()
+        left, _, right = torch.linalg.svd(centered(x[fit]).T @ centered(y[fit]))
+        held, read = centered(x[~fit]), centered(y[~fit])
+        turned = held @ (left @ right)
+        return cls(_channel_correlation(held, read), _channel_correlation(turned, read))
+
+
+def _channel_correlation(x: Tensor, y: Tensor) -> float:
+    """Mean over the channels of the correlation of ``x[:, c]`` with ``y[:, c]`` (centred)."""
+    scale = (x.norm(dim=0) * y.norm(dim=0)).clamp_min(1e-12)
+    return float(((x * y).sum(dim=0) / scale).mean())
+
+
 def ridge_r2(
     features: Tensor, targets: Tensor, weights: Tensor, fit: Tensor, penalty: float = 1e-3
 ) -> float:

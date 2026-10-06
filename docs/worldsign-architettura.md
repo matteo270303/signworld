@@ -220,7 +220,7 @@ L'encoder di worldSign adattato al tubelet di V-JEPA (`pose_features.py`, `pose_
 | 5 | **transformer temporale**: 2 `TransformerEncoderLayer` pre-norm (d = 512, 8 teste, FFN 2.048, senza dropout) | `(B, 32, 512)` | 6.304.768 |
 | 6 | `LayerNorm(512)` + `Linear(512 → 192)` | `(B, 32, 192)` = `s_t` | 99.520 |
 
-**Totale: 8.025.408**, tutti addestrabili, gruppo proprio con learning rate di picco 3e-4, warm-up sul 20 % della run e coseno fino a 0. In addestramento l'encoder gira in un solo passaggio sulle 4 viste (4B sequenze, `worldsign-posa.md` §4.1).
+**Totale: 8.025.408**, tutti addestrabili, gruppo proprio con learning rate di picco 3e-4, warm-up di 2 epoche (lo stadio P) e coseno fino a 0. In addestramento l'encoder gira in un solo passaggio sulle 4 viste (4B sequenze, `worldsign-posa.md` §4.1).
 
 ### 5.1 Decoder dell'ancora `D`
 

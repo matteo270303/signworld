@@ -4,7 +4,7 @@ A group's learning rate is its peak times ``GroupSchedule.factor`` times ``Coold
 
 * every family but the pose is 0 before it enters training, rises linearly for
   ``activation_warmup_epochs`` from its entry (LLaVA's warm-up at every stage), then stays;
-* the pose rises linearly over ``pose_encoder.warmup_fraction`` of the run, then follows a
+* the pose rises linearly over ``pose_encoder.warmup_epochs`` (stage P), then follows a
   cosine to 0 at the planned end: the target slows down while the video chases it;
 * the cooldown is V-JEPA 2's: from the end of the constant phase, or from the best checkpoint
   when early stopping ends it, every rate falls linearly to 0.
@@ -77,7 +77,7 @@ def group_schedules(
     schedules: dict[str, GroupSchedule] = {}
     for family, start in curriculum.entries.items():
         if family == POSE:
-            warmup = max(1, round(config.pose_encoder.warmup_fraction * total_steps))
+            warmup = max(1, round(config.pose_encoder.warmup_epochs * curriculum.steps_per_epoch))
             schedules[family] = GroupSchedule(start, warmup, decay_end=total_steps)
         else:
             schedules[family] = GroupSchedule(start, activation_warmup)

@@ -41,6 +41,7 @@ from signworld.loss.worldsign import POSE_TERMS
 from signworld.metrics.directions import DIRECTIONS
 from signworld.metrics.measures import collect, model_measures, pose_target_measures, split_measures
 from signworld.metrics.readings import (
+    BasisDrift,
     Spread,
     gradient_norms,
     keypoint_errors,
@@ -170,6 +171,7 @@ def _rules(s: DiagnosticsSettings) -> list[_Rule]:
         _Rule("noise_drop", "below", s.noise_drop_min, "the model does not look at the video"),
         _Rule("s_sigreg", "above_ratio", s.sigreg_growth_max, "the pose target leaves N(0, I)"),
         _Rule("pose_r2_drop_*", "above", s.pose_r2_drop_max, "the pose target loses kinematics"),
+        _Rule("s_rotation", "above", s.rotation_max, "the pose target's basis turns"),
         _Rule("excluded_part1", "above", s.excluded_hands_max, "the left hand is mostly excluded"),
         _Rule("excluded_part2", "above", s.excluded_hands_max, "the right hand is mostly excluded"),
         _Rule("query_cosine", "above", s.query_cosine_max, "the queries collapsed"),
@@ -197,6 +199,8 @@ class _References:
     latent: Tensor | None = None
     features: Tensor | None = None
     residual: Tensor | None = None
+    previous: Tensor | None = None
+    """The pose target on the probe batch at the previous probe reading, for its basis drift."""
 
 
 class Monitor:
@@ -543,7 +547,8 @@ class Monitor:
     def _probe_readings(self, step: int) -> dict[str, float]:
         """Isotropy, kinematic content per articulator and speed of the pose target on the fixed
         probe batch. The R² of each articulator is compared with its best so far: a target
-        trained from scratch must gain kinematics, and must not lose what it has gained."""
+        trained from scratch must gain kinematics, and must not lose what it has gained. Against
+        the previous probe reading, the drift of its basis (``BasisDrift``)."""
         found = self._probe_latent()
         if found is None:
             return {}
@@ -563,6 +568,17 @@ class Monitor:
         out["probe_rank"] = target["rank"]
         out["probe_sigreg"] = target["sigreg"]
         out["cka_s"] = linear_cka(latent.flatten(0, 1), reference.flatten(0, 1))
+        clips, steps = latent.shape[:2]
+        present = weights.mean(-1).flatten() > 0
+        first_half = (torch.arange(clips) < clips // 2)[:, None].expand(clips, steps).flatten()
+        rows = latent.flatten(0, 1)[present]
+        previous = self.references.previous
+        if previous is not None and clips > 1:
+            drift = BasisDrift.between(previous.flatten(0, 1)[present], rows, first_half[present])
+            out["s_basis_correlation"] = drift.correlation
+            out["s_aligned_correlation"] = drift.aligned
+            out["s_rotation"] = drift.rotation
+        self.references.previous = latent
         for name in PARTS:
             for kind in ("position", "velocity"):
                 key = f"pose_r2_{kind}_{name}"

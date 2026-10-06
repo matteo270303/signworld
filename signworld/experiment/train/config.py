@@ -227,8 +227,9 @@ class PoseEncoderSettings(FrozenModel):
     above the 125 linear components of 99.9 % of a step's pose on OpenASL."""
     learning_rate: PositiveFloat = 3e-4
     """Peak learning rate of the pose family (worldSign's value)."""
-    warmup_fraction: float = Field(default=0.2, gt=0.0, lt=1.0)
-    """Linear warm-up over this share of the run, then a cosine to 0 at its planned end."""
+    warmup_epochs: PositiveFloat = 2.0
+    """Linear warm-up over these epochs, stage P, then a cosine to 0 at the planned end of the
+    run: the target is already slowing down when the physical level starts chasing it."""
     views: PoseViewSettings = Field(default_factory=PoseViewSettings)
 
     @model_validator(mode="after")
@@ -252,8 +253,8 @@ class TextSettings(FrozenModel):
 class StageSettings(FrozenModel):
     """Epochs of the stages before F, which lasts to the end (gerarchia §6.1)."""
 
-    pose_epochs: PositiveInt = 1
-    """Stage P: the pose and semantic levels alone."""
+    pose_epochs: PositiveInt = 2
+    """Stage P: the pose and semantic levels alone, while the pose's learning rate warms up."""
     heads_epochs: PositiveInt = 1
     """Stage F0: plus the new modules of the physical level, every LoRA still frozen."""
 
@@ -350,6 +351,10 @@ class DiagnosticsSettings(FrozenModel):
     sigreg_growth_max: float = 1.5
     pose_r2_drop_max: float = 0.02
     """Largest fall of the probe R² of the keypoints from s below its best so far."""
+    rotation_max: float = 0.1
+    """Largest gap between the channel correlations of s, from one probe reading to the next,
+    after and before aligning it by a rotation: above it the target's basis turns while the
+    physical read-out chases it (gerarchia §4.1) [our choice]."""
     pose_r2_min: float = 0.9
     """Stop F1: position R² of both hands from s on the probe batch [Aperto: PC7]."""
     isoscore_min: float = 0.8
@@ -427,6 +432,16 @@ class WorldSignConfig(FrozenModel):
             raise ValueError(
                 f"the physical head predicts {self.physical.target_dim} channels and the pose "
                 f"encoder gives {self.pose_encoder.output_dim}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _target_slows(self) -> Self:
+        warmup, stage = self.pose_encoder.warmup_epochs, self.training.stages.pose_epochs
+        if self.physical.enabled and warmup > stage:
+            raise ValueError(
+                f"the pose warms up over {warmup} epochs, past stage P ({stage}): the target "
+                "would still be speeding up when the physical level starts chasing it"
             )
         return self
 

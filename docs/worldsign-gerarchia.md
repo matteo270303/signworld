@@ -7,7 +7,7 @@ Documenti collegati:
 - `worldsign-architettura.md` e `worldsign-loss.md`: i componenti e i termini;
 - `worldsign-ablation.md`: le ablation che cambiano la gerarchia (globale, ESP-2, ESP-6, ESP-8).
 
-Stato: 3/10/2026. Decisioni della revisione del 2–3/10 **[Nostra scelta]**.
+Stato: 6/10/2026. Decisioni della revisione del 2–3/10 **[Nostra scelta]**; stadi, warm-up della posa e SIGReg al livello fisico rivisti il 6/10 sul confronto con LeJEPA e LeWorldModel (§4.1).
 
 ---
 
@@ -19,8 +19,9 @@ Stato: 3/10/2026. Decisioni della revisione del 2–3/10 **[Nostra scelta]**.
 | Livello semantico | legge `sg(Enc_θ(x))`, l'uscita dell'ultimo blocco dell'encoder video sulla clip intera; **nessun condizionamento** sulla predizione fisica |
 | Livello fisico | unico a modificare l'encoder video (LoRA); bersaglio `sg(s)` |
 | Lettura fisica | per passo: le medie dei 4 riquadri concatenate, poi Linear(1536 → 192) |
-| Calendario | 15 epoche; stadi **P** (epoca 1), **F₀** (epoca 2), **F** (dall'epoca 3) |
-| Learning rate | warm-up di **2 epoche** per ogni gruppo dalla sua entrata; posa: warm-up del 20 % e coseno |
+| Calendario | 15 epoche; stadi **P** (epoche 1–2), **F₀** (epoca 3), **F** (dall'epoca 4) |
+| Learning rate | warm-up di **2 epoche** per ogni gruppo dalla sua entrata; posa: warm-up di 2 epoche (lo stadio P), poi coseno |
+| SIGReg al livello fisico | **nessuna**: agisce solo attraverso il bersaglio `s` (§4.1) |
 | Early stopping | pazienza **3** epoche, contata solo nello stadio F |
 | Monitoraggio | ogni componente letto prima e dopo il suo ingresso; una fermata a ogni confine di stadio |
 
@@ -103,6 +104,26 @@ E_fis   = media sui 2 tipi di maschera k
 
 Ogni token nascosto dentro i riquadri conta 1, ogni token visibile λ_ctx = 0,5, come in V-JEPA 2.1. Per la plausibilità e le energie per clip, la stessa somma si fa clip per clip.
 
+### 4.1 SIGReg al livello fisico [revisione del 6/10]
+
+**Al livello fisico non c'è SIGReg, come nei due paper.**
+- LeJEPA e LeWorldModel la applicano alla rappresentazione appresa che definisce lo stato, quella che può collassare: lo `z` di LeWM, che per noi è `s` (livello 0, per passo).
+- LeWM non regolarizza la predizione (`pred_emb`), e neanche noi `ŝ`.
+- I token dell'encoder video non ne hanno bisogno. Il bersaglio è fisso e non collassato, quindi il collasso non conviene. SIGReg cancellerebbe la geometria pre-addestrata di V-JEPA 2.1. E gli 8.192 token di una clip sono campioni ancora più correlati dei 32 passi.
+- Il collasso dimensionale dell'encoder si sorveglia (deriva dell'encoder, rango, R@1), non si regolarizza.
+
+**Come agisce attraverso il bersaglio.**
+- **Varianza uguale.** `s` ha la stessa varianza nelle 192 dimensioni, quindi nessuna domina la L1 di `E_fis`.
+- **Scala già standardizzata.** `LN(sg(s))` è quasi una no-op: toglie circa 2 gradi di libertà su 192, la media sui canali e la norma, che per una gaussiana in 192 dimensioni oscilla del ±5 %. La si tiene come protezione della scala all'ingresso di F₀.
+- **Base non fissata.** SIGReg, `L_inv` e l'ancora sono invarianti per rotazione di `s`: il decoder dell'ancora può ruotare insieme. Niente fissa la base del bersaglio, che può derivare mentre la lettura fisica lo insegue.
+  - La CKA con il passo 0 è cieca a questa deriva. La misura invece `s_rotation` (`worldsign-posa.md` §6): sul batch sonda, la correlazione canale per canale di `s` con la lettura precedente, prima e dopo la rotazione migliore (Procrustes, stimata su metà delle clip e letta sull'altra metà).
+  - L'allarme scatta oltre 0,1. Se la rotazione risultasse grande, il rimedio di riserva è congelare il decoder dell'ancora dopo lo stadio P, che fissa la base nelle 138 direzioni che decodifica.
+- Per questo il warm-up della posa coincide con lo stadio P (§6.2): il bersaglio rallenta già quando entra il livello fisico, come il momentum dell'EMA che cresce in V-JEPA e BYOL.
+
+**Scelte del 6/10.**
+- **Forma della loss.** Resta quella di V-JEPA 2.1: L1 su `LN(sg(s))`. La MSE senza LayerNorm di LeWM è un'ablation facoltativa (F8, `worldsign-ablation.md` §3.2).
+- **Nessuna maschera «futuro».** Le maschere restano tubi su tutti i 32 passi, come V-JEPA: il livello fisico ricostruisce lo stato nascosto anche dai passi futuri e non prevede in avanti, come farebbe invece un world model alla LeWM. Una maschera che nasconda gli ultimi passi è stata valutata e scartata.
+
 ---
 
 ## 5. Il livello semantico
@@ -122,14 +143,15 @@ Le epoche sono **15**. Gli stadi seguono i confini di epoca.
 
 | Stadio | Epoche | Passaggi | Famiglie addestrate |
 |---|---|---|---|
-| **P** | 1 | posa, semantico | `pose`, `semantic_new` |
-| **F₀** | 2 | + fisico | in più `physical_new` (fusione e lettura); LoRA dell'encoder e del predictor ferme |
-| **F** | 3 → fine | tutti | in più `physical_lora` e `video_lora` |
+| **P** | 1–2 | posa, semantico | `pose`, `semantic_new` |
+| **F₀** | 3 | + fisico | in più `physical_new` (fusione e lettura); LoRA dell'encoder e del predictor ferme |
+| **F** | 4 → fine | tutti | in più `physical_lora` e `video_lora` |
 
 Senza livello fisico (ESP-2) c'è un solo stadio, **S**: solo il semantico, e la LoRA non si addestra mai.
 
 **Perché questi stadi.**
 - **P:** la LoRA non deve inseguire un bersaglio di posa ancora casuale. Il semantico parte subito, su V-JEPA 2.1 pre-addestrato.
+- **P dura 2 epoche [revisione del 6/10]:** coincide con il warm-up della posa. Il suo learning rate arriva al picco a fine P e da lì scende: il bersaglio rallenta quando il livello fisico comincia a inseguirlo (§4.1). Prima il warm-up durava 3 epoche e il bersaglio accelerava ancora durante F₀ e la prima epoca di F. Un controllo della configurazione impedisce un warm-up più lungo di P.
 - **F₀:** è il «prima la testa» di LP-FT [Lett. 95]: le teste fisiche nuove imparano su un encoder fermo, così non ne distorcono le feature quando la LoRA si sblocca.
 - **Precedenti per gli stadi di un'epoca:**
   - ULMFiT sblocca un gruppo di strati per epoca (https://arxiv.org/abs/1801.06146);
@@ -144,13 +166,13 @@ Ogni famiglia ha il suo gruppo di AdamW (con e senza weight decay):
 fattore(gruppo, passo) = schedule della famiglia(passo) × cooldown(passo)
 
 famiglie tranne la posa:  0 prima della loro entrata; warm-up lineare di 2 epoche dall'entrata; poi costante
-posa:                     warm-up lineare sul 20 % dei passi della run; poi coseno fino a 0 alla fine pianificata
+posa:                     warm-up lineare di 2 epoche (lo stadio P); poi coseno fino a 0 alla fine pianificata
 cooldown (V-JEPA 2):      1 fino all'inizio del cooldown; poi lineare fino a 0 in 5 % dei passi della run
 ```
 
 | Famiglia | Entra | Picco | Warm-up |
 |---|---|---|---|
-| `pose` | passo 0 | 3e-4 | 20 % della run, poi coseno |
+| `pose` | passo 0 | 3e-4 | 2 epoche (lo stadio P), poi coseno |
 | `semantic_new` | passo 0 | LR base (2e-4) | 2 epoche |
 | `physical_new` | inizio di F₀ | LR base | 2 epoche |
 | `physical_lora`, `video_lora` | inizio di F | LR base | 2 epoche |
@@ -174,7 +196,7 @@ Ogni componente si legge **prima** di entrare (le letture alla fine dello stadio
 | Modello di posa | P | passo 0: riferimento di rango, deviazione, SIGReg di s | fine P: fermata F1 |
 | Predictor semantico, testa testuale | P | passo 0: R@1 a caso, γ_sem | fine P: fermata F1 |
 | Fusione, lettura fisica | F₀ | fine P: `E_fis` con le teste casuali (letto, non addestrato) | fine F₀: fermata F2 |
-| LoRA video e del predictor | F | fine F₀: R@1, drift dell'encoder = 0, rapporto LoRA = 0 | fine dell'epoca 3: fermata F3 |
+| LoRA video e del predictor | F | fine F₀: R@1, drift dell'encoder = 0, rapporto LoRA = 0 | fine dell'epoca 4: fermata F3 |
 
 **Letture fisse a ogni cadenza:**
 - i termini di ogni livello e il learning rate di ogni famiglia;
@@ -186,9 +208,9 @@ Ogni componente si legge **prima** di entrare (le letture alla fine dello stadio
 
 | Fermata | Quando | Criteri |
 |---|---|---|
-| **F1** | fine di P (epoca 1) | **posa:** ancora e SIGReg_posa in calo · rango di s > 0,5 × passo 0 · IsoScore di s ≥ 0,8 · R² di posizione delle mani da s ≥ 0,9. **Semantico:** γ_sem > 0,3 · SIGReg_sem in calo · R@1 > 5× il caso · test col rumore superato · query non collassate |
-| **F2** | fine di F₀ (epoca 2) | `E_fis` in calo · R² dei passi soprattutto visibili > 0,9 · la dinamica batte la baseline · nessuna fuga (test del leak) |
-| **F3** | fine della prima epoca di F (epoca 3) | `E_fis` in calo · nessuna LoRA sposta il suo strato oltre il 10 % · drift dell'encoder ≥ 0,5 · R@1 > baseline ridge · ω < 0,95 · hubness stabile · curva di R@1 estrapolata compatibile con X · nessun conflitto stabile fra gradienti |
+| **F1** | fine di P (epoca 2) | **posa:** ancora e SIGReg_posa in calo · rango di s > 0,5 × passo 0 · IsoScore di s ≥ 0,8 · R² di posizione delle mani da s ≥ 0,9. **Semantico:** γ_sem > 0,3 · SIGReg_sem in calo · R@1 > 5× il caso · test col rumore superato · query non collassate |
+| **F2** | fine di F₀ (epoca 3) | `E_fis` in calo · R² dei passi soprattutto visibili > 0,9 · la dinamica batte la baseline · nessuna fuga (test del leak) |
+| **F3** | fine della prima epoca di F (epoca 4) | `E_fis` in calo · nessuna LoRA sposta il suo strato oltre il 10 % · drift dell'encoder ≥ 0,5 · R@1 > baseline ridge · ω < 0,95 · hubness stabile · curva di R@1 estrapolata compatibile con X · nessun conflitto stabile fra gradienti |
 | **F4** | fine | tabella del gate su OpenASL |
 
 Nella run di gate una fermata fallita ferma la run; nelle altre run si registra e basta.

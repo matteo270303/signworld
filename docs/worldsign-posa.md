@@ -192,11 +192,11 @@ L_0 = (1 − λ_P)·( L_inv + L_anchor ) + λ_P·SIGReg_posa             λ_P = 
 |---|---|
 | Gruppo | proprio (famiglia `pose`: encoder e decoder) |
 | LR di picco | **3e-4** (il valore di worldSign) |
-| Schedule | warm-up lineare sul **20 %** dei passi della run, poi **coseno fino a 0** alla fine pianificata; il cooldown della run lo moltiplica |
+| Schedule | warm-up lineare di **2 epoche**, cioè lo stadio P; poi **coseno fino a 0** alla fine pianificata; il cooldown della run lo moltiplica |
 | Weight decay | quello della run (0,04), non su norme, bias e posizioni |
 | Attiva | dal passo 0 (stadio P, `worldsign-gerarchia.md` §6) |
 
-Il coseno fa rallentare il bersaglio proprio mentre il video lo insegue, come il momentum dell'EMA che sale verso 1 in V-JEPA e S-JEPA.
+Il coseno fa rallentare il bersaglio proprio mentre il video lo insegue, come il momentum dell'EMA che sale verso 1 in V-JEPA e S-JEPA. **[Revisione del 6/10]** Il warm-up prima durava il 20 % della run (3 epoche), mentre il livello fisico entrava all'epoca 2: il bersaglio accelerava ancora mentre il video cominciava a inseguirlo. Ora il warm-up dura quanto lo stadio P (2 epoche) e il livello fisico entra all'epoca 3 (`worldsign-gerarchia.md` §4.1, §6). Conta anche perché la base di `s` non è fissata: SIGReg, invarianza e ancora sono invarianti per rotazione.
 
 ### 4.4 Confronto con LeJEPA e LeWorldModel [revisione del 6/10]
 
@@ -242,10 +242,11 @@ La posa entra nell'addestramento al passo 0. Lo stadio P esiste per verificarla 
 | `s_rank`, `s_std`, `s_isoscore` di s sui passi validi; `s_sigreg` passo per passo, come la loss (≈ 1 per una gaussiana) | letture frequenti | rango o deviazione sotto 0,5 × il passo 0; `s_sigreg` oltre 1,5 × il passo 0 |
 | quote e coseni del gradiente di `inv_posa`, `anchor`, `sigreg_posa` sull'encoder di posa | letture frequenti | `pose_cos_anchor_sigreg_posa` < −0,3 per 5 letture: SIGReg combatte l'ancora |
 | sul batch sonda fisso: IsoScore, rango, SIGReg di s; R² di posizione e velocità di ogni articolatore da s; CKA con il passo 0 | validazione | R² sceso oltre 0,02 sotto **il suo massimo** |
+| sul batch sonda, contro la lettura precedente: `s_basis_correlation` (correlazione di ogni canale con sé stesso), `s_aligned_correlation` (la stessa dopo la rotazione migliore, di Procrustes), `s_rotation` (la loro differenza). La rotazione si stima su metà delle clip e si legge sull'altra metà | validazione | `s_rotation` > 0,1: la base del bersaglio ruota mentre la lettura fisica la insegue (`worldsign-gerarchia.md` §4.1) **[Nostra scelta]** |
 | learning rate del gruppo `pose` | ogni passo di log | — |
 | assenza di gradiente di `E_fis` sulla posa | P17, prima di lanciare | la run non parte |
 
-**Fermata F1, a fine stadio P (fine dell'epoca 1):**
+**Fermata F1, a fine stadio P (fine dell'epoca 2):**
 - `anchor` e `sigreg_posa` in calo;
 - rango di s > 0,5 × il passo 0;
 - IsoScore di s ≥ 0,8;

@@ -157,9 +157,11 @@ Oggi una maschera per tipo è condivisa dalle 64 clip di una GPU. Varianti per c
 
 Solo brevi, solo lunghe, entrambe (oggi); scala dei blocchi. V-JEPA l'ha già studiato sul video naturale [Lett. 30]; da noi cambia il target (la posa), non il video. **Config:** `masking.specs`.
 
-#### M4 — Maschera causale (predire il futuro dal passato) · priorità bassa
+#### M4 — Maschera causale (predire il futuro dal passato) · **scartata il 6/10**
 
-Nascondere gli ultimi passi. In V-JEPA peggiora le rappresentazioni [Lett. 30], ma darebbe un'energia di **prevedibilità** del futuro, utile per la produzione (H6). **Codice:** poco (blocchi con estensione temporale parziale, ancorati alla fine).
+Nascondere gli ultimi passi, per un livello fisico che preveda in avanti come LeWorldModel. È stata valutata nel confronto con LeJEPA e LeWorldModel (`worldsign-gerarchia.md` §4.1) e scartata:
+- in V-JEPA peggiora le rappresentazioni [Lett. 30];
+- con l'encoder sul 75 % dei token visibili costerebbe più del doppio del passaggio fisico.
 
 ### 3.2 Loss fisica
 
@@ -171,7 +173,7 @@ Nascondere gli ultimi passi. In V-JEPA peggiora le rappresentazioni [Lett. 30], 
 | F4 | soglia dei riquadri **1,0** invece di 0,3 | quali keypoint devono definire il riquadro di lettura? È una decisione aperta | config: `physical.box_threshold: 1.0` | **media** |
 | F5 | lettura con **attention pooling** appreso invece della media nel riquadro | la media perde informazione (dita, orientamento)? | codice: una testa di lettura nuova | bassa |
 | F6 | **niente ancora** (`L_anchor`) | l'ancora serve a tenere il target informativo? (H2) | codice: un'opzione in `WorldSign` | **media** |
-| F8 | errore **L2** invece di L1 | L1 porta alla mediana, L2 alla media (§5.5 del progetto) | codice: poco | bassa |
+| F8 | **MSE su `sg(s)` senza LayerNorm**, la loss di LeWorldModel, invece della L1 su `LN(sg(s))` di V-JEPA 2.1 **[facoltativa, 6/10]** | con un bersaglio reso N(0, I) da SIGReg la LayerNorm è quasi ridondante, e la MSE è invariante per rotazione mentre la L1 privilegia la base, arbitraria, di `s`; L1 porta alla mediana, L2 alla media (§5.5 del progetto) | codice: un'opzione in `physical_energy` | bassa |
 
 F7 (`SIGReg_posa` sull'unione dei quattro articolatori) è superata: il bersaglio è un vettore per passo che li concatena (3/10).
 

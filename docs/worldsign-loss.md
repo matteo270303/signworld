@@ -335,6 +335,7 @@ Con gli stop-gradient fra i livelli ogni termine aggiorna solo il suo livello: l
 | **Congelamento + LoRA** | encoder video, predictor fisico (r = 16) | `B = 0` all'inizio, scala `α/r = 1` **[Aperto: α]** | allontanarsi dai pesi pre-addestrati: i pesi congelati non memorizzano il corpus, gli aggiornamenti restano a basso rango |
 | **Weight decay** (AdamW, disaccoppiato) | matrici addestrabili, LoRA comprese | 0,04 costante, come V-JEPA 2.1 | pesi grandi; 0 su norme, bias, scalari, posizioni e query apprese |
 | **Dropout** | predictor semantico (attenzione, residui, MLP), testa testuale; **non** nell'encoder di posa, il cui `sg(s)` è un bersaglio | 0,1 **[Aperto: PC7]** | co-adattamento nei moduli da zero |
+| **Dropout del predictor fisico** | blocchi del predictor rilasciato: dopo la proiezione dell'attenzione e nell'MLP (`physical.dropout`) | 0,1, come il predictor di LeWorldModel (6/10) | sovradattamento della dinamica appresa |
 | **Stochastic depth** (DropPath) | rami residui del predictor semantico | 0,1 **[Aperto: PC7]** | dipendenza da singoli blocchi |
 | **LayerScale** | rami residui del predictor semantico | init 1e-4 **[Aperto: PC7]** | aggiornamenti grandi all'inizio: ogni blocco parte vicino all'identità |
 | **Ancora** | `s` → keypoint | peso uguale agli altri termini della posa | perdita di informazione cinematica nel target |

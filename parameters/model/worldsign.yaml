@@ -28,6 +28,7 @@ physical:
   lora: {rank: 16, alpha: 16.0, targets: [qkv, proj, fc1, fc2]}
   target_dim: 192             # C, width of the pose target s_t (pose_encoder.output_dim)
   mask_index: 0               # the only trained mask token (PC6)
+  dropout: 0.1                # in the predictor's blocks, as LeWorldModel's predictor
   context_lambda: 0.5         # λ of the visible tokens (V-JEPA 2.1)
   lambda_progressive: false   # V-JEPA 2.1 cooldown: λ from the first step
   lambda_warmup: [0.0595, 0.119]   # used only if progressive (its pre-training: 15k-30k of 252k)

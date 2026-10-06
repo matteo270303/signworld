@@ -123,6 +123,7 @@ Ogni token nascosto dentro i riquadri conta 1, ogni token visibile λ_ctx = 0,5,
 **Scelte del 6/10.**
 - **Forma della loss.** Resta quella di V-JEPA 2.1: L1 su `LN(sg(s))`. La MSE senza LayerNorm di LeWM è un'ablation facoltativa (F8, `worldsign-ablation.md` §3.2).
 - **Nessuna maschera «futuro».** Le maschere restano tubi su tutti i 32 passi, come V-JEPA: il livello fisico ricostruisce lo stato nascosto anche dai passi futuri e non prevede in avanti, come farebbe invece un world model alla LeWM. Una maschera che nasconda gli ultimi passi è stata valutata e scartata.
+- **Dropout 0,1 nel predictor fisico**, come il predictor di LeWM, dove porta il successo da 78 a 96 %. Si alzano i moduli `nn.Dropout` dei blocchi rilasciati, senza toccare la LoRA; il dropout sulle probabilità dell'attenzione resta a 0 (`worldsign-architettura.md` §4.3).
 
 ---
 

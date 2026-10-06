@@ -13,7 +13,9 @@ inside each articulator box of a step and maps the four boxes together to the po
 * the RoPE grid is set to the clip's: the released module fixes it at construction (24 x 24
   patches for 384²) and does not interpolate, so at 256² every token would be decoded to the
   wrong row and column;
-* ``mask_index = 0``: the only mask token the distilled checkpoint trained (PC6).
+* ``mask_index = 0``: the only mask token the distilled checkpoint trained (PC6);
+* dropout in the blocks (``set_dropout``), as LeWorldModel's predictor; the released module has
+  its ``nn.Dropout`` layers at 0.
 """
 
 from collections.abc import Sequence
@@ -68,6 +70,7 @@ class PhysicalPredictor(nn.Module):
         *,
         mask_index: int = 0,
         activation_checkpointing: bool = True,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         # Meta's module is untyped; its embedding and projections are replaced here.
@@ -78,6 +81,7 @@ class PhysicalPredictor(nn.Module):
         released.use_activation_checkpointing = activation_checkpointing
         set_rope_grid(released, grid.rows)
         blocks: nn.Module = released.predictor_blocks
+        set_dropout(blocks, dropout)
         self.adapters = lora.inject(blocks, adapters.targets, adapters.rank, adapters.alpha)
         self.predictor: Any = released
         self.fusion = fusion
@@ -122,6 +126,16 @@ class PhysicalPredictor(nn.Module):
             visible_weight=box_sum(distance, members).sum(dim=-1),
             box_tokens=predicted.sum(dim=(-1, -2)),
         )
+
+
+def set_dropout(module: nn.Module, rate: float) -> None:
+    """Every ``nn.Dropout`` under ``module`` at ``rate``: in Meta's blocks, after the attention
+    projection and twice in the MLP. The attention's ``proj_drop_prob`` stays 0: Meta passes it
+    to ``scaled_dot_product_attention`` whatever the mode, so it would drop in evaluation too.
+    The activation checkpointing replays the same draws (``preserve_rng_state``)."""
+    for layer in module.modules():
+        if isinstance(layer, nn.Dropout):
+            layer.p = rate
 
 
 def set_rope_grid(module: nn.Module, rows: int) -> None:

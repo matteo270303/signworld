@@ -153,6 +153,7 @@ def assemble(
             grid,
             mask_index=config.physical.mask_index,
             activation_checkpointing=config.encoder.activation_checkpointing,
+            dropout=config.physical.dropout,
         )
     semantic = SemanticPredictor(backbone.width, config.semantic, grid)
     settings = config.physical

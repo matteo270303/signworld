@@ -189,7 +189,9 @@ Sostituisce il `predictor_embed` del predictor rilasciato (§4.4.5 del progetto;
 | 7 | riordino inverso; **predict_all**: un'uscita per ogni token, visibile o nascosto | `(B, 8.192, 384)` | — | — |
 | 8 | `predictor_proj` e `predictor_proj_context` (384 → 1.664, verso il teacher ViT-G) **sostituiti dall'identità** | — | — | tolti |
 
-**Un blocco del predictor.** `LayerNorm(384, ε=1e-6)` → `qkv: Linear(384 → 1.152)` + LoRA q, k, v → RoPE 3D → attenzione → `proj: Linear(384 → 384)` + LoRA → residuo → `LayerNorm(384)` → `fc1: Linear(384 → 1.536)` + LoRA → GELU → `fc2: Linear(1.536 → 384)` + LoRA → residuo.
+**Un blocco del predictor.** `LayerNorm(384, ε=1e-6)` → `qkv: Linear(384 → 1.152)` + LoRA q, k, v → RoPE 3D → attenzione → `proj: Linear(384 → 384)` + LoRA → Dropout(0,1) → residuo → `LayerNorm(384)` → `fc1: Linear(384 → 1.536)` + LoRA → GELU → Dropout(0,1) → `fc2: Linear(1.536 → 384)` + LoRA → Dropout(0,1) → residuo.
+
+- **Dropout 0,1 [6/10]:** sono i moduli `nn.Dropout` del blocco rilasciato, che Meta lascia a 0, come nel predictor di LeWorldModel (`physical.dropout`, `set_dropout`). Il dropout sulle probabilità dell'attenzione resta a 0: Meta lo passa a SDPA in qualunque modalità, quindi agirebbe anche in valutazione. Le letture, la validazione e la plausibilità girano in valutazione, senza dropout.
 
 - **RoPE 3D del predictor:** per testa (32 dimensioni), 10 dimensioni per passo, 10 per riga, 10 per colonna, 2 non ruotate. **La griglia è impostata a 16×16**: il modulo rilasciato la fissa a 24×24 (384 pixel) e non interpola, quindi a 256 pixel ogni token sarebbe decodificato nella riga e colonna sbagliate.
 - **LoRA r = 16 sui 12 blocchi:** per blocco `3·16·768 + 16·768 + 2·16·1.920 = 110.592`; **totale 1.327.104**.

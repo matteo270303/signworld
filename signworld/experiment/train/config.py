@@ -88,6 +88,9 @@ class PhysicalSettings(FrozenModel):
     """C, the width of the pose target s_t (``pose_encoder.output_dim``)."""
     mask_index: int = 0
     """Only the first mask token of the released predictor is trained (PC6)."""
+    dropout: float = Field(default=0.1, ge=0.0, lt=1.0)
+    """Dropout in the blocks of the physical predictor, after the attention projection and in
+    the MLP: LeWorldModel's 0.1, which lifted its planning success from 78 to 96 %."""
     context_lambda: float = 0.5
     """λ of the visible-token term (V-JEPA 2.1)."""
     lambda_progressive: bool = False

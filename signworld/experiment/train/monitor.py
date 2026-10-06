@@ -28,12 +28,13 @@ readings from stage P, the physical ones from F0, the LoRA's from F.
 
 import math
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from torch.nn import functional
 
 from signworld.loss.worldsign import POSE_TERMS
@@ -176,6 +177,18 @@ def _rules(s: DiagnosticsSettings) -> list[_Rule]:
         _Rule("lora_zero_blocks", "above", 0.0, "LoRA blocks without gradient"),
         _Rule("loss_spikes", "above", 3.0, "repeated loss spikes: instability"),
     ]
+
+
+@contextmanager
+def evaluating(model: nn.Module) -> Iterator[None]:
+    """``model`` without dropout and stochastic depth for a reading, then as it was: the readings
+    must not depend on the draws of the training noise."""
+    was_training = model.training
+    model.train(False)
+    try:
+        yield
+    finally:
+        model.train(was_training)
 
 
 @dataclass
@@ -356,7 +369,7 @@ class Monitor:
         readings: dict[str, float] = {}
         iterator = iter(batches)
         first = next(iterator, None)
-        with torch.no_grad():
+        with torch.no_grad(), evaluating(self.model):
             if first is not None:
                 clips = first.take(self.settings.order_clips).to(self.device)
                 forward = self.model.video.semantic(clips.frames).float().mean(1)
@@ -515,16 +528,17 @@ class Monitor:
         if pose is None or not self.probe:
             return None
         latents, keypoints, weights, features = [], [], [], []
-        for batch in self.probe:
-            clips = batch.to(self.device)
-            latents.append(pose.target(clips.pose_tokens).float().cpu())
-            keypoints.append(clips.keypoints.float().cpu())
-            weights.append(clips.keypoint_weights.float().cpu())
-            tokens = self.model.video.backbone.tokens(clips.frames).float()
-            grid = self.model.video.grid
-            features.append(
-                tokens.view(len(tokens), grid.steps, -1, tokens.shape[-1]).mean(2).cpu()
-            )
+        with evaluating(self.model):
+            for batch in self.probe:
+                clips = batch.to(self.device)
+                latents.append(pose.target(clips.pose_tokens).float().cpu())
+                keypoints.append(clips.keypoints.float().cpu())
+                weights.append(clips.keypoint_weights.float().cpu())
+                tokens = self.model.video.backbone.tokens(clips.frames).float()
+                grid = self.model.video.grid
+                features.append(
+                    tokens.view(len(tokens), grid.steps, -1, tokens.shape[-1]).mean(2).cpu()
+                )
         return torch.cat(latents), torch.cat(keypoints), torch.cat(weights), torch.cat(features)
 
     def _probe_readings(self, step: int) -> dict[str, float]:

@@ -40,12 +40,14 @@ L'encoder legge `pose_tokens` (B, 32, 69, 6), lo stesso tensore che il dataset g
 | Canali | Contenuto |
 |---|---|
 | 0–1 | posizione globale (x, y) |
-| 2–3 | posizione locale rispetto alla radice della parte, divisa per il mezzo ingombro della parte nel frame |
+| 2–3 | posizione locale rispetto alla radice della parte, divisa per il mezzo ingombro della parte nel frame: la coordinata più grande fra le posizioni locali e gli ossi della parte, così entrambi restano entro ±1 |
 | 4–5 | osso: vettore verso il giunto padre, con la stessa scala |
 | 6–7 | velocità: spostamento globale dal frame precedente, in unità di spalla (0 al frame 0 e se uno dei due frame manca) |
 | 8 | valido (presenza) |
 
 Il decimo canale di worldSign, la confidenza di RTMW, non c'è: i dati materializzati hanno solo la presenza (soglia di punteggio 1,0). Un giunto assente ha 0 in tutti i canali tranne «valido».
+
+**Perché anche gli ossi nel mezzo ingombro [correzione del 6/10].** Se manca la radice della parte (il polso, la punta del naso), le posizioni locali valgono 0 e da sole darebbero un ingombro al minimo (0,001). Gli ossi fra i giunti ancora visibili verrebbero divisi per quel valore: su OpenASL il 5,5 % delle clip superava 100, fino a 5.710, e la verifica P13 divergeva. worldSign non aveva il problema perché non azzerava le posizioni locali.
 
 **Tubelet:** i 2 frame del passo si concatenano, quindi **(B, 32, 69, 18)**, allineato ai token di V-JEPA (tubelet di 2 frame).
 

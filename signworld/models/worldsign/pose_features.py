@@ -4,10 +4,10 @@ From the pose tokens (x, y and presence of the two frames of every step, in the 
 units) ``JointFeatures`` rebuilds the 64 frames, re-centres every frame between its own
 shoulders (worldSign's SignSpace, frame by frame), computes nine channels per joint and frame
 (global position; position from the part's root and bone to the parent, both rescaled by the
-part's extent in the frame; velocity; presence) and joins the two frames of each step again:
-18 channels per joint and step. A missing joint is 0 in every channel but presence. A frame
-without both shoulders, or with shoulders too close to be a real detection, keeps the clip's
-own reference.
+part's extent in the frame, so within ±1; velocity; presence) and joins the two frames of each
+step again: 18 channels per joint and step. A missing joint is 0 in every channel but presence.
+A frame without both shoulders, or with shoulders too close to be a real detection, keeps the
+clip's own reference.
 """
 
 from typing import Final
@@ -67,7 +67,7 @@ class JointFeatures(nn.Module):
         local = (position - position[:, :, self.roots] * rooted) * keep * root_seen
         parent_seen = present[:, :, self.parents][..., None].to(position.dtype)
         bone = (position - position[:, :, self.parents]) * keep * parent_seen
-        extent = self._extent(local)
+        extent = self._extent(local, bone)
         velocity = torch.zeros_like(position)
         velocity[:, 1:] = (position[:, 1:] - position[:, :-1]) * keep[:, 1:] * keep[:, :-1]
 
@@ -86,8 +86,14 @@ class JointFeatures(nn.Module):
         scale = torch.where(usable, width, torch.ones_like(width))
         return (position - centre[:, :, None]) / scale[:, :, None, None]
 
-    def _extent(self, local: Tensor) -> Tensor:
-        """(batch, frames, joints, 1): the half-extent of each joint's part in the frame."""
-        magnitude = local.abs().amax(dim=-1)
+    def _extent(self, local: Tensor, bone: Tensor) -> Tensor:
+        """(batch, frames, joints, 1): the half-extent of each joint's part in the frame.
+
+        It is the largest coordinate of the part's local positions and bones, so both stay
+        within ±1. Local positions alone would not do: when the part's root is missing they are
+        all 0, the extent would fall to its floor, and the bones between the joints still seen
+        would be divided by it (5.5 % of OpenASL's clips went over 100, up to 5,710).
+        """
+        magnitude = torch.maximum(local.abs().amax(dim=-1), bone.abs().amax(dim=-1))
         extent = torch.stack([magnitude[..., p.start : p.stop].amax(dim=-1) for p in PARTS], -1)
         return extent.clamp_min(_MIN_EXTENT)[..., self.part_of][..., None]

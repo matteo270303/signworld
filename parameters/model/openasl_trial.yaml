@@ -1,15 +1,17 @@
 # Trial run on OpenASL alone: does the whole model train as it should, end to end?
 # worldsign.yaml + ablation/arm_A.yaml (alignment + SIGReg) + openasl_trial.yaml, on 4 GPUs
 # (32 clips each, batch 128), without augmentation.
-# OpenASL's own splits: train 96k clips, valid 967 (validated here), test 976 (kept for the end).
-# 15 epochs ≈ 10,770 steps (718 per epoch); the diagnostics run at the end of each epoch.
+# OpenASL's own splits as materialised in the index: train 91,923 clips, valid 891 (validated
+# here), test 904 (kept for the end; the official split has 975, so the comparison with C²RL
+# must say so). 15 epochs ≈ 10,770 steps (718 per epoch); the diagnostics run at the end of each
+# epoch.
 name: worldsign-openasl-trial
 data:
   index: data/training/openasl/index.parquet
   embeddings: data/openasl/text/2fdc70f119730c4c
   split_source: manifest      # OpenASL's train / valid / test
   validation_split: valid
-  validation_clips: 967       # the whole valid split
+  validation_clips: 891       # the whole valid split
   statistics_clips: 5000      # enough for the keypoint scale; faster start
   workers: 12                 # data loader processes per GPU (52 CPUs for 4 GPUs)
 training:

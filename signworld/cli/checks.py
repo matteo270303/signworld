@@ -5,6 +5,7 @@ the download jobs share the entry point and must not pay that import on every st
 """
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
@@ -137,6 +138,38 @@ def embed(
         read_source_manifest(dataset), encoder, encoder.identity, dataset.layout.text_embeddings
     )
     typer.echo(store.directory)
+
+
+@text_app.command("false-negatives")
+@reports_user_errors
+def false_negatives(  # noqa: PLR0913, PLR0917 (typer options)
+    index: Annotated[Path, typer.Option(exists=True, dir_okay=False, help="Training index.")],
+    embeddings: Annotated[
+        Path, typer.Option(exists=True, file_okay=False, help="EmbeddingStore directory.")
+    ],
+    output: Annotated[Path, typer.Option(file_okay=False, help="Directory to write.")],
+    alpha: Annotated[float, typer.Option(help="Share of negatives treated as false.")] = 1e-3,
+    reference: Annotated[int, typer.Option(min=1, help="Captions of the reference set.")] = 200_000,
+    seed: Annotated[int, typer.Option(help="Seed of the reference set.")] = 0,
+    device: Annotated[str, typer.Option(help="Device of the similarities.")] = "cpu",
+) -> None:
+    """GloFND's threshold of every training caption for arm C (``losses.false_negatives``)."""
+    from signworld.data.loaders import TRAIN, read_index
+    from signworld.data.negatives import write_thresholds
+    from signworld.data.text import EmbeddingStore
+
+    meta = write_thresholds(
+        output,
+        EmbeddingStore(embeddings).embeddings(),
+        read_index(index, TRAIN),
+        store=embeddings.name,
+        index=index,
+        alpha=alpha,
+        reference=reference,
+        seed=seed,
+        device=device,
+    )
+    typer.echo(f"{output}: {meta.anchors} captions, median threshold {meta.quantiles['p50']:.3f}")
 
 
 @text_app.command("verify")

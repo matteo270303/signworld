@@ -39,6 +39,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
 
 from signworld.data.loaders import ClipDataset, Collate, EpochSampler
+from signworld.logger.wandb_mirror import WandbMirror
 from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
 
 from .checkpoint import CheckpointStore, TrainingState
@@ -46,6 +47,7 @@ from .config import WorldSignConfig
 from .curriculum import SEMANTIC_NEW, Curriculum, Stage, families, trainable_names
 from .distributed import SINGLE, Distributed
 from .monitor import Monitor, RunStoppedError
+from .provenance import seed_step
 from .reporting import RunReport, finish_time
 from .schedules import Cooldown, group_schedules, parameter_groups
 from .validation import RetrievalScores
@@ -91,11 +93,14 @@ class Progress:
 
 
 class MetricsLog:
-    """One JSON line per record, written by the first GPU only."""
+    """One JSON line per record, written by the first GPU only; optionally mirrored on W&B."""
 
-    def __init__(self, path: Path, collective: Distributed = SINGLE) -> None:
+    def __init__(
+        self, path: Path, collective: Distributed = SINGLE, mirror: WandbMirror | None = None
+    ) -> None:
         self.path = path
         self.enabled = collective.is_main
+        self.mirror = mirror if self.enabled else None
         if self.enabled:
             path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -104,6 +109,8 @@ class MetricsLog:
             return
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"kind": kind, "time": time.time(), **values}) + "\n")
+        if self.mirror is not None:
+            self.mirror.write(kind, values)
 
 
 class Trainer:
@@ -180,7 +187,20 @@ class Trainer:
         self.rates: dict[str, float] = {}
         """Every family's learning rate at the current step, for the logs."""
         self.checkpoints = CheckpointStore(output / "checkpoints", names, collective)
-        self.log = MetricsLog(output / "metrics.jsonl", collective)
+        settings = config.diagnostics.wandb
+        mirror = (
+            WandbMirror(
+                output,
+                config.name,
+                config.model_dump(mode="json"),
+                project=settings.project,
+                entity=settings.entity,
+                mode=settings.mode,
+            )
+            if settings.enabled and collective.is_main
+            else None
+        )
+        self.log = MetricsLog(output / "metrics.jsonl", collective, mirror)
         self.output = output
         self.monitor = Monitor(
             model,
@@ -254,6 +274,9 @@ class Trainer:
         except RunStoppedError:
             self._save("stopped", state)
             raise
+        finally:
+            if self.log.mirror is not None:
+                self.log.mirror.finish()
 
     def _fit(self, state: TrainingState) -> TrainingState:
         if state.step == 0:  # everything read once at step 0, as the reference (§4.13)
@@ -478,7 +501,9 @@ class Trainer:
         frequent = self._frequent_due(state)
         if frequent and state.step == 0:
             self.monitor.frequent(0, batch, stage)  # the untrained model: the reference
-        randomness = StepRandomness.at(self.config.training.seed, state.step, self.collective.rank)
+        seed = self.config.training.seed
+        randomness = StepRandomness.at(seed, state.step, self.collective.rank)
+        seed_step(seed, state.step, self.collective.rank)  # dropout: the same draws on resume
         with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=self.bf16):
             terms = self.wrapped(
                 batch,

@@ -1,0 +1,7 @@
+# ESP-6, on θ*: the physical level predicts the released V-JEPA 2.1 encoder, frozen, on the whole
+# clip, per token, with V-JEPA 2.1's loss (L1 on the layer-normalised last layer, masked tokens +
+# 0.5 · visible ones); no pose encoder, anchor or pose SIGReg. Encoder LoRA, fusion, released
+# predictor with its LoRA, masks, stages and semantic level as θ*. Lay it over the winning
+# arm_*.yaml.
+name: worldsign-esp6-video-target
+physical: {target: video}

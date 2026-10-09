@@ -19,6 +19,7 @@ from torch.nn import functional
 from signworld.loss.sigreg import SIGReg, random_directions
 from signworld.models.worldsign import lora
 from signworld.models.worldsign.physical import PhysicalPrediction
+from signworld.models.worldsign.video_target import TokenPrediction
 
 from ..metrics.geometry import centered, effective_rank, isoscore, mean_dimension_std
 
@@ -270,7 +271,9 @@ def keypoint_errors(
     weights: Tensor,
 ) -> dict[str, float]:
     """Keypoints decoded from the read-outs of mostly hidden steps, against interpolation and
-    constant velocity from the mostly visible steps.
+    constant velocity from the mostly visible steps, and against the decoder's own floor: the
+    true target ``s`` decoded on the same steps (``keypoint_error_decoder``), the error a
+    perfect prediction would still have.
 
     The read-out predicts LN(s); it is brought back to the scale of ``s`` with ``s``'s own mean
     and spread before the anchor's decoder. Errors are mean distances in shoulder units over
@@ -283,7 +286,14 @@ def keypoint_errors(
     std = latent.float().var(-1, keepdim=True, unbiased=False).add(1e-5).sqrt()
     truth = keypoints.float()
     present = weights > 0
-    errors: dict[str, list[float]] = {"model": [], "interpolation": [], "constant_velocity": []}
+    with torch.no_grad():
+        floor = decode(latent.float()).float()  # the target itself, decoded: D's own error
+    errors: dict[str, list[float]] = {
+        "model": [],
+        "decoder": [],
+        "interpolation": [],
+        "constant_velocity": [],
+    }
     for prediction in predictions:
         restored = prediction.state.float() * std + mean
         with torch.no_grad():
@@ -294,6 +304,7 @@ def keypoint_errors(
         interpolated, extrapolated = _temporal_baselines(truth, seen)
         for name, estimate in (
             ("model", decoded),
+            ("decoder", floor),
             ("interpolation", interpolated),
             ("constant_velocity", extrapolated),
         ):
@@ -510,3 +521,36 @@ def shares_and_cosines(gradients: dict[str, Tensor], prefix: str) -> dict[str, f
                 float(a @ b / denominator) if float(denominator) > 0 else float("nan")
             )
     return out
+
+
+def token_readings(
+    predictions: Sequence[TokenPrediction], target: Tensor, rows: int = 8192, seed: int = 0
+) -> dict[str, float]:
+    """ESP-6: the predicted tokens against the frozen encoder's (layer-normalised) tokens.
+
+    R² and gamma (variance ratio) on the masked tokens, R² on the visible ones, over at most
+    ``rows`` tokens of each kind drawn with ``seed``: the counterpart of ``physical_readings``
+    when the physical level predicts the video instead of the pose.
+    """
+    generator = torch.Generator().manual_seed(seed)
+
+    def sample(values: Tensor, index: Tensor) -> tuple[Tensor, Tensor]:
+        truth = target.gather(1, index[..., None].expand(-1, -1, target.shape[-1]))
+        flat, wanted = values.float().flatten(0, 1), truth.float().flatten(0, 1)
+        chosen = torch.randperm(len(flat), generator=generator)[:rows].to(flat.device)
+        return flat[chosen], wanted[chosen]
+
+    masked = [sample(p.predicted, p.target_index) for p in predictions]
+    visible = [sample(p.context, p.context_index) for p in predictions]
+    p_masked = torch.cat([m[0] for m in masked])
+    t_masked = torch.cat([m[1] for m in masked])
+    p_visible = torch.cat([v[0] for v in visible])
+    t_visible = torch.cat([v[1] for v in visible])
+    ones_masked = torch.ones(len(p_masked), device=p_masked.device)
+    return {
+        "token_r2_masked": weighted_r2(p_masked, t_masked, ones_masked),
+        "token_gamma_masked": variance_ratio(p_masked, t_masked, ones_masked),
+        "token_r2_visible": weighted_r2(
+            p_visible, t_visible, torch.ones(len(p_visible), device=p_visible.device)
+        ),
+    }

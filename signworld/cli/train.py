@@ -20,6 +20,10 @@ train_app.command("materialize")(materialize)
 def run(
     config: ConfigFiles,
     output: Annotated[Path, typer.Option(file_okay=False, help="Run directory.")],
+    allow_code_change: Annotated[
+        bool,
+        typer.Option(help="Resume although the code differs from the first launch (recorded)."),
+    ] = False,
 ) -> None:
     """Train, or resume, one run; launch with torchrun for several GPUs."""
     from signworld.experiment.train.config import load_config
@@ -28,11 +32,89 @@ def run(
 
     collective = Distributed.from_environment()
     try:
-        state = start(load_config(*config), output, collective)
+        state = start(load_config(*config), output, collective, allow_code_change=allow_code_change)
     finally:
         collective.shutdown()
     if collective.is_main:
         typer.echo(f"{output}: finished at step {state.step}, best at {state.best_step}")
+
+
+@train_app.command("ridge-baseline")
+@reports_user_errors
+def ridge_baseline_command(  # noqa: PLR0913, PLR0917 (typer options)
+    config: ConfigFiles,
+    output: Annotated[Path, typer.Option(dir_okay=False, help="Report to write (JSON).")],
+    split: Annotated[
+        list[str], typer.Option(help="Splits to score; the first chooses the penalty.")
+    ],
+    device: Annotated[str, typer.Option(help="Device of the encoder.")] = "cuda",
+    fit_clips: Annotated[int, typer.Option(min=1, help="Training clips the ridge fits.")] = 20_000,
+    clips: Annotated[
+        int | None, typer.Option(min=1, help="Clips of each split but validation (all if unset).")
+    ] = None,
+    seed: Annotated[int, typer.Option(help="Seed of the bootstrap intervals.")] = 0,
+) -> None:
+    """PC2's ridge from frozen V-JEPA 2.1 features on the run's own splits (§4.12.1)."""
+    import torch
+
+    from signworld.experiment.evaluation.ridge import ridge_baseline, write_ridge_report
+    from signworld.experiment.train.config import load_config
+
+    report = ridge_baseline(
+        load_config(*config),
+        split,
+        torch.device(device),
+        fit_clips=fit_clips,
+        clips=clips,
+        seed=seed,
+    )
+    baseline = report["ridge_baseline"]
+    typer.echo(write_ridge_report(report, output))
+    typer.echo(
+        f"diagnostics.ridge_baseline: {{t2v: {baseline['t2v']:.4f}, v2t: {baseline['v2t']:.4f}}}"
+    )
+
+
+@train_app.command("report")
+@reports_user_errors
+def report_command(
+    run: Annotated[
+        Path, typer.Option("--run", exists=True, file_okay=False, help="Run directory.")
+    ],
+    evaluation: Annotated[
+        Path | None, typer.Option(exists=True, dir_okay=False, help="Its `train evaluate` JSON.")
+    ] = None,
+    ridge: Annotated[
+        Path | None,
+        typer.Option(exists=True, dir_okay=False, help="The `train ridge-baseline` JSON."),
+    ] = None,
+    split: Annotated[str | None, typer.Option(help="The split the evaluation read.")] = None,
+) -> None:
+    """The run's report: identity, training, stops, evaluation and the triage of its alarms."""
+    from signworld.experiment.evaluation.report import analyse_run, write_report
+
+    for path in write_report(analyse_run(run, evaluation, ridge, split), run):
+        typer.echo(path)
+
+
+@train_app.command("compare")
+@reports_user_errors
+def compare_command(
+    run: Annotated[list[Path], typer.Option(exists=True, file_okay=False, help="Run directory.")],
+    evaluation: Annotated[
+        list[Path],
+        typer.Option(exists=True, dir_okay=False, help="Its evaluation JSON, in the same order."),
+    ],
+    output: Annotated[Path, typer.Option(file_okay=False, help="Directory to write.")],
+    k: Annotated[int, typer.Option(min=1, help="R@k compared.")] = 1,
+) -> None:
+    """The ablation tables: planned contrasts with a paired bootstrap over the same queries."""
+    from signworld.experiment.evaluation.compare import compare_runs, write_comparison
+
+    if len(run) != len(evaluation):
+        raise typer.BadParameter("one --evaluation per --run", param_hint="--evaluation")
+    for path in write_comparison(compare_runs(list(zip(run, evaluation, strict=True)), k), output):
+        typer.echo(path)
 
 
 @train_app.command("fetch-models")
@@ -92,7 +174,11 @@ def evaluate(  # noqa: PLR0913, PLR0917 (typer options)
     from signworld.experiment.train.checkpoint import CheckpointStore
     from signworld.experiment.train.config import load_config
     from signworld.experiment.train.curriculum import trainable_names
-    from signworld.experiment.train.run import STATISTICS, load_statistics
+    from signworld.experiment.train.run import (
+        STATISTICS,
+        false_negative_thresholds,
+        load_statistics,
+    )
     from signworld.metrics.directions import DIRECTIONS, Bidirectional
     from signworld.models.worldsign.model import build_worldsign
 
@@ -105,7 +191,7 @@ def evaluate(  # noqa: PLR0913, PLR0917 (typer options)
     settings = load_config(*config)
     if settings.data.embeddings is None:
         raise ValueError("data.embeddings must name the caption embeddings of these clips")
-    model = build_worldsign(settings)
+    model = build_worldsign(settings, false_negatives=false_negative_thresholds(settings))
     load_statistics(model, torch.load(run_directory / STATISTICS, weights_only=False))
     CheckpointStore(run_directory / "checkpoints", trainable_names(model)).load(
         checkpoint, model, None
@@ -137,6 +223,7 @@ def evaluate(  # noqa: PLR0913, PLR0917 (typer options)
         settings,
         torch.tensor([names.index(str(s)) for s in signs]),
         table.column("video_id").to_pylist(),
+        channels=table.column("channel_id").to_pylist(),
         masks=masks,
         ridge_baseline=ridge,
         gate=gate,
@@ -176,13 +263,13 @@ def overfit_command(
     from signworld.data.text import EmbeddingStore
     from signworld.experiment.collaudo.worldsign import overfit
     from signworld.experiment.train.config import load_config
-    from signworld.experiment.train.run import fit_statistics
+    from signworld.experiment.train.run import false_negative_thresholds, fit_statistics
     from signworld.models.worldsign.model import build_worldsign
 
     settings = load_config(*config)
     if settings.data.index is None or settings.data.embeddings is None:
         raise ValueError("data.index and data.embeddings must name the stage-0 outputs")
-    model = build_worldsign(settings)
+    model = build_worldsign(settings, false_negatives=false_negative_thresholds(settings))
     embeddings = EmbeddingStore(settings.data.embeddings).embeddings()
     train = read_index(settings.data.index, TRAIN)
     fit_statistics(model, train, embeddings, settings.data.statistics_clips)

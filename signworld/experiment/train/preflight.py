@@ -28,10 +28,11 @@ from torch import Tensor
 
 from signworld.data.augmentation import ClipAugmenter
 from signworld.data.corpus.manifest import read_manifest
+from signworld.data.negatives import UNUSED
 from signworld.data.pose.tokens import JOINTS, STEPS, TOKEN_CHANNELS
 from signworld.data.pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER
 from signworld.experiment.collaudo.contamination import contamination_report
-from signworld.loss.worldsign import POSE_TERMS
+from signworld.loss.worldsign import POSE_TERMS, REGULARIZERS
 from signworld.models.encoders.video_encoders import PATCH, TUBELET
 from signworld.models.worldsign.masking import MultiBlockMasks, TokenGrid
 from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
@@ -315,7 +316,8 @@ def p13_overfit(
     *,
     bf16: bool = False,
 ) -> Assertion:
-    """One batch, SIGReg off: the predictive loss must fall; the model is restored afterwards.
+    """One batch, the regularisers off (SIGReg, VICReg, L_unif): the predictive loss must fall;
+    the model is restored afterwards.
 
     The forward runs under the training's autocast: in float32 the whole model on a GPU's
     batch does not fit in memory.
@@ -331,7 +333,8 @@ def p13_overfit(
         for step in range(steps):
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
                 terms = model.loss(batch, step, steps, StepRandomness.at(0, 0)).parts
-            total = torch.stack([v for k, v in terms.items() if not k.startswith("sigreg")]).sum()
+            predictive = [v for k, v in terms.items() if not k.startswith(REGULARIZERS)]
+            total = torch.stack(predictive).sum()
             optimizer.zero_grad(set_to_none=True)
             total.backward()  # type: ignore[no-untyped-call]
             optimizer.step()
@@ -352,6 +355,8 @@ def p14_pose_isolated(
     """The pose never reaches the physical predictor: its output has no gradient wrt the boxes."""
     if not model.video.has_physical_level:
         return Assertion("P14", Status.SKIP, "no physical level (ESP-2)")
+    if model.video.target is not None:
+        return Assertion("P14", Status.SKIP, "video target (ESP-6): no pose, the boxes unused")
     boxes = batch.boxes.clone().requires_grad_(True)
     output = model.video.physical(batch.frames, boxes, batch.box_visible, 0, 1, generator)
     total = sum(p.state.float().sum() for p in output.predictions)
@@ -365,18 +370,36 @@ def p14_pose_isolated(
 
 
 def p15_infonce(model: WorldSign) -> Assertion:
-    """Arm C: pairs of different clips of one video never enter the denominator."""
+    """Arm C: other clips of one video and GloFND's false negatives never enter a denominator,
+    clips with the same caption are positives, and a positive is never dropped."""
     infonce = model.objective.infonce
     if infonce is None:
         return Assertion("P15", Status.SKIP, "not arm C")
-    embeddings = torch.randn(3, 8, device=infonce.log_temperature.device)
-    logits = infonce.logits(embeddings, embeddings, ["a", "a", "b"])
-    ok = bool(torch.isinf(logits[0, 1]) and torch.isinf(logits[1, 0])) and bool(
-        torch.isfinite(logits.diagonal()).all()
+    device = infonce.log_temperature.device
+    rows = torch.tensor([0, 1, 2, 0], device=device)
+    excluded = torch.zeros(4, 4, dtype=torch.bool, device=device)
+    excluded[1, 2] = excluded[2, 1] = excluded[0, 3] = True
+    positive, dropped = infonce.pairs(["a", "a", "b", "c"], rows, excluded, device)
+    problems = []
+    if not (dropped[0, 1] and dropped[1, 0]):
+        problems.append("same-video pairs in the denominator")
+    if not (dropped[1, 2] and dropped[2, 1]):
+        problems.append("false negatives in the denominator")
+    if infonce.multi_positive and not (positive[0, 3] and positive[3, 0]):
+        problems.append("clips with the same caption are not positives")
+    if (positive & dropped).any():
+        problems.append("a positive is dropped")
+    negatives = model.objective.false_negatives
+    if negatives is not None:
+        values = negatives.thresholds
+        if not bool(((values >= -1) & (values <= UNUSED)).all()):
+            problems.append("false-negative thresholds outside [-1, 2]")
+    detail = "; ".join(problems) or (
+        "same video and false negatives dropped, same caption positive"
+        if negatives is not None
+        else "same video dropped, same caption positive; no false-negative thresholds"
     )
-    return _check(
-        "P15", ok, "same-video pairs excluded" if ok else "same-video pairs in the denominator"
-    )
+    return _check("P15", not problems, detail)
 
 
 def p16_batch(config: WorldSignConfig, collective: Distributed, per_gpu: int) -> Assertion:
@@ -405,7 +428,7 @@ def _reaches(terms: Sequence[Tensor], parameters: Sequence[torch.nn.Parameter]) 
 def p17_levels(model: WorldSign, batch: WorldSignBatch, *, bf16: bool = False) -> Assertion:
     """The levels are trained apart (gerarchia §3): ``E_fis`` gives the pose encoder no
     gradient, the pose terms give the video branch none, and the semantic terms give the video
-    LoRA none unless the «global» ablation lets them."""
+    LoRA none unless the «global» ablation lets them; ESP-6's video target is frozen."""
     clips = batch.take(2)
     device = clips.frames.device
     with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
@@ -420,6 +443,9 @@ def p17_levels(model: WorldSign, batch: WorldSignBatch, *, bf16: bool = False) -
         problems.append("the pose terms reach the video branch")
     if not model.video.encoder_gradient and _reaches(semantic, found[VIDEO_LORA]):
         problems.append("the semantic terms reach the video LoRA")
+    teacher = model.video.target
+    if teacher is not None and any(p.requires_grad for p in teacher.parameters()):
+        problems.append("the video target (ESP-6) is not frozen")
     for parameter in model.parameters():
         parameter.grad = None
     return _check("P17", not problems, "; ".join(problems) or "each level trains its own weights")

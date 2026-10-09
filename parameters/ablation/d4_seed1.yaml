@@ -1,0 +1,5 @@
+# D4, on θ*: a second seed of the reference configuration, for the variance between runs.
+# The seed draws the initial weights, the data order, the masks, the SIGReg directions, the pose
+# views, the augmentation and the dropout. Lay it over the winning arm_*.yaml.
+name: worldsign-d4-seed1
+training: {seed: 1}

@@ -55,12 +55,13 @@ from signworld.metrics.readings import (
     stepwise_sigreg_ratio,
     term_gradients,
     text_head_spearman,
+    token_readings,
 )
 from signworld.models.worldsign.lora import adapter_parameters
 from signworld.models.worldsign.masking import token_roles
 from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
 from signworld.models.worldsign.plausibility import as_measures, plausibility_tests
-from signworld.models.worldsign.readout import membership
+from signworld.models.worldsign.readout import StepReadout, membership
 
 from .config import DiagnosticsSettings, WorldSignConfig
 from .curriculum import POSE, VIDEO_LORA, Stage, families
@@ -390,7 +391,7 @@ class Monitor:
             drift = self._encoder_drift()
             if drift is not None:
                 readings["encoder_drift_r2"] = drift
-        if first is not None and self.model.pose is not None:
+        if first is not None and self.model.has_physical_level:
             chosen, wanted = [first], self.settings.plausibility_clips
             while sum(len(b.videos) for b in chosen) < wanted:
                 following = next(iterator, None)
@@ -481,6 +482,8 @@ class Monitor:
                 ]
                 if baselines and not math.isnan(errors["keypoint_error_model"]):
                     out["keypoint_margin"] = min(baselines) - errors["keypoint_error_model"]
+        if "teacher" in record and "physical" in record:  # ESP-6: towards the video tokens
+            out |= token_readings(record["physical"].tokens, record["teacher"].detach())
         if "predicted" in record:
             predicted, target = record["predicted"].detach(), record["target"].detach()
             names = list(self.model.text.centering.languages)
@@ -503,8 +506,9 @@ class Monitor:
         """How much E_fis grows when a box moves to a masked region without its articulator."""
         video, pose = self.model.video, self.model.pose
         physical = video.physical_predictor
-        if physical is None or pose is None:
+        if physical is None or pose is None or not isinstance(physical.readout, StepReadout):
             return float("nan")
+        readout = physical.readout
         grid = video.grid
         mask = video.masks(len(clips.frames), randomness.masks)[-1].to(self.device)
         levels = video.backbone.context_levels(clips.frames, mask.context)
@@ -518,11 +522,11 @@ class Monitor:
             1 - members
         )
         target = functional.layer_norm(
-            pose.target(clips.pose_tokens).float(), (physical.readout.target_dim,)
+            pose.target(clips.pose_tokens).float(), (readout.target_dim,)
         )
         errors = []
         for boxes in (members * masked, shifted * masked):
-            reading = physical.readout(tokens, boxes).float()
+            reading = readout(tokens, boxes).float()
             weight = boxes.sum((-1, -2, -3)) > 0
             errors.append((reading - target).abs().mean(-1)[weight].mean())
         both = (
@@ -779,14 +783,15 @@ class Monitor:
             self._semantic_criteria(add)
         elif name == "F2":
             add("E_fis falling", self._falling("term_e_fis"), "first against last quarter")
-            r2 = self._latest("r2_visible")
-            add("R² of mostly visible steps > 0.9", r2 > s.visible_r2_min, f"{r2:.3f}")
-            margin = self._latest("dynamics_margin")
-            add("dynamics beats the baseline", margin > 0, f"margin {margin:.3f}")
+            if self.model is None or self.model.pose is not None:  # the per-step pose read-out
+                r2 = self._latest("r2_visible")
+                add("R² of mostly visible steps > 0.9", r2 > s.visible_r2_min, f"{r2:.3f}")
+                margin = self._latest("dynamics_margin")
+                add("dynamics beats the baseline", margin > 0, f"margin {margin:.3f}")
             leak = self._latest("leak_change")
             add("no leak", not leak > s.leak_tolerance, f"{leak:.2e}")
         elif name == "F3":
-            if self.model.pose is not None:
+            if self.model.has_physical_level:
                 add("E_fis falling", self._falling("term_e_fis"), "first against last quarter")
                 lora = self._latest("lora_ratio_max")
                 add(
@@ -794,6 +799,7 @@ class Monitor:
                     not lora > s.lora_ratio_max,
                     f"{lora:.3f}",
                 )
+            if self.model.pose is not None:  # the drift is read against the keypoints
                 drift = self._latest("encoder_drift_r2")
                 add(f"encoder drift R² >= {s.drift_min}", not drift < s.drift_min, f"{drift:.3f}")
             self._progress_criteria(add, extrapolated_r1)

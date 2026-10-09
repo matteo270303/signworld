@@ -16,6 +16,9 @@ inside each articulator box of a step and maps the four boxes together to the po
 * ``mask_index = 0``: the only mask token the distilled checkpoint trained (PC6);
 * dropout in the blocks (``set_dropout``), as LeWorldModel's predictor; the released module has
   its ``nn.Dropout`` layers at 0.
+
+With the video target of ESP-6 the read-out is ``TokenHeads`` instead, and ``token_forward``
+gives every predicted token (``video_target``).
 """
 
 from collections.abc import Sequence
@@ -31,6 +34,7 @@ from . import lora
 from .fusion import _Fusion
 from .masking import Mask, TokenGrid, TokenRoles
 from .readout import StepReadout, box_sum
+from .video_target import TokenHeads, TokenPrediction
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +68,7 @@ class PhysicalPredictor(nn.Module):
         self,
         predictor: Any,
         fusion: _Fusion,
-        readout: StepReadout,
+        readout: StepReadout | TokenHeads,
         adapters: LoRASettings,
         grid: TokenGrid,
         *,
@@ -93,25 +97,47 @@ class PhysicalPredictor(nn.Module):
     def width(self) -> int:
         return int(self.predictor.predictor_norm.normalized_shape[0])
 
-    def tokens(self, levels: Sequence[Tensor], mask: Mask) -> Tensor:
-        """(batch, N, width) predicted token at every grid position; zero where neither list."""
+    def _predict(self, levels: Sequence[Tensor], mask: Mask) -> tuple[Tensor, Tensor]:
+        """The released predictor on the fused levels: the masked and the visible tokens."""
         fused = self.fusion(levels)
         predicted, context = self.predictor(
             fused, [mask.context], [mask.target], mask_index=self.mask_index
         )
-        batch = fused.shape[0]
+        return predicted, context
+
+    def tokens(self, levels: Sequence[Tensor], mask: Mask) -> Tensor:
+        """(batch, N, width) predicted token at every grid position; zero where neither list."""
+        predicted, context = self._predict(levels, mask)
+        batch = predicted.shape[0]
         grid = torch.zeros(
-            batch, self.grid.size, self.width, device=fused.device, dtype=predicted.dtype
+            batch, self.grid.size, self.width, device=predicted.device, dtype=predicted.dtype
         )
         grid = grid.scatter(1, mask.target[..., None].expand(-1, -1, self.width), predicted)
         return grid.scatter(
             1, mask.context[..., None].expand(-1, -1, self.width), context.to(grid.dtype)
         )
 
+    def token_forward(
+        self, levels: Sequence[Tensor], mask: Mask, roles: TokenRoles
+    ) -> TokenPrediction:
+        """ESP-6: every masked and visible token mapped to the teacher's width."""
+        if not isinstance(self.readout, TokenHeads):
+            raise RuntimeError("the step read-out predicts the pose, not the video tokens")
+        predicted, context = self._predict(levels, mask)
+        return TokenPrediction(
+            predicted=self.readout.predicted(predicted),
+            context=self.readout.context(context),
+            target_index=mask.target,
+            context_index=mask.context,
+            context_weight=roles.distance.gather(1, mask.context),
+        )
+
     def forward(
         self, levels: Sequence[Tensor], mask: Mask, members: Tensor, roles: TokenRoles
     ) -> PhysicalPrediction:
         """``members`` (batch, steps, parts, rows, columns); ``roles`` of the same ``mask``."""
+        if not isinstance(self.readout, StepReadout):
+            raise RuntimeError("the token heads predict the video tokens: use token_forward")
         g = self.grid
         tokens = self.tokens(levels, mask).view(-1, g.steps, g.rows, g.columns, self.width)
         masked, visible, distance = (

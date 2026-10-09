@@ -24,7 +24,18 @@ from signworld.metrics.retrieval import KS
 
 T = TypeVar("T")
 
-TERMS = ("e_fis", "anchor", "sigreg_posa", "e_sem", "unif", "infonce", "sigreg_sem")
+TERMS = (
+    "e_fis",
+    "inv_posa",
+    "anchor",
+    "sigreg_posa",
+    "e_sem",
+    "unif",
+    "vicreg_var",
+    "vicreg_cov",
+    "infonce",
+    "sigreg_sem",
+)
 """Terms of the objective, in the order of the tables."""
 
 _DIRECTIONS = ("T2V", "V2T")

@@ -1,0 +1,37 @@
+# The runs of the CVPR paper: YouTube-SL-25 complete, every sign language, split by channel
+# (progetto §3.4). OpenASL is only the pipeline trial (openasl_trial.yaml).
+# Lay it after the base and before the run's overlays:
+#   worldsign.yaml + youtube_sl25.yaml + ablation/arm_<X>.yaml [+ ablation/<run on θ*>.yaml]
+#
+# Stage 0, once, before any run (the paths below are then filled in):
+#   signworld fetch-media youtube_sl25                     the videos
+#   signworld manifest build youtube_sl25                  the captioned clips
+#   signworld train materialize youtube_sl25 --output data/training/youtube_sl25/clips
+#                                                          crop, 64 frames, pose (sharded, GPU)
+#   signworld text embed youtube_sl25                      EmbeddingGemma, pinned prompt
+#   signworld train index --manifest ... --materialized ... --embeddings ...
+#       --output data/training/youtube_sl25/index.parquet -c worldsign.yaml -c youtube_sl25.yaml
+#                                                          splits by channel, frozen; also
+#                                                          writes index.splits.csv to publish
+#   signworld text false-negatives --index ... --embeddings ... --output ... --device cuda
+#                                                          GloFND's thresholds for arm C
+#   signworld train ridge-baseline -c ... --split val_channel --split test_channel
+#       --clips 5000 --output ...                          PC2 on these splits: ridge_baseline
+name: worldsign-youtube-sl25
+data:
+  index: null                 # data/training/youtube_sl25/index.parquet (stage 0)
+  embeddings: null            # data/youtube_sl25/text/<fingerprint> (stage 0)
+  split_source: channel       # ours, by language, channel and video (§3.4)
+  validation_fraction: 0.1    # channels of each sign language for validation [Aperto]
+  test_fraction: 0.1          # further channels for the paper's test, disjoint [Aperto]
+  validation_split: val_channel
+  validation_clips: 2000      # the fixed subset validated during training (§4.10)
+  seen_video_fraction: 0.02   # new videos of seen channels: the channel gap (§4.13.4)
+  held_out_languages: []      # no held-out language in the CVPR plan
+losses:
+  false_negatives: null       # arm C: the directory of `text false-negatives`
+training:
+  epochs: 15                  # [Aperto: PC7] the same clips seen by every arm; to set from
+                              # the cost per step measured on Leonardo and the GPU budget
+diagnostics:
+  ridge_baseline: null        # {t2v: …, v2t: …} from `train ridge-baseline` on val_channel

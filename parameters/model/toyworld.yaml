@@ -17,7 +17,10 @@ data:
   statistics_clips: 2000
 training:
   epochs: 3
+  stages: {pose_epochs: 1, heads_epochs: 1}  # one epoch each of P and F0, then F
   validation_every: 500
+pose_encoder:
+  warmup_epochs: 1.0          # within stage P
 diagnostics:
   frequent_every: 100
   rare_every: 1000

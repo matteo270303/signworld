@@ -1,0 +1,20 @@
+# The whole test suite with the slow tests (tests.sh); the JUnit report goes to logs/tests.
+#
+# Submit:  condor_submit -name ettore slurm/condor/tests.sub
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/slurm/condor/tests.sh
+arguments  = $(initialdir)/logs/tests/$(Cluster)
+
+output = $(initialdir)/logs/condor/tests_$(Cluster).out
+error  = $(initialdir)/logs/condor/tests_$(Cluster).err
+log    = $(initialdir)/logs/condor/tests_$(Cluster).log
+
+getenv         = True
+request_gpus   = 1
+request_cpus   = $(cpus:8)
+request_memory = $(memory:32 GB)
+request_disk   = $(disk:10 GB)
+
+queue

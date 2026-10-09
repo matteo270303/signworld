@@ -147,3 +147,39 @@ def hubness(similarity: Tensor, k: int) -> float:
     if spread == 0:
         return 0.0
     return (deviation.pow(3).mean() / spread.pow(3)).item()
+
+
+def error_sources(
+    similarity: Tensor, rows: Tensor, videos: Sequence[str], channels: Sequence[str]
+) -> dict[str, float]:
+    """Where the first result of each query comes from, in both directions.
+
+    ``similarity`` (texts, clips) for clips that are also the captions' owners (row i is clip
+    i's caption). The first result is a match (the same caption), a clip of the same video, of
+    the same channel, or of another channel: a model that leans on the signer and the
+    background errs within the video or the channel more than the gallery's make-up explains.
+    Each share comes with its chance level, the share of the gallery in that relation.
+    """
+    video_ids = {v: i for i, v in enumerate(dict.fromkeys(videos))}
+    channel_ids = {c: i for i, c in enumerate(dict.fromkeys(channels))}
+    video = torch.tensor([video_ids[v] for v in videos])
+    channel = torch.tensor([channel_ids[c] for c in channels])
+    out: dict[str, float] = {}
+    for direction, (scores,) in both_ways(similarity.cpu()).items():
+        top = scores.argmax(dim=1)
+        match = rows[top] == rows
+        same_video = (video[top] == video) & ~match
+        same_channel = (channel[top] == channel) & (video[top] != video) & ~match
+        other = ~match & ~same_video & ~same_channel
+        gallery_video = (video[:, None] == video[None, :]).float().mean(1)
+        gallery_channel = (channel[:, None] == channel[None, :]).float().mean(1) - gallery_video
+        for name, share, chance in (
+            ("match", match, None),
+            ("same_video", same_video, gallery_video),
+            ("same_channel", same_channel, gallery_channel),
+            ("other_channel", other, None),
+        ):
+            out[f"{direction}_first_{name}"] = float(share.float().mean())
+            if chance is not None:
+                out[f"{direction}_first_{name}_chance"] = float(chance.mean())
+    return out

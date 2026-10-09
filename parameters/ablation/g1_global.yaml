@@ -1,0 +1,4 @@
+# G1, on θ*: the «global» hierarchy, E_sem also trains the video LoRA (gerarchia §8), with the
+# same weights and learning rate as θ*. Lay it over the winning arm_*.yaml.
+name: worldsign-g1-global
+semantic: {trains_encoder: true}

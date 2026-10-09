@@ -9,7 +9,7 @@ through instead (the «global» ablation). ``build_video_branch`` assembles the 
 ``WorldSignConfig``.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -26,15 +26,18 @@ from .masking import LambdaSchedule, Mask, MaskPolicy, TokenGrid, token_roles
 from .physical import PhysicalPrediction, PhysicalPredictor
 from .readout import StepReadout, membership
 from .semantic import SemanticPredictor
+from .video_target import TokenHeads, TokenPrediction, VideoTarget
 
 
 @dataclass(frozen=True, slots=True)
 class PhysicalOutput:
     predictions: list[PhysicalPrediction]
-    """One per mask kind of the step."""
+    """One per mask kind of the step, read per step towards the pose target; empty in ESP-6."""
     masks: list[Mask]
     context_lambda: float
     """λ of ``L_ctx`` at this step (warm-up of V-JEPA 2.1)."""
+    tokens: list[TokenPrediction] = field(default_factory=list)
+    """ESP-6: one per mask kind, every token towards the video target; empty with the pose."""
 
 
 class VideoBranch(nn.Module):
@@ -49,9 +52,12 @@ class VideoBranch(nn.Module):
         *,
         weight_distance: bool = False,
         encoder_gradient: bool = False,
+        target: VideoTarget | None = None,
     ) -> None:
         super().__init__()
         self.backbone = backbone
+        self.target = target
+        """ESP-6: the frozen released encoder whose tokens the physical level predicts."""
         self.physical_predictor = physical
         self.semantic_predictor = semantic
         self.masks = masks
@@ -84,14 +90,24 @@ class VideoBranch(nn.Module):
         device = frames.device
         members = membership(boxes, visible, self.grid.rows, self.grid.columns)
         lam = self.schedule.at(step, total_steps)
-        predictions, drawn = [], []
+        predictions, tokens, drawn = [], [], []
         for drawn_mask in self.masks(len(frames), generator):
             mask = drawn_mask.to(device)
             levels = self.backbone.context_levels(frames, mask.context)
             roles = token_roles(mask, self.grid, self.weight_distance)
-            predictions.append(self.physical_predictor(levels, mask, members, roles))
+            if self.target is None:
+                predictions.append(self.physical_predictor(levels, mask, members, roles))
+            else:
+                tokens.append(self.physical_predictor.token_forward(levels, mask, roles))
             drawn.append(mask)
-        return PhysicalOutput(predictions, drawn, lam)
+        return PhysicalOutput(predictions, drawn, lam, tokens)
+
+    def target_tokens(self, frames: Tensor) -> Tensor:
+        """ESP-6: (batch, N, width) the frozen encoder's tokens of the whole clip, normalised."""
+        if self.target is None:
+            raise RuntimeError("the physical level predicts the pose, not the video")
+        tokens: Tensor = self.target(frames)
+        return tokens
 
     def semantic(self, frames: Tensor, record: dict[str, Tensor] | None = None) -> Tensor:
         """(batch, K, d) predicted caption embeddings ŷ from the whole clip.
@@ -139,16 +155,24 @@ def assemble(
     # The physical level adapts the encoder; with neither it nor the global ablation, no level
     # trains it and it stays as released (ESP-2).
     adapted = config.physical.enabled or config.semantic.trains_encoder
+    video_target = config.physical.enabled and config.physical.target == "video"
+    # ESP-6's teacher is copied before the LoRA is injected in place: every weight as released.
+    teacher = VideoTarget(encoder) if video_target else None
     backbone = VideoBackbone(encoder, config.encoder, adapted=adapted)
     physical = None
     if config.physical.enabled:
         released = predictor.predictor_embed
         fusion = build_fusion(config.fusion, backbone.level_norms(), released)
         width = int(predictor.predictor_norm.normalized_shape[0])
+        readout: StepReadout | TokenHeads = (
+            TokenHeads(width, teacher.width)
+            if teacher is not None
+            else StepReadout(width, len(Articulator), config.physical.target_dim)
+        )
         physical = PhysicalPredictor(
             predictor,
             fusion,
-            StepReadout(width, len(Articulator), config.physical.target_dim),
+            readout,
             config.physical.lora,
             grid,
             mask_index=config.physical.mask_index,
@@ -171,4 +195,5 @@ def assemble(
         grid,
         weight_distance=settings.weight_distance,
         encoder_gradient=config.semantic.trains_encoder,
+        target=teacher,
     )

@@ -46,8 +46,9 @@ TRAIN = "train"
 VALIDATION_CHANNEL = "val_channel"
 VALIDATION_LANGUAGE = "val_language"
 VALIDATION_VIDEO = "val_video"
+TEST_CHANNEL = "test_channel"
 """New videos of channels seen in training (§4.13.4)."""
-SPLITS = (TRAIN, VALIDATION_CHANNEL, VALIDATION_LANGUAGE, VALIDATION_VIDEO)
+SPLITS = (TRAIN, VALIDATION_CHANNEL, VALIDATION_LANGUAGE, VALIDATION_VIDEO, TEST_CHANNEL)
 
 INDEX_SCHEMA = pa.schema(
     [
@@ -80,7 +81,10 @@ def assign_splits(
     """The split of every clip, by language, channel and video, never by clip (§3.4).
 
     ``val_language``: the held-out sign languages. ``val_channel``: a share of the channels of
-    every other language. ``val_video``: a share of the videos of the remaining channels.
+    every other language. ``test_channel``: a further share of them, disjoint, for the numbers
+    of the paper, while the validation chooses the checkpoints and the best arm. ``val_video``:
+    a share of the videos of the remaining channels. Channels are taken in the order of a
+    stable hash of their ID, so the splits are the same on every machine.
     """
     split = np.full(len(channels), TRAIN, dtype=object)
     held = np.isin(sign_languages, list(settings.held_out_languages))
@@ -88,6 +92,12 @@ def assign_splits(
     rest = np.flatnonzero(~held)
     test = channel_split(channels[rest], sign_languages[rest], settings.validation_fraction)
     split[rest[test]] = VALIDATION_CHANNEL
+    if settings.test_fraction > 0:
+        # The next channels in the same hash order: a share of what validation left.
+        left = np.flatnonzero(split == TRAIN)
+        share = settings.test_fraction / (1 - settings.validation_fraction)
+        tested = channel_split(channels[left], sign_languages[left], share)
+        split[left[tested]] = TEST_CHANNEL
     if videos is not None:
         seen = (split == TRAIN) & video_split(videos, settings.seen_video_fraction)
         split[seen] = VALIDATION_VIDEO
@@ -195,6 +205,21 @@ def write_index(table: pa.Table, path: Path) -> None:
     temporary = path.with_name(f"{path.name}.tmp")
     pq.write_table(table, temporary)
     temporary.replace(path)
+
+
+SPLIT_COLUMNS = ("clip_id", "video_id", "channel_id", "sign_language", "caption_language", "split")
+
+
+def write_split_list(table: pa.Table, path: Path) -> str:
+    """The splits as a CSV without machine paths, to freeze and publish; its SHA-256."""
+    import hashlib  # noqa: PLC0415 (only the index builder writes it)
+
+    import pyarrow.csv as pacsv  # noqa: PLC0415
+
+    ordered = table.select(list(SPLIT_COLUMNS)).sort_by("clip_id")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pacsv.write_csv(ordered, path)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def read_index(path: Path, split: str | None = None) -> pa.Table:

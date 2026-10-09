@@ -23,6 +23,7 @@ from signworld.loss.worldsign import physical_energy_per_clip
 
 from .model import StepRandomness, WorldSign, WorldSignBatch
 from .pose_branch import step_confidence
+from .video_target import token_energy_per_clip
 
 Manipulation = Callable[[WorldSignBatch], WorldSignBatch]
 
@@ -91,13 +92,21 @@ MANIPULATIONS: dict[str, tuple[Manipulation, str]] = {
 """Name → (manipulation, expected effect on Ē_fis) of §4.12.4."""
 
 
+POSE_ONLY = frozenset({"pose_shifted"})
+"""Controls that move the pose alone: meaningless when the target is the video (ESP-6)."""
+
+
 @torch.no_grad()
 def plausibility(model: WorldSign, batch: WorldSignBatch, masks: int) -> Tensor:
-    """(masks, batch) E_fis of every clip under ``masks`` fixed random masks of each kind."""
-    pose = model.pose
-    if pose is None:
+    """(masks, batch) E_fis of every clip under ``masks`` fixed random masks of each kind.
+
+    With the pose target the target is the pose of the (manipulated) clip; in ESP-6 it is the
+    frozen encoder's tokens of the (manipulated) clip, and E_fis is V-JEPA 2.1's token loss."""
+    if not model.has_physical_level:
         raise RuntimeError("no physical level")
-    latent = pose.target(batch.pose_tokens)
+    pose = model.pose
+    latent = pose.target(batch.pose_tokens) if pose is not None else None
+    teacher = model.video.target_tokens(batch.frames) if pose is None else None
     confidence = step_confidence(batch.keypoint_weights)
     energies = []
     for draw in range(masks):
@@ -105,9 +114,15 @@ def plausibility(model: WorldSign, batch: WorldSignBatch, masks: int) -> Tensor:
         output = model.video.physical(
             batch.frames, batch.boxes, batch.box_visible, 0, 1, randomness.masks
         )
-        energies.append(
-            physical_energy_per_clip(output.predictions, latent, confidence, output.context_lambda)
-        )
+        if teacher is not None:
+            energies.append(token_energy_per_clip(output.tokens, teacher, output.context_lambda))
+        else:
+            assert latent is not None
+            energies.append(
+                physical_energy_per_clip(
+                    output.predictions, latent, confidence, output.context_lambda
+                )
+            )
     return torch.stack(energies).float().cpu()
 
 
@@ -136,12 +151,17 @@ def plausibility_tests(
     """
     was_training = model.training
     model.eval()
+    chosen = {
+        name: value
+        for name, value in MANIPULATIONS.items()
+        if model.pose is not None or name not in POSE_ONLY
+    }
     intact_parts: list[Tensor] = []
-    manipulated: dict[str, list[Tensor]] = {name: [] for name in MANIPULATIONS}
+    manipulated: dict[str, list[Tensor]] = {name: [] for name in chosen}
     for batch in batches:
         clips = batch.to(device).augmented()
         intact_parts.append(plausibility(model, clips, masks))
-        for name, (manipulate, _) in MANIPULATIONS.items():
+        for name, (manipulate, _) in chosen.items():
             manipulated[name].append(plausibility(model, manipulate(clips), masks))
     model.train(was_training)
     local = {"intact": torch.cat(intact_parts, dim=1)} | {
@@ -152,7 +172,7 @@ def plausibility_tests(
     intact = joined["intact"]
     floor = float((intact.std(0) / math.sqrt(masks)).mean()) if masks > 1 else 0.0
     results = []
-    for name, (_, expected) in MANIPULATIONS.items():
+    for name, (_, expected) in chosen.items():
         energy = joined[name]
         increase = energy.mean(0) - intact.mean(0)
         mean = float(increase.mean())

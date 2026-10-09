@@ -162,11 +162,16 @@ class ClipMaterializer:
         if signer is None:
             return None
 
-        crops = np.concatenate(list(self._cropped_chunks(reader, first, last, signer.crop)))
+        cropped = np.concatenate(list(self._cropped_chunks(reader, first, last, signer.crop)))
         inside = signer.union_in_crop(self._size)
         video = root / "clips" / f"{cut.clip_id}.mp4"
         pose = root / "poses" / f"{cut.clip_id}.npz"
-        _write_video(video, crops, fps)
+        _write_video(video, cropped, fps)
+        # The selection and the pose read the frames as written: mp4v is lossy and the training
+        # decodes these pixels, so the pose target describes exactly what the model sees (on
+        # the crops before encoding the collaudo found 30/200 selections and a 3.2 % keypoint
+        # gap on YouTube-SL-25, §4.13.1).
+        crops = _read_video(video)
 
         selected = np.asarray(select_frames(local_motion(crops)))
         centre = max(0, len(crops) // 2 - FRAMES_PER_CLIP // 2)
@@ -195,6 +200,13 @@ class ClipMaterializer:
         for start in range(first, last, DECODE_CHUNK):
             indices = list(range(start, min(start + DECODE_CHUNK, last)))
             yield crop_square(reader.get_batch(indices).asnumpy(), box, self._size)
+
+
+def _read_video(path: Path) -> np.ndarray:
+    """(frames, H, W, 3) uint8 RGB of a written clip, every frame."""
+    reader = decord.VideoReader(str(path))
+    frames: np.ndarray = reader.get_batch(list(range(len(reader)))).asnumpy()
+    return frames
 
 
 def _write_video(path: Path, frames: np.ndarray, fps: float) -> None:

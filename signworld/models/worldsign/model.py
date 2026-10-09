@@ -27,6 +27,7 @@ from torch.nn import functional
 from signworld.experiment.train.config import WorldSignConfig
 from signworld.experiment.train.distributed import SINGLE, Distributed
 from signworld.loss.worldsign import (
+    FalseNegatives,
     LossTerms,
     Objective,
     invariance,
@@ -38,6 +39,7 @@ from .masking import TokenGrid
 from .pose_branch import PoseBranch, step_confidence
 from .text_branch import TextBranch
 from .video_branch import VideoBranch, build_video_branch
+from .video_target import token_energy, token_energy_per_clip
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,8 +137,11 @@ class WorldSign(nn.Module):
         objective: Objective,
     ) -> None:
         super().__init__()
-        if video.has_physical_level != (pose is not None):
-            raise ValueError("the physical predictor and the pose branch go together (ESP-2)")
+        needs_pose = video.has_physical_level and video.target is None
+        if needs_pose != (pose is not None):
+            raise ValueError(
+                "the pose branch goes with a physical level that predicts the pose (ESP-2, ESP-6)"
+            )
         self.video = video
         self.pose = pose
         self.text = text
@@ -144,7 +149,8 @@ class WorldSign(nn.Module):
 
     @property
     def has_physical_level(self) -> bool:
-        return self.pose is not None
+        """A physical level, towards the pose or, in ESP-6, towards the video."""
+        return self.video.has_physical_level
 
     def _pose(self) -> PoseBranch:
         if self.pose is None:
@@ -201,18 +207,49 @@ class WorldSign(nn.Module):
         energy = physical_energy(output.predictions, target, confidence, output.context_lambda)
         return {"e_fis": energy}
 
+    def video_target_terms(
+        self,
+        batch: WorldSignBatch,
+        step: int,
+        total_steps: int,
+        randomness: StepRandomness,
+        record: dict[str, Any] | None = None,
+    ) -> dict[str, Tensor]:
+        """ESP-6: ``E_fis`` of the masked clip against the frozen encoder's tokens."""
+        output = self.video.physical(
+            batch.frames, batch.boxes, batch.box_visible, step, total_steps, randomness.masks
+        )
+        target = self.video.target_tokens(batch.frames)
+        if record is not None:
+            record |= {"physical": output, "teacher": target}
+        return {"e_fis": token_energy(output.tokens, target, output.context_lambda)}
+
     def semantic_terms(
         self,
         batch: WorldSignBatch,
         randomness: StepRandomness,
         record: dict[str, Any] | None = None,
     ) -> dict[str, Tensor]:
-        """Level 2: the arm's L_pred_sem and SIGReg_sem, from ŷ of the whole clip and ẽ."""
+        """Level 2: the arm's L_pred_sem and SIGReg_sem, from ŷ of the whole clip and ẽ.
+
+        Arm C also reads each clip's caption row (the same caption is a positive) and, for
+        GloFND's false negatives, the frozen caption vectors centred by language."""
         predicted = self.video.semantic(batch.frames, record)
         target = self.text(batch.captions, batch.languages)
         if record is not None:
             record |= {"predicted": predicted, "target": target}
-        return self.objective.semantic_terms(predicted, target, batch.videos, randomness.directions)
+        captions = None
+        if self.objective.false_negatives is not None:
+            with torch.no_grad():
+                captions = self.text.centering(batch.captions, batch.languages)
+        return self.objective.semantic_terms(
+            predicted,
+            target,
+            batch.videos,
+            randomness.directions,
+            batch.caption_rows,
+            captions,
+        )
 
     def loss(  # noqa: PLR0913 (the step, its randomness, the passes and a record)
         self,
@@ -237,7 +274,9 @@ class WorldSign(nn.Module):
         terms: dict[str, Tensor] = {}
         diagnostics: dict[str, Tensor] = {}
         seen: dict[str, Any] = record if record is not None else {}
-        if self.has_physical_level and (pose or physical):
+        if self.has_physical_level and self.pose is None and physical:  # ESP-6
+            terms.update(self.video_target_terms(batch, step, total_steps, randomness, seen))
+        elif self.pose is not None and (pose or physical):
             found, target = self.pose_terms(batch, randomness, seen)
             if pose:
                 terms.update(found)
@@ -249,6 +288,7 @@ class WorldSign(nn.Module):
                 )
         if semantic:
             terms.update(self.semantic_terms(batch, randomness, seen))
+            diagnostics.update(self.objective.last_diagnostics)
         if not terms:
             raise ValueError("no pass selected")
         combined = self.objective.combine(terms)
@@ -264,7 +304,12 @@ class WorldSign(nn.Module):
                 seen["predicted"], seen["target"][:, None], dim=-1
             )
             out["e_sem"] = (1 - cosine.amax(dim=1)).float()
-        if "physical" in seen:
+        if "physical" in seen and "teacher" in seen:
+            output = seen["physical"]
+            out["e_fis"] = token_energy_per_clip(
+                output.tokens, seen["teacher"], output.context_lambda
+            ).float()
+        elif "physical" in seen:
             output = seen["physical"]
             out["e_fis"] = physical_energy_per_clip(
                 output.predictions, seen["latent"], seen["confidence"], output.context_lambda
@@ -280,16 +325,29 @@ def assemble_worldsign(
     pose: PoseBranch | None,
     config: WorldSignConfig,
     collective: Distributed = SINGLE,
+    false_negatives: Tensor | None = None,
 ) -> WorldSign:
-    """The model around already-built branches (also used by the tests, with tiny ones)."""
+    """The model around already-built branches (also used by the tests, with tiny ones).
+
+    ``false_negatives``: GloFND's threshold of every caption row, for arm C
+    (``signworld.data.negatives``)."""
+    if config.losses.false_negatives is not None and false_negatives is None:
+        raise ValueError("losses.false_negatives is set: load its thresholds first")
     objective = Objective(
-        config.losses, config.semantic, physical=config.physical.enabled, collective=collective
+        config.losses,
+        config.semantic,
+        physical=config.physical.enabled,
+        collective=collective,
+        false_negatives=None if false_negatives is None else FalseNegatives(false_negatives),
     )
     return WorldSign(video, pose, TextBranch(config.text), objective)
 
 
 def build_worldsign(
-    config: WorldSignConfig, grid: TokenGrid | None = None, collective: Distributed = SINGLE
+    config: WorldSignConfig,
+    grid: TokenGrid | None = None,
+    collective: Distributed = SINGLE,
+    false_negatives: Tensor | None = None,
 ) -> WorldSign:
     """V-JEPA 2.1 loaded from its checkpoint and adapted, the pose encoder built from scratch.
 
@@ -299,7 +357,7 @@ def build_worldsign(
     video = build_video_branch(config, grid)
     pose = (
         PoseBranch.from_settings(config.pose_encoder, video.grid.steps)
-        if config.physical.enabled
+        if config.physical.enabled and config.physical.target == "pose"
         else None
     )
-    return assemble_worldsign(video, pose, config, collective)
+    return assemble_worldsign(video, pose, config, collective, false_negatives)

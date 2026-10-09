@@ -1,0 +1,4 @@
+# ESP-1, arm V: alignment + VICReg on {ŷ} and on {ẽ}, in place of SIGReg (moments, not the
+# whole distribution). VICReg's 25/25/1 with E_sem as invariance (losses.vicreg_coefficients).
+name: worldsign-V
+losses: {arm: V}

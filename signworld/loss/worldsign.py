@@ -5,11 +5,18 @@
 λ_P = 0.04 for the pose (posa §4.2) and λ = 0.04 above it (loss §8.5), with ``L_pred_sem`` and
 ``SIGReg_sem`` set by the arm of ESP-1:
 
-    A₀   E_sem                —
-    A    E_sem                ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
-    B₀   E_sem + L_unif       —
-    B    E_sem + L_unif       ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
-    C    InfoNCE              ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
+    A₀   E_sem                                  —
+    A    E_sem                                  ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
+    V    E_sem + 0.5·Σ v + 0.02·Σ c (VICReg)    —
+    B₀   E_sem + L_unif / 3                     —
+    B    E_sem + L_unif / 3                     ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
+    C    InfoNCE                                ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
+
+The weights inside an arm come from the closest literature (``LossSettings``): VICReg's
+25/25/1, with E_sem in place of its MSE (2·E_sem at unit variance); Wang and Isola's
+0.75·L_align + 0.5·L_unif at batch 128, with L_align = 2·E_sem on the sphere. InfoNCE treats
+clips with the same caption as positives and drops from its denominators the clips of the
+same video and the false negatives of GloFND, read on the frozen caption embeddings.
 
 SIGReg is applied to each modality apart, as LeJEPA applies it to each view, with the same
 random directions for both. On the pose it is applied to each of the four views at each step
@@ -23,6 +30,7 @@ off (ESP-2) every pose and physical term is absent.
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -35,6 +43,8 @@ from signworld.models.worldsign.physical import PhysicalPrediction
 
 POSE_TERMS = ("inv_posa", "anchor", "sigreg_posa")
 """The terms of level 0, the pose (posa §4.2)."""
+REGULARIZERS = ("sigreg", "vicreg", "unif")
+"""Prefixes of the terms that shape the distribution rather than predict (P13 turns them off)."""
 
 
 def step_errors(prediction: PhysicalPrediction, target: Tensor) -> Tensor:
@@ -123,28 +133,111 @@ def uniformity(x: Tensor, t: float) -> Tensor:
     return value
 
 
-class InfoNCE(nn.Module):
-    """Symmetric InfoNCE with a learnable temperature; same-video pairs are not negatives."""
+def vicreg_variance(x: Tensor, gamma: float, epsilon: float) -> Tensor:
+    """VICReg's v(Z): the mean over dimensions of ``max(0, gamma - √(Var(z_j) + ε))``."""
+    std = (x.float().var(dim=0) + epsilon).sqrt()
+    return functional.relu(gamma - std).mean()
 
-    def __init__(self, temperature: float) -> None:
+
+def vicreg_covariance(x: Tensor) -> Tensor:
+    """VICReg's c(Z): the squared off-diagonal covariances, summed and divided by d."""
+    z = x.float() - x.float().mean(dim=0)
+    covariance = z.T @ z / max(len(z) - 1, 1)
+    off_diagonal = covariance - torch.diag(torch.diagonal(covariance))
+    return off_diagonal.pow(2).sum() / x.shape[-1]
+
+
+def _soft_cross_entropy(logits: Tensor, positive: Tensor, dropped: Tensor) -> Tensor:
+    """Mean over the rows of ``-Σ_{j ∈ P_i} log softmax_ij / |P_i|``, softmax over the columns
+    that are not dropped (UniCL's target, uniform over the positives)."""
+    log_p = functional.log_softmax(logits.masked_fill(dropped, float("-inf")), dim=1)
+    share = positive.float() / positive.sum(dim=1, keepdim=True).float()
+    per_row = -(share * log_p.masked_fill(~positive, 0.0)).sum(dim=1)
+    return per_row.mean()
+
+
+class InfoNCE(nn.Module):
+    """Symmetric InfoNCE with a learnable temperature (arm C).
+
+    * Positives: a clip and its caption; with ``rows``, every clip with the same caption too
+      (``multi_positive``), with the target spread evenly over them.
+    * Dropped from the denominators: the other clips of the same video (P15) and, with
+      ``excluded``, GloFND's false negatives; a positive is never dropped.
+    """
+
+    def __init__(
+        self, temperature: float, min_temperature: float = 0.01, multi_positive: bool = True
+    ) -> None:
         super().__init__()
         self.log_temperature = nn.Parameter(torch.tensor(temperature).log())
+        self.min_temperature = min_temperature
+        self.multi_positive = multi_positive
 
-    def logits(self, video: Tensor, text: Tensor, videos: Sequence[str]) -> Tensor:
-        """(batch, batch) scaled cosines; pairs of different clips of one video at -inf (P15)."""
-        logits = functional.normalize(video, dim=-1) @ functional.normalize(text, dim=-1).T
-        logits = logits / self.log_temperature.exp()
-        same = torch.tensor([[a == b for b in videos] for a in videos], device=logits.device)
-        excluded = same & ~torch.eye(len(videos), dtype=torch.bool, device=logits.device)
-        masked: Tensor = logits.masked_fill(excluded, float("-inf"))
-        return masked
+    @property
+    def temperature(self) -> Tensor:
+        """The learnt temperature, floored as CLIP clips its logit scale at 100."""
+        return self.log_temperature.exp().clamp_min(self.min_temperature)
 
-    def forward(self, video: Tensor, text: Tensor, videos: Sequence[str]) -> Tensor:
-        logits = self.logits(video, text, videos)
-        labels = torch.arange(len(videos), device=logits.device)
+    def pairs(
+        self, videos: Sequence[str], rows: Tensor | None, excluded: Tensor | None, device: Any
+    ) -> tuple[Tensor, Tensor]:
+        """(batch, batch) ``positive`` and ``dropped`` masks, video along the rows."""
+        size = len(videos)
+        positive = torch.eye(size, dtype=torch.bool, device=device)
+        if rows is not None and self.multi_positive:
+            positive |= rows.to(device)[:, None] == rows.to(device)[None, :]
+        same = torch.tensor([[a == b for b in videos] for a in videos], device=device)
+        dropped = same
+        if excluded is not None:
+            dropped = dropped | excluded.to(device)
+        return positive, dropped & ~positive
+
+    def logits(self, video: Tensor, text: Tensor) -> Tensor:
+        """(batch, batch) cosines over the temperature, video along the rows."""
+        cosine = functional.normalize(video, dim=-1) @ functional.normalize(text, dim=-1).T
+        return cosine / self.temperature
+
+    def forward(
+        self,
+        video: Tensor,
+        text: Tensor,
+        videos: Sequence[str],
+        rows: Tensor | None = None,
+        excluded: Tensor | None = None,
+    ) -> Tensor:
+        logits = self.logits(video, text)
+        positive, dropped = self.pairs(videos, rows, excluded, logits.device)
         return 0.5 * (
-            functional.cross_entropy(logits, labels) + functional.cross_entropy(logits.T, labels)
+            _soft_cross_entropy(logits, positive, dropped)
+            + _soft_cross_entropy(logits.T, positive.T, dropped.T)
         )
+
+
+class FalseNegatives:
+    """GloFND's false negatives, read with thresholds fixed in advance (``text.negatives``).
+
+    Caption ``i`` treats caption ``j`` as a false negative when the cosine of their frozen,
+    language-centred EmbeddingGemma vectors reaches ``λ_i``, the k-th largest of its
+    similarities to the reference set with k = ceil(alpha · size), i.e. its top alpha share:
+    GloFND's fixed point, computed once since the oracle is frozen.
+    A pair is dropped when either caption flags the other, as worldSign symmetrised it.
+    """
+
+    def __init__(self, thresholds: Tensor) -> None:
+        self.thresholds = thresholds.float()
+
+    def mask(self, captions: Tensor, rows: Tensor) -> Tensor:
+        """(batch, batch) bool for the centred caption vectors and their store rows.
+
+        In fp32 whatever the autocast: a bf16 cosine keeps ~3 digits, too few against a
+        threshold measured in fp32."""
+        with torch.autocast(captions.device.type, enabled=False):
+            unit = functional.normalize(captions.float(), dim=-1)
+            similarity = unit @ unit.T
+        thresholds = self.thresholds.to(captions.device)[rows.to(captions.device)]
+        flagged = (similarity >= thresholds[:, None]) | (similarity >= thresholds[None, :])
+        different = rows.to(captions.device)[:, None] != rows.to(captions.device)[None, :]
+        return flagged & different
 
 
 class SIGRegLoss:
@@ -211,6 +304,7 @@ class Objective(nn.Module):
         semantic: SemanticSettings,
         physical: bool,
         collective: Distributed = SINGLE,
+        false_negatives: FalseNegatives | None = None,
     ) -> None:
         super().__init__()
         self.settings = losses
@@ -218,7 +312,16 @@ class Objective(nn.Module):
         self.physical = physical
         self.collective = collective
         self.sigreg = SIGRegLoss(losses.sigreg_directions, losses.sigreg_knots, collective)
-        self.infonce = InfoNCE(losses.infonce_temperature) if losses.arm == "C" else None
+        self.infonce = (
+            InfoNCE(
+                losses.infonce_temperature, losses.infonce_min_temperature, losses.multi_positive
+            )
+            if losses.arm == "C"
+            else None
+        )
+        self.false_negatives = false_negatives if losses.arm == "C" else None
+        self.last_diagnostics: dict[str, Tensor] = {}
+        """Values of the last semantic pass that do not enter the total (arm C's pairs)."""
 
     @property
     def uses_sigreg(self) -> bool:
@@ -228,20 +331,42 @@ class Objective(nn.Module):
     def uses_uniformity(self) -> bool:
         return self.settings.arm in ("B0", "B")
 
+    @property
+    def uses_vicreg(self) -> bool:
+        return self.settings.arm == "V"
+
     def semantic_terms(
-        self, predicted: Tensor, text: Tensor, videos: Sequence[str], generator: torch.Generator
+        self,
+        predicted: Tensor,
+        text: Tensor,
+        videos: Sequence[str],
+        generator: torch.Generator,
+        rows: Tensor | None = None,
+        captions: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """``predicted`` (batch, K, d) and ``text`` (batch, d), this GPU's share of the batch.
 
-        InfoNCE and L_unif compare all the pairs of the whole batch, gathered from every GPU.
+        InfoNCE, L_unif and VICReg read the whole batch, gathered from every GPU. Arm C also
+        reads each clip's caption ``rows`` (same caption, positive) and, for its false
+        negatives, the frozen ``captions`` centred by language (batch, 768).
         """
         terms: dict[str, Tensor] = {}
+        self.last_diagnostics = {}
         gather = self.collective.all_gather
         if self.infonce is not None:
             if predicted.shape[1] != 1:
                 raise ValueError("arm C with several hypotheses is not defined here")
             everyone = self.collective.gather_objects(videos)
-            terms["infonce"] = self.infonce(gather(predicted[:, 0]), gather(text), everyone)
+            every_row = None if rows is None else gather(rows.to(text.device))
+            excluded = None
+            if self.false_negatives is not None:
+                if rows is None or captions is None or every_row is None:
+                    raise ValueError("the false negatives need the caption rows and vectors")
+                excluded = self.false_negatives.mask(gather(captions.detach()), every_row)
+            terms["infonce"] = self.infonce(
+                gather(predicted[:, 0]), gather(text), everyone, every_row, excluded
+            )
+            self.last_diagnostics = self._pair_diagnostics(everyone, every_row, excluded)
         elif predicted.shape[1] > 1:
             terms["e_sem"] = free_energy(predicted, text, self.relaxation).mean()
         else:
@@ -251,9 +376,38 @@ class Objective(nn.Module):
                 uniformity(gather(predicted.flatten(0, 1)), self.settings.uniformity_t)
                 + uniformity(gather(text), self.settings.uniformity_t)
             )
+        if self.uses_vicreg:
+            modalities = (gather(predicted.flatten(0, 1)), gather(text))
+            s = self.settings
+            terms["vicreg_var"] = sum(
+                (vicreg_variance(z, s.vicreg_gamma, s.vicreg_epsilon) for z in modalities),
+                torch.zeros((), device=text.device),
+            )
+            terms["vicreg_cov"] = sum(
+                (vicreg_covariance(z) for z in modalities), torch.zeros((), device=text.device)
+            )
         if self.uses_sigreg:
             terms["sigreg_sem"] = self.sigreg([predicted.flatten(0, 1), text], generator)
         return terms
+
+    @torch.no_grad()
+    def _pair_diagnostics(
+        self, videos: Sequence[str], rows: Tensor | None, excluded: Tensor | None
+    ) -> dict[str, Tensor]:
+        """Arm C: positives and dropped negatives per clip, and the temperature."""
+        assert self.infonce is not None
+        device = self.infonce.log_temperature.device
+        positive, dropped = self.infonce.pairs(videos, rows, excluded, device)
+        out = {
+            "temperature": self.infonce.temperature.detach(),
+            "positives_per_clip": positive.float().sum(dim=1).mean() - 1.0,
+            "dropped_per_clip": dropped.float().sum(dim=1).mean(),
+        }
+        if excluded is not None:
+            out["false_negatives_per_clip"] = (
+                (excluded.to(device) & ~positive).float().sum(1).mean()
+            )
+        return out
 
     def pose_sigreg(self, views: Tensor, present: Tensor, generator: torch.Generator) -> Tensor:
         """``SIGReg_posa``: the mean over the views and the steps of SIGReg of
@@ -266,12 +420,21 @@ class Objective(nn.Module):
 
     def weights(self, names: Iterable[str]) -> dict[str, float]:
         """Each term's weight in the total: ``1 - λ`` if predictive, ``λ`` if SIGReg, with the
-        pose level's own λ on its terms."""
+        pose level's own λ on its terms; L_unif and VICReg's terms carry, on top, their
+        weight against E_sem from the literature (``LossSettings``)."""
+        s = self.settings
+        invariance, variance, covariance = s.vicreg_coefficients
+        relative = {
+            "unif": s.uniformity_weight,
+            "vicreg_var": variance / (2 * invariance),
+            "vicreg_cov": covariance / (2 * invariance),
+        }
         out = {}
         for name in names:
             pose = name in POSE_TERMS
-            weight = self.settings.pose_sigreg_weight if pose else self.settings.sigreg_weight
-            out[name] = weight if name.startswith("sigreg") else 1.0 - weight
+            weight = s.pose_sigreg_weight if pose else s.sigreg_weight
+            level = weight if name.startswith("sigreg") else 1.0 - weight
+            out[name] = level * relative.get(name, 1.0)
         return out
 
     def combine(self, terms: dict[str, Tensor]) -> LossTerms:

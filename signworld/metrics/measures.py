@@ -42,6 +42,7 @@ from signworld.loss.worldsign import uniformity
 from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
 from signworld.models.worldsign.readout import membership
 
+from ..metrics.distribution import distribution_measures
 from ..metrics.geometry import centered, condition_number, effective_rank, isoscore
 from ..metrics.retrieval import both_ways, hubness
 from .readings import (
@@ -54,6 +55,7 @@ from .readings import (
     ridge_r2,
     sigreg_ratio,
     stepwise_sigreg_ratio,
+    token_readings,
 )
 
 PARTS = ("body", "left", "right", "face")
@@ -77,9 +79,12 @@ def _noise(frames: Tensor, generator: torch.Generator) -> Tensor:
 
 
 def _physical(model: WorldSign, clips: WorldSignBatch, record: dict[str, Any]) -> dict[str, float]:
-    """The read-outs and keypoint errors of one batch's physical pass."""
+    """The read-outs and keypoint errors of one batch's physical pass; in ESP-6 the predicted
+    tokens against the frozen encoder's."""
     pose = model.pose
     if pose is None:
+        if "teacher" in record:
+            return token_readings(record["physical"].tokens, record["teacher"])
         return {}
     latent, confidence = record["latent"].float(), record["confidence"].float()
     predictions = record["physical"].predictions
@@ -115,7 +120,7 @@ def collect(  # noqa: PLR0913 (the model, the clips, where, and what to keep)
     sums: dict[str, float] = defaultdict(float)
     counts: dict[str, float] = defaultdict(float)
     generator = torch.Generator().manual_seed(seed)
-    physical = physical and model.pose is not None
+    physical = physical and model.has_physical_level
 
     def add(name: str, value: float, weight: float) -> None:
         if not math.isnan(value):
@@ -248,6 +253,15 @@ def split_measures(
     out["uniformity_video"] = float(uniformity(hypotheses, config.losses.uniformity_t))
     out["uniformity_text"] = float(uniformity(texts, config.losses.uniformity_t))
     out |= _geometry("y", hypotheses) | _geometry("text", texts)
+    losses = config.losses
+    for name, rows in (("y", hypotheses), ("text", texts)):
+        out |= distribution_measures(
+            f"{name}_dist",
+            rows,
+            t=losses.uniformity_t,
+            gamma=losses.vicreg_gamma,
+            epsilon=losses.vicreg_epsilon,
+        )
 
     if "noise" in t:
         noisy = retrieval(t["noise"], texts, t["rows"])
@@ -310,7 +324,7 @@ def model_measures(
     model.eval()
     small = batch.take(clips).to(device).augmented()
     out = attention(model, small)
-    if model.pose is not None:
+    if model.has_physical_level:
         out["leak_change"] = leak_change(model, small, device)
     model.train(was_training)
     return out

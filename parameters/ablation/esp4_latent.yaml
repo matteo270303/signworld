@@ -1,2 +1,3 @@
 # ESP-4 (optional), on θ*: K = 4 hypotheses from the 8 queries, relaxed minimum (§4.5.9).
+name: worldsign-esp4-latent
 semantic: {hypotheses: 4}

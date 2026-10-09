@@ -24,6 +24,7 @@ from signworld.data.loaders import (
     read_index,
     validation_subset,
 )
+from signworld.data.negatives import THRESHOLDS, load_thresholds
 from signworld.data.text import EmbeddingStore
 from signworld.models.worldsign.model import WorldSign, build_worldsign
 
@@ -31,6 +32,7 @@ from .checkpoint import TrainingState
 from .config import WorldSignConfig
 from .distributed import Distributed
 from .preflight import enforce, run_preflight
+from .provenance import record_launch, seed_everything
 from .trainer import Trainer
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,14 @@ def fit_statistics(
         "centering": model.text.centering.state_dict(),
         "keypoint_variance": None if model.pose is None else model.pose.keypoint_variance,
     }
+
+
+def false_negative_thresholds(config: WorldSignConfig) -> torch.Tensor | None:
+    """GloFND's thresholds when the run asks for them (arm C), checked against its alpha."""
+    losses = config.losses
+    if losses.false_negatives is None:
+        return None
+    return load_thresholds(losses.false_negatives, losses.false_negative_alpha)
 
 
 def load_statistics(model: WorldSign, saved: dict[str, Any]) -> None:
@@ -73,7 +83,10 @@ def prepare(config: WorldSignConfig, output: Path, collective: Distributed) -> P
     data = config.data
     if data.index is None or data.embeddings is None:
         raise ValueError("data.index and data.embeddings must name the stage-0 outputs")
-    model = build_worldsign(config, collective=collective)
+    seed_everything(config.training.seed)  # the initial weights come from the run's seed
+    model = build_worldsign(
+        config, collective=collective, false_negatives=false_negative_thresholds(config)
+    )
     embeddings = EmbeddingStore(data.embeddings).embeddings()
     train = read_index(data.index, TRAIN)
     statistics = output / STATISTICS
@@ -119,8 +132,26 @@ def prepare(config: WorldSignConfig, output: Path, collective: Distributed) -> P
     return Prepared(trainer, train, train_data, embeddings)
 
 
-def run(config: WorldSignConfig, output: Path, collective: Distributed) -> TrainingState:
-    """The assertions before launching (§4.13.2), then the training loop."""
+def run(
+    config: WorldSignConfig,
+    output: Path,
+    collective: Distributed,
+    *,
+    allow_code_change: bool = False,
+) -> TrainingState:
+    """The provenance of the launch, the assertions before launching (§4.13.2), then the
+    training loop. A resume must keep the run's configuration, and its code unless
+    ``allow_code_change`` (``provenance``)."""
+    if collective.is_main:
+        record_launch(
+            output,
+            config,
+            resumed=(output / "checkpoints" / "latest.pt").is_file(),
+            world_size=collective.world_size,
+            clips_per_gpu=config.training.batch_size // collective.world_size,
+            allow_code_change=allow_code_change,
+        )
+    collective.barrier()
     prepared = prepare(config, output, collective)
     trainer, model = prepared.trainer, prepared.trainer.model
     fresh = not trainer.checkpoints.exists("latest")
@@ -145,7 +176,7 @@ def run(config: WorldSignConfig, output: Path, collective: Distributed) -> Train
         output / "checksums.json",
         collective,
         overfit_steps=config.training.preflight_overfit_steps if fresh else 0,
-        checksum_files=_checksum_files(config),
+        checksum_files=_checksum_files(config, output),
     )
     if collective.is_main:
         report.write(output / "preflight.json")
@@ -154,10 +185,15 @@ def run(config: WorldSignConfig, output: Path, collective: Distributed) -> Train
     return trainer.fit()
 
 
-def _checksum_files(config: WorldSignConfig) -> dict[str, Path]:
-    """The pre-trained files a run reads: V-JEPA 2.1 and the caption embeddings (the pose
+def _checksum_files(config: WorldSignConfig, output: Path) -> dict[str, Path]:
+    """The files a run reads, unchanged from its first launch (P5): V-JEPA 2.1, the caption
+    embeddings, the training index with its splits and the statistics fitted on it (the pose
     encoder is trained from scratch)."""
-    files = {"encoder": config.encoder.checkpoint}
+    files = {"encoder": config.encoder.checkpoint, "statistics": output / STATISTICS}
     if config.data.embeddings is not None:
         files["embeddings"] = config.data.embeddings / "embeddings.npy"
+    if config.data.index is not None:
+        files["index"] = config.data.index
+    if config.losses.false_negatives is not None:
+        files["false_negatives"] = config.losses.false_negatives / THRESHOLDS
     return files

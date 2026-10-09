@@ -310,6 +310,59 @@ def text_scores(
     )
 
 
+def split_text_scores(
+    fitting: np.ndarray,
+    fitting_targets: TextTargets,
+    held_out: dict[str, tuple[np.ndarray, TextTargets]],
+    choose_on: str,
+    seed: int = 0,
+) -> dict[str, TextScores]:
+    """PC2's ridge on fixed splits: fit on ``fitting``, penalty chosen by the mean R@1 of the
+    two directions on the split ``choose_on``, scores on every split of ``held_out``.
+
+    The training clips fit the standardisation and the ridge; each split is its own gallery,
+    with every clip of the same caption a match (as ``text_scores`` and the model's own
+    validation).
+    """
+    mean, scale = fitting.mean(axis=0), fitting.std(axis=0) + 1e-6
+
+    def design(values: np.ndarray) -> np.ndarray:
+        standard: np.ndarray = (values.astype(np.float64) - mean) / scale
+        return standard
+
+    candidates = _ridge(design(fitting), fitting_targets.embeddings, TEXT_PENALTIES)
+
+    def similarity(name: str, weights: np.ndarray) -> torch.Tensor:
+        features, targets = held_out[name]
+        return _similarity(targets.embeddings, _predict(design(features), weights))
+
+    def relevance(name: str) -> torch.Tensor:
+        groups = held_out[name][1].groups.tolist()
+        return grouped_relevance(groups, groups)
+
+    def decision(index: int) -> float:
+        pairs = both_ways(similarity(choose_on, candidates[index]), relevance(choose_on))
+        return float(np.mean([recall_at_k(s, r, (1,))[1] for s, r in pairs.values()]))
+
+    chosen = max(range(len(TEXT_PENALTIES)), key=decision)
+    out = {}
+    for name in held_out:
+        scores, relevant = similarity(name, candidates[chosen]), relevance(name)
+        generator = torch.Generator().manual_seed(seed)
+        intervals = {
+            direction: bootstrap_recall(s, r, 1, generator=generator)
+            for direction, (s, r) in both_ways(scores, relevant).items()
+        }
+        out[name] = TextScores(
+            t2v_r1=intervals["t2v"],
+            v2t_r1=intervals["v2t"],
+            measures=bidirectional_measures(scores, relevant),
+            penalty=TEXT_PENALTIES[chosen],
+            gallery=len(held_out[name][0]),
+        )
+    return out
+
+
 def run_scores(
     name: str,
     features: ClipFeatures,

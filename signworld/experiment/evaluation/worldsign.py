@@ -26,10 +26,11 @@ from torch import Tensor
 from torch.nn import functional
 
 from signworld.experiment.train.config import WorldSignConfig
-from signworld.experiment.train.validation import EVERY_INTERVAL
+from signworld.experiment.train.validation import EVERY_INTERVAL, similarity
 from signworld.metrics.directions import Bidirectional
 from signworld.metrics.measures import collect, model_measures, pose_target_measures, split_measures
 from signworld.metrics.probes import video_split
+from signworld.metrics.retrieval import both_ways, error_sources, grouped_relevance, match_ranks
 from signworld.models.worldsign.model import WorldSign, WorldSignBatch
 from signworld.models.worldsign.plausibility import PlausibilityResult, plausibility_tests
 
@@ -78,6 +79,12 @@ class EvaluationReport:
     gate: str | None
     plausibility: list[PlausibilityResult]
     language_probes: dict[str, float]
+    rows: list[int] = dataclasses.field(default_factory=list)
+    """Each query's caption row, in the order of the clips: two runs evaluated on the same
+    clips have the same rows, and their ranks can be compared query by query."""
+    ranks: dict[str, list[int]] = dataclasses.field(default_factory=dict)
+    """Zero-based rank of the first match of every query, per direction (``t2v``, ``v2t``):
+    what the paired bootstrap between runs resamples (``evaluation.compare``)."""
 
     def write(self, path: Path) -> None:
         payload = dataclasses.asdict(self)
@@ -126,6 +133,7 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     sign_languages: Tensor,
     videos: Sequence[str],
     *,
+    channels: Sequence[str] | None = None,
     masks: int = 8,
     ridge_baseline: Bidirectional | None = None,
     gate: bool = False,
@@ -137,23 +145,30 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     into memory instead of decoding every clip five times;
     a list or a tuple is used as it is.
     ``ridge_baseline``: R@1 of the ridge baseline of PC2 in both directions, as fractions.
+    ``channels``: each clip's channel, in the order of ``videos``, for where the first result
+    of each query comes from (``retrieval.error_sources``).
     """
     if not isinstance(batches, Sequence):
         batches = list(batches)
     languages = model.text.centering.languages
-    physical = model.pose is not None
+    physical, pose = model.has_physical_level, model.pose is not None
     seen = collect(
-        model, batches, device, bf16=device.type == "cuda", pose_target=physical, desc="[test]"
+        model, batches, device, bf16=device.type == "cuda", pose_target=pose, desc="[test]"
     )
     scores, measures = split_measures(seen, languages, config, bootstrap=EVERY_INTERVAL)
     first = next(iter(batches), None)
     if first is not None:
         measures |= model_measures(model, first, device, config.diagnostics.small_clips)
-    if physical:
+    if pose:
         t = seen.tensors
         target = pose_target_measures(t["latents"], t["keypoints"], t["weights"])
         measures |= {f"pose_{name}": value for name, value in target.items()}
     measures["order_cosine"] = order_cosine(model, batches, device)
+    if channels is not None:
+        t = seen.tensors
+        measures |= error_sources(
+            similarity(t["predicted"], t["texts"]), t["rows"], videos, channels
+        )
     decision = None
     if gate:
         if ridge_baseline is None:
@@ -164,4 +179,13 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     probes = {
         name: language_probe(values, sign_languages, videos) for name, values in features.items()
     }
-    return EvaluationReport(measures, decision, tests, probes)
+    rows = seen.tensors["rows"]
+    groups = rows.tolist()
+    relevance = grouped_relevance(groups, groups)
+    ranks = {
+        direction: match_ranks(scored, relevant).tolist()
+        for direction, (scored, relevant) in both_ways(
+            similarity(seen.tensors["predicted"], seen.tensors["texts"]), relevance
+        ).items()
+    }
+    return EvaluationReport(measures, decision, tests, probes, groups, ranks)

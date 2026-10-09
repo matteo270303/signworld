@@ -1,0 +1,23 @@
+# Every run of the CVPR plan on the toy world, end to end (ablations_toy.sh). Build the toy
+# world first (toyworld.sub). Runs one after another on one node.
+#
+# Submit:  condor_submit -name ettore -a 'toy=/lustrehome/mvigone/data/toyworld' -a 'gpus=2' \
+#              slurm/condor/ablations_toy.sub
+#   one run only:  -a 'runs=ESP-6'
+
+universe   = vanilla
+initialdir = /lustrehome/mvigone/workspace/signworld
+executable = $(initialdir)/slurm/condor/ablations_toy.sh
+arguments  = $(toy) $(gpus:2) $(runs:)
+
+output = $(initialdir)/logs/condor/ablations_toy_$(Cluster).out
+error  = $(initialdir)/logs/condor/ablations_toy_$(Cluster).err
+log    = $(initialdir)/logs/condor/ablations_toy_$(Cluster).log
+
+getenv         = True
+request_gpus   = $(gpus:2)
+request_cpus   = $(cpus:32)
+request_memory = $(memory:192 GB)
+request_disk   = $(disk:20 GB)
+
+queue

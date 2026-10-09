@@ -18,8 +18,9 @@ from pydantic import Field, PositiveFloat, PositiveInt, model_validator
 from signworld.data.acquisition.config import FrozenModel
 from signworld.metrics.directions import Bidirectional
 
-Arm = Literal["A0", "A", "B0", "B", "C"]
-"""Loss arms of ESP-1 (§4.14): alignment with or without SIGReg and L_unif, or InfoNCE."""
+Arm = Literal["A0", "A", "V", "B0", "B", "C"]
+"""Loss arms of ESP-1 (§4.14): alignment with SIGReg (A), with VICReg instead (V), with or
+without SIGReg and L_unif, or InfoNCE."""
 
 
 class LoRASettings(FrozenModel):
@@ -83,6 +84,12 @@ class FusionSettings(FrozenModel):
 class PhysicalSettings(FrozenModel):
     enabled: bool = True
     """False for ESP-2: no pose encoder, physical predictor, anchor or pose SIGReg."""
+    target: Literal["pose", "video"] = "pose"
+    """What the physical level predicts. ``pose``: the pose target s_t, read per step in the
+    articulators' boxes. ``video`` (ESP-6): the tokens of the released V-JEPA 2.1 encoder,
+    frozen, on the whole clip, per token, with V-JEPA 2.1's loss; no pose branch, anchor or
+    pose SIGReg. V-JEPA 2.1 distilled its ViT-L from a frozen teacher in place of the EMA
+    (arXiv 2603.14482, App. B); SALT shows a frozen teacher suffices (ICLR 2026)."""
     lora: LoRASettings = Field(default_factory=LoRASettings)
     target_dim: PositiveInt = 192
     """C, the width of the pose target s_t (``pose_encoder.output_dim``)."""
@@ -153,9 +160,35 @@ class LossSettings(FrozenModel):
     """Random directions per SIGReg evaluation, redrawn at every step (LeJEPA recommends 1,024)."""
     sigreg_knots: PositiveInt = 17
     uniformity_t: PositiveFloat = 2.0
-    """t of Wang and Isola's L_unif [Lett. 40]."""
+    """t of Wang and Isola's L_unif [Lett. 40]: their value with batch 128 (NYU-Depth) and 768."""
+    uniformity_weight: PositiveFloat = 1 / 3
+    """Weight of L_unif against E_sem in arms B₀ and B. Wang and Isola, batch 128 and t = 2
+    (NYU-Depth): 0.75·L_align + 0.5·L_unif; on the sphere L_align(alpha = 2) = 2·E_sem, so
+    1.5·E_sem + 0.5·L_unif, i.e. E_sem + L_unif / 3 (their range is stable below a ratio
+    align / unif of about 4; ImageNet-100 at batch 128 used 3 : 1)."""
+    vicreg_coefficients: tuple[PositiveFloat, PositiveFloat, PositiveFloat] = (25.0, 25.0, 1.0)
+    """lambda, mu, nu of VICReg (invariance, variance, covariance): Bardes et al., ICLR 2022,
+    the best of their grid (Tab. 7: 25/25/1 = 68.6; 5/5/1 = 68.1, 50/50/1 = 68.3; lambda and
+    mu apart: unstable). Arm V keeps E_sem as invariance; at unit variance the per-dimension
+    MSE is 2·E_sem, so the terms weigh ``E_sem + mu/(2 lambda)·Σ v + nu/(2 lambda)·Σ c``,
+    summed over ŷ and ẽ: ``E_sem + 0.5·Σ v + 0.02·Σ c``."""
+    vicreg_gamma: PositiveFloat = 1.0
+    """Target standard deviation of every dimension (VICReg §4.2)."""
+    vicreg_epsilon: PositiveFloat = 1e-4
     infonce_temperature: PositiveFloat = 0.07
-    """Initial, learnable temperature of arm C (§4.10)."""
+    """Initial, learnable temperature of arm C: CLIP's 1/0.07, and the best of CiCo's sweep
+    for sign language retrieval (§4.10)."""
+    infonce_min_temperature: PositiveFloat = 0.01
+    """Floor of the learnt temperature: CLIP clips its logit scale at 100."""
+    multi_positive: bool = True
+    """Arm C: clips with the same caption (one row of the embedding store) are positives of
+    each other, the target spread evenly over them (UniCL, MIL-NCE)."""
+    false_negatives: Path | None = None
+    """Arm C: directory of the per-caption thresholds of GloFND (``text false-negatives``);
+    None: no false-negative removal beyond the same video and the same caption."""
+    false_negative_alpha: float = Field(default=1e-3, gt=0.0, lt=1.0)
+    """alpha of GloFND: the share of each caption's negatives treated as false. 1e-3 is the
+    paper's bimodal setting with FastCLIP on CC3M (2.7 M pairs; 5e-4 with SogCLR)."""
 
 
 class SamplingSettings(FrozenModel):
@@ -308,6 +341,17 @@ class TrainingSettings(FrozenModel):
         return self
 
 
+class WandbSettings(FrozenModel):
+    """An optional copy of ``metrics.jsonl`` on Weights & Biases (``logger.wandb_mirror``)."""
+
+    enabled: bool = False
+    """Off by default: it needs the ``wandb`` package and, to upload, an account and a key."""
+    project: str = "signworld"
+    entity: str | None = None
+    mode: Literal["offline", "online", "disabled"] = "offline"
+    """Offline on compute nodes without internet; ``wandb sync`` uploads the run later."""
+
+
 class DiagnosticsSettings(FrozenModel):
     """The fail-fast system during training (§4.13.3-§4.13.5).
 
@@ -378,6 +422,7 @@ class DiagnosticsSettings(FrozenModel):
     [Aperto]."""
     gate_stops: bool = False
     """True only for the gate run: a failed stop F1-F3 ends the run (§4.13.5)."""
+    wandb: WandbSettings = Field(default_factory=WandbSettings)
 
 
 class DataSettings(FrozenModel):
@@ -389,6 +434,9 @@ class DataSettings(FrozenModel):
     """The directory of the pre-computed EmbeddingGemma rows (``EmbeddingStore``)."""
     validation_fraction: float = 0.1
     """Share of the channels of each sign language held out for validation [Aperto]."""
+    test_fraction: float = Field(default=0.0, ge=0.0, lt=1.0)
+    """Share of the channels of each sign language held out for the test of the paper,
+    disjoint from validation; 0: no test split (a benchmark's own, or a trial)."""
     held_out_languages: tuple[str, ...] = ()
     """Sign languages kept out of training entirely: the held-out language split [Aperto]."""
     split_source: Literal["channel", "manifest"] = "channel"
@@ -436,7 +484,11 @@ class WorldSignConfig(FrozenModel):
                 f"the text head gives {self.text.output_dim} dimensions and the semantic "
                 f"predictor {self.semantic.output_dim}: E_sem compares them"
             )
-        if self.physical.enabled and self.physical.target_dim != self.pose_encoder.output_dim:
+        if (
+            self.physical.enabled
+            and self.physical.target == "pose"
+            and self.physical.target_dim != self.pose_encoder.output_dim
+        ):
             raise ValueError(
                 f"the physical head predicts {self.physical.target_dim} channels and the pose "
                 f"encoder gives {self.pose_encoder.output_dim}"
@@ -446,7 +498,7 @@ class WorldSignConfig(FrozenModel):
     @model_validator(mode="after")
     def _target_slows(self) -> Self:
         warmup, stage = self.pose_encoder.warmup_epochs, self.training.stages.pose_epochs
-        if self.physical.enabled and warmup > stage:
+        if self.physical.enabled and self.physical.target == "pose" and warmup > stage:
             raise ValueError(
                 f"the pose warms up over {warmup} epochs, past stage P ({stage}): the target "
                 "would still be speeding up when the physical level starts chasing it"

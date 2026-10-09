@@ -76,6 +76,7 @@ def index(  # noqa: PLR0913, PLR0917 (typer options)
         build_training_index,
         records_from_files,
         write_index,
+        write_split_list,
     )
     from signworld.data.text import EmbeddingStore
     from signworld.experiment.collaudo.contamination import contamination_report
@@ -105,6 +106,9 @@ def index(  # noqa: PLR0913, PLR0917 (typer options)
         workers=workers,
     )
     write_index(table, output)
+    listed = output.with_suffix(".splits.csv")
+    digest = write_split_list(table, listed)
+    typer.echo(f"{listed}: the splits to freeze and publish, sha256 {digest}")
     splits = table.column("split").value_counts().to_pylist()
     typer.echo(
         f"{output}: {table.num_rows} clips; "

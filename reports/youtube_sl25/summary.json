@@ -1,0 +1,45 @@
+{
+  "release_ids": 39197,
+  "languages": 56,
+  "states": {
+    "downloaded": 13377,
+    "unavailable": 25238,
+    "bot": 162,
+    "other": 418,
+    "untried": 2
+  },
+  "gini": 0.7593524832439802,
+  "durations": {
+    "videos": 13377.0,
+    "hours": 1074.3730209169444,
+    "mean_min": 4.8188967074094835,
+    "p01_min": 0.27545058666666666,
+    "p05_min": 0.6354527666666667,
+    "p25_min": 1.5565109666666668,
+    "p50_min": 3.059616016666667,
+    "p75_min": 5.621938016666666,
+    "p95_min": 14.54923658333333,
+    "p99_min": 29.99318446133333,
+    "lognormal_mu": 5.198131117615341,
+    "lognormal_sigma": 0.9588590605661557,
+    "lognormal_ks": 0.010397587024491783,
+    "skew_log": 0.018401782808800893,
+    "hours_share_top1pct": 0.09455844384705582,
+    "hours_share_top10pct": 0.38526912510491906
+  },
+  "duration_by_language": {
+    "groups": 30.0,
+    "h": 1843.9959091725107,
+    "p": 0.0,
+    "epsilon_squared": 0.1409244103303409
+  },
+  "retrieval_bias": {
+    "chi2": 7264.035260603227,
+    "p": 0.0,
+    "cramers_v": 0.4337215011466022,
+    "total_variation": 0.2144884545896077
+  },
+  "anomalies": 7,
+  "duplicate_groups": 2,
+  "subtitle_files": 13697
+}

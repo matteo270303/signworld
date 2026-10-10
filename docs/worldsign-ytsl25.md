@@ -96,6 +96,100 @@ Avvertenze sul testo:
 | `jsl` | 430 | 19.432 | 22 | 20 | 15 % |
 | `pso` | 295 | 17.142 | 24 | 27 | 33 % |
 
+### 3.4 Figure e come leggerle
+
+Le figure sono in `reports/youtube_sl25/` (generate da `youtube_sl25_report`). I codici sono ISO 639-3 (`ase` = ASL, `ils` = lingua dei segni internazionale, `hsh` = ungherese, ecc.). Tutte descrivono i **13.377 video scaricati** o il rilascio di 39.197 ID, non le clip.
+
+#### Figura 1: video per lingua, rilascio contro scaricato
+
+![Video per lingua](../reports/youtube_sl25/01_composition.png)
+
+**Cosa mostra.** Per ogni lingua, una barra grigia (video nel rilascio) e una blu (video scaricati), su **scala logaritmica**, ordinate per dimensione.
+
+**Come leggerla.** La parte grigia visibile oltre il blu è quello che non abbiamo. Sulla scala log un tratto di grigio apparentemente piccolo in alto vale migliaia di video (`ase`: 16.724 nel rilascio, 5.096 scaricati). Dove il blu copre il grigio (`svk`, `isg`, `ssr`, `asq`, `aed`) abbiamo quasi tutto; `sfb` non ha nessun video scaricato.
+
+**Cosa ne segue.** Il sottoinsieme non è una copia ridotta del rilascio: alcune lingue sono molto più complete di altre (`hsh`, `ise`, `swl`, `isr`, `ssp` quasi complete; `gsg`, `fsl`, `rsl`, `pks` sotto il 20 %). Compaiono anche codici da normalizzare (`slovenia`, `vietnam`) e `???` (197 video con lingua ignota).
+
+#### Figura 2: quanto è sbilanciato il corpus
+
+![Curva di Lorenz e rango-frequenza](../reports/youtube_sl25/02_balance.png)
+
+**Cosa mostra.** A sinistra la curva di Lorenz: in ascissa la quota di lingue (dalla più piccola), in ordinata la quota cumulata di video. A destra il grafico rango-frequenza (log-log): ogni punto è una lingua, in ascissa la posizione per numerosità, in ordinata i video; la retta rossa è l'adattamento a una legge di potenza.
+
+**Come leggerla.** Con un corpus perfettamente bilanciato la curva sarebbe la diagonale tratteggiata; più è lontana, più è sbilanciato. L'area tra le due è il **Gini (0,76)**. Qui l'80 % delle lingue più piccole contiene circa il 20 % dei video, e l'ultimo tratto della curva, quasi verticale, è `ase` (42,7 %). A destra, una pendenza di −1,56 indica una coda pesante; la retta spiega bene il grosso (R² 0,91) ma i dati si discostano: la fascia centrale (rango 6–35) sta sopra la retta e le ultime lingue cadono sotto, cioè la coda è più corta di una legge di potenza pura.
+
+**Cosa ne segue.** Una media sul corpus intero descrive soprattutto ASL e le prime cinque lingue (63,2 % dei video). Le metriche vanno riportate **per lingua**, non solo in media.
+
+#### Figura 3: cosa cambia ribilanciando con la temperatura
+
+![Effetto della temperatura di campionamento](../reports/youtube_sl25/08_sampling_temperature.png)
+
+**Cosa mostra.** Se si campiona una lingua con probabilità `p ∝ nᵗ` (n = video della lingua, t = temperatura), a sinistra quante «lingue effettive» (inverso dell'indice di Simpson) ottengo al variare di t; a destra come cambia la probabilità delle sei lingue maggiori.
+
+**Come leggerla.** t = 1 è il campionamento proporzionale ai dati (5,0 lingue effettive, `ase` al 42,7 %); t = 0 è uniforme (56 lingue effettive, 1,8 % ciascuna). Valori intermedi: t = 0,7 dà 14,1 lingue e `ase` al 22,2 %; t = 0,5 dà 27,8 e 12,4 %; t = 0,3 dà 44,5 e 6,2 %.
+
+**Cosa ne segue.** Abbassare t dà più peso alle lingue piccole, ma le fa ripetere molte volte (rischio di memorizzazione di pochi video). È un compromesso da scegliere: il progetto, per ora, non ribilancia (§3.5), ma la figura dice quanto costerebbe farlo.
+
+#### Figura 4: cosa è stato recuperato e con che bias
+
+![Disponibilità per lingua e stato di recupero](../reports/youtube_sl25/04_retrieval.png)
+
+**Cosa mostra.** A sinistra, per ogni lingua, la frazione `scaricati / (scaricati + non disponibili)` con il suo intervallo di confidenza di Wilson al 95 %. A destra, il conteggio degli ID per esito (scaricato 13.377, non disponibile 25.238, bot 162, altro 418, mai provato 2).
+
+**Come leggerla.** Il punto è la stima, la barra l'incertezza: le barre lunghe sono lingue con pochi video. Se la disponibilità non dipendesse dalla lingua, tutti i punti starebbero intorno alla stessa frazione; invece vanno da 1,0 (`ssr`, `isg`, `svk`) a 0 (`sfb`), con `ase` intorno a 0,31. È l'effetto che il test chi² misura (p < 1e-10, Cramér V 0,43, scostamento totale del mix 0,21).
+
+**Cosa ne segue e cautela.** Il sottoinsieme non rappresenta il rilascio. Ma il 64,4 % di «non disponibili» è inquinato dal rate-limit di YouTube (§1): è un limite superiore, e il bias va **rimisurato dopo un download pulito**, non usato così com'è.
+
+#### Figura 5: durate dei video
+
+![Durate: istogramma, ECDF e per lingua](../reports/youtube_sl25/05_durations.png)
+
+**Cosa mostra.** A sinistra la distribuzione delle durate (asse x logaritmico) con l'adattamento log-normale (KS 0,01); al centro le curve cumulative della quota di **video** e della quota di **ore** in funzione della durata; a destra i boxplot (scatola = quartili, riga arancione = mediana) per le 15 lingue maggiori, in scala log.
+
+**Come leggerla.** Il log-normale descrive bene il corpo (KS basso, mediana 3,1 min), ma c'è un eccesso di video molto brevi (sotto ~0,3 min) che la curva non spiega. Al centro, la curva delle ore sta a destra di quella dei video: metà dei video dura meno di circa 3 minuti, ma servono video fino a circa 7 minuti per arrivare a metà delle ore; l'1 % dei video più lunghi vale il 9 % delle ore, il 10 % ne vale il 39 %. A destra, la durata dipende dalla lingua (Kruskal-Wallis ε² 0,14): `ils` ha mediana alta, `hsh` e `ssp` bassa.
+
+**Cosa ne segue.** Pochi video lunghi pesano molto in ore: campionare per video e per ore dà mix diversi. I video brevissimi vanno controllati.
+
+#### Figura 6: video contro ore, e durata mediana per lingua
+
+![Video contro ore e durata mediana](../reports/youtube_sl25/03_hours_vs_videos.png)
+
+**Cosa mostra.** A sinistra, per lingua, la quota di video scaricati (asse x) contro la quota di ore (asse y), in log-log. A destra la durata mediana per le lingue con almeno 20 video.
+
+**Come leggerla.** Un punto sulla diagonale ha ore in proporzione ai video; **sopra** la diagonale i video sono più lunghi della media (`ils`: circa il 4 % dei video ma l'8 % delle ore), **sotto** più corti (`hsh`: circa il 9 % dei video e il 5 % delle ore). A destra le mediane vanno da circa 10 min (`csn`) a poco più di 1 (`???`, `ssp`, `hsh`).
+
+**Cosa ne segue.** «Quanti dati ha una lingua» dipende dall'unità: per `ils` le ore sono il doppio di quanto suggerisce il numero di video, per `hsh` circa la metà. Per decisioni sul mix (§3.5) conviene ragionare in **ore o clip**, non in video.
+
+#### Figura 7: qualità tecnica
+
+![Altezza, fps, aspect ratio e bit per pixel](../reports/youtube_sl25/06_technical.png)
+
+**Cosa mostra.** Quattro istogrammi sui video scaricati: altezza del fotogramma, frame rate, rapporto d'aspetto, bit per pixel per fotogramma (proxy del dettaglio). Frame rate e rapporto d'aspetto hanno l'asse y in scala log.
+
+**Come leggerla.** L'altezza è troncata a 720p dal downloader (11.386 video a 720–1079, 85 %), quindi non dice nulla sulle risoluzioni originali superiori. Il frame rate è **misto**: 30 fps (circa 7.000 video), 25 (circa 3.400), 24 (circa 1.200), 50 e 60 (circa 600 ciascuno) e una coda di valori rari, 7 video sotto i 10 fps. Il rapporto d'aspetto è quasi sempre 16:9 (circa 12.000), poi 4:3, verticale, quadrato, ultralargo. I bit per pixel hanno una campana intorno a 0,05: la coda sinistra sono video molto compressi (mani sfocate), la destra video ricchi di dettaglio.
+
+**Cosa ne segue.** Serve un ricampionamento a frame rate fisso e una regola di ritaglio coerente per i formati non 16:9 (un ritaglio centrale su video verticali o 4:3 può tagliare le mani). I bit per pixel sono solo un'approssimazione: non misurano la qualità né la visibilità delle mani.
+
+#### Figura 8: risoluzione per lingua
+
+![Mix di risoluzioni per lingua](../reports/youtube_sl25/07_language_resolution.png)
+
+**Cosa mostra.** Una matrice: ogni riga è una lingua (le 20 maggiori), ogni colonna una classe di altezza, il colore è la quota dei video della lingua in quella classe (ogni riga somma a 1).
+
+**Come leggerla.** Quasi tutto è nella colonna 720–1079 (colore scuro). Le righe più chiare in quella colonna hanno risoluzioni più basse: `ssp` ha circa il 60 % a 720p e il resto a 360–719; `dse` e `jsl` hanno una quota evidente a 480–719 o 360–479; `ins`, `pso`, `pks`, `isr`, `icl` sono quasi tutte a 720p.
+
+**Cosa ne segue.** La risoluzione è **correlata con la lingua** (in pratica con i canali di origine): un modello potrebbe imparare la qualità dell'immagine come scorciatoia per riconoscere la lingua. Va controllato nelle valutazioni per lingua e, se serve, compensato con augmentation di qualità.
+
+#### Figura 9: didascalie
+
+![Copertura e densità delle didascalie](../reports/youtube_sl25/09_subtitles.png)
+
+**Cosa mostra.** A sinistra la copertura (quota della durata del video coperta da cue di sottotitolo); a destra la densità (parole per secondo di didascalia).
+
+**Come leggerla.** La copertura ha il picco intorno a 0,85–0,9 (mediana 84 %): quasi sempre una parte del video resta senza testo, con una coda verso lo zero (tracce quasi vuote). Valori leggermente sopra 1 indicano cue che superano la fine del video (43 casi oltre 5 s, §2). La densità ha picco tra 1 e 2 parole al secondo (mediana 1,64); i valori sopra 5 sono rari e vanno ispezionati.
+
+**Cosa ne segue.** Queste figure dicono **quanto** testo c'è, non se è **allineato** al segnato: le cue sono tempi di sottotitolo, non del segnato (§3.2). Per le lingue senza spazi (`jsl`) le parole al secondo non sono una misura valida: servono i caratteri.
+
 ## 4. Gli split
 
 **Il dataset non ha split predefiniti.** Il CSV del rilascio ha solo `video_id,language`, e il README e il paper non ne definiscono: YouTube-SL-25 è un corpus di pre-addestramento, i risultati si riportano su benchmark esterni. Va quindi definito da noi, ed è una decisione scientifica: il progetto l'ha già fissata (§3.4: **per canale, mai per clip**; validation held-out-channel e held-out-language).

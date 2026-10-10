@@ -517,7 +517,11 @@ CUE_TIME: Final = re.compile(
     r"(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{3})"
 )
 SUBTITLE_NAME: Final = re.compile(
+<<<<<<< HEAD
     r"^(?P<id>[A-Za-z0-9_-]{11})\.(?P<lang>[A-Za-z0-9_-]+)\.(?:vtt|srt)$"
+=======
+    r"^(?P<id>[A-Za-z0-9_-]{11})\.(?P<lang>[A-Za-z0-9-]+)\.(?:vtt|srt)$"
+>>>>>>> refs/remotes/origin/analysis/youtube-sl25
 )
 
 

@@ -83,8 +83,10 @@ if [ "$JOBS" -le 1 ]; then
 else
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
+  # split -n l/N richiede un file normale (non una pipe): prima scrivo l'elenco completo
   (cd "$SRC/videos" && find . -maxdepth 1 -type f -printf '%f\n' \
-     | grep -vE '\.(part|ytdl)$|\.f[0-9]+\.' | sort) | split -n "l/$JOBS" - "$tmp/list_"
+     | { grep -vE '\.(part|ytdl)$|\.f[0-9]+\.' || true; } | sort) > "$tmp/all"
+  split -n "l/$JOBS" "$tmp/all" "$tmp/list_"
   # una prima passata crea la cartella di destinazione (la lista è vuota)
   retry "${RSYNC[@]}" --files-from=/dev/null "$SRC/videos/" "$DEST/videos/"
   pids=()

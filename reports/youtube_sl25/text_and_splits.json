@@ -1,0 +1,926 @@
+{
+ "text": {
+  "videos_valid": 13536,
+  "videos_with_info": 13455,
+  "videos_with_any_track": 13454,
+  "videos_with_own_track": 12852,
+  "videos_unknown_sign_language": 193,
+  "videos_tracks_but_no_own": 602,
+  "tracks_per_video": {
+   "0": 82,
+   "1": 12574,
+   "2": 565,
+   "3": 150,
+   "4": 27,
+   "5": 93,
+   "6": 37,
+   "7": 2,
+   "8": 1,
+   "14": 1,
+   "21": 1,
+   "47": 1,
+   "57": 1,
+   "61": 1
+  },
+  "own_track_names": [
+   [
+    "en",
+    4695
+   ],
+   [
+    "hu",
+    1262
+   ],
+   [
+    "ase",
+    779
+   ],
+   [
+    "it",
+    736
+   ],
+   [
+    "en-GB",
+    658
+   ],
+   [
+    "en-US",
+    547
+   ],
+   [
+    "ja",
+    482
+   ],
+   [
+    "es",
+    448
+   ],
+   [
+    "sv",
+    330
+   ],
+   [
+    "pl",
+    322
+   ],
+   [
+    "en-IN",
+    290
+   ],
+   [
+    "de",
+    237
+   ],
+   [
+    "pt-BR",
+    227
+   ],
+   [
+    "pt",
+    170
+   ],
+   [
+    "fr",
+    170
+   ],
+   [
+    "es-419",
+    162
+   ],
+   [
+    "tr",
+    134
+   ],
+   [
+    "es-ES",
+    123
+   ],
+   [
+    "en-cvfXDfbeED0",
+    111
+   ],
+   [
+    "ru",
+    104
+   ],
+   [
+    "en-0hllRZe4s5s",
+    95
+   ],
+   [
+    "de-AT",
+    86
+   ],
+   [
+    "is",
+    83
+   ],
+   [
+    "sk",
+    59
+   ],
+   [
+    "en-CA",
+    50
+   ]
+  ],
+  "track_languages": [
+   [
+    "en",
+    5182
+   ],
+   [
+    "hu",
+    1262
+   ],
+   [
+    "ase",
+    799
+   ],
+   [
+    "it",
+    745
+   ],
+   [
+    "en-GB",
+    682
+   ],
+   [
+    "es",
+    589
+   ],
+   [
+    "en-US",
+    566
+   ],
+   [
+    "ja",
+    520
+   ],
+   [
+    "sv",
+    450
+   ],
+   [
+    "pl",
+    332
+   ],
+   [
+    "de",
+    294
+   ],
+   [
+    "en-IN",
+    291
+   ],
+   [
+    "is",
+    273
+   ],
+   [
+    "iw",
+    271
+   ],
+   [
+    "ru",
+    255
+   ],
+   [
+    "pt-BR",
+    229
+   ],
+   [
+    "fr",
+    221
+   ],
+   [
+    "da",
+    180
+   ],
+   [
+    "pt",
+    175
+   ],
+   [
+    "es-419",
+    170
+   ],
+   [
+    "fi",
+    147
+   ],
+   [
+    "es-ES",
+    143
+   ],
+   [
+    "tr",
+    137
+   ],
+   [
+    "en-cvfXDfbeED0",
+    111
+   ],
+   [
+    "no",
+    103
+   ]
+  ],
+  "clips": 635807,
+  "clip_hours": 870.4938444444444,
+  "clip_duration_s": {
+   "n": 635807,
+   "mean": 4.928819342976721,
+   "p01": 0.06700000000000728,
+   "p05": 1.2199999999999989,
+   "p25": 2.576000000000022,
+   "p50": 4.079999999999927,
+   "p75": 6.36099999999999,
+   "p95": 11.089000000000018,
+   "p99": 17.0,
+   "max": 604.629
+  },
+  "words_per_clip": {
+   "n": 635807,
+   "mean": 8.392076526367278,
+   "p01": 1.0,
+   "p05": 1.0,
+   "p25": 5.0,
+   "p50": 8.0,
+   "p75": 11.0,
+   "p95": 17.0,
+   "p99": 23.0,
+   "max": 201.0
+  },
+  "chars_per_clip": {
+   "n": 635807,
+   "mean": 48.64389193576038,
+   "p01": 4.0,
+   "p05": 9.0,
+   "p25": 28.0,
+   "p50": 45.0,
+   "p75": 65.0,
+   "p95": 99.0,
+   "p99": 132.0,
+   "max": 1097.0
+  },
+  "words_total": 5335741,
+  "words_per_second": {
+   "n": 635807,
+   "mean": 2.930507964015333,
+   "p01": 0.18587360594795505,
+   "p05": 0.4761904761904763,
+   "p25": 1.2048192771084336,
+   "p50": 1.8162393162393136,
+   "p75": 2.6119402985074562,
+   "p95": 4.347826086956526,
+   "p99": 44.77611940299921,
+   "max": 5999.999999971351
+  },
+  "clips_shorter_than_1s": 19827,
+  "clips_longer_than_20s": 3379,
+  "clips_non_positive_duration": 0,
+  "clips_non_speech": 3209,
+  "clips_one_word": 45413,
+  "clips_per_video": {
+   "n": 12850,
+   "mean": 49.4791439688716,
+   "p01": 2.0,
+   "p05": 6.0,
+   "p25": 14.0,
+   "p50": 28.0,
+   "p75": 58.0,
+   "p95": 150.0,
+   "p99": 322.0,
+   "max": 2415.0
+  },
+  "clips_overlapping_next": 2633,
+  "clips_repeating_text_in_video": 17580,
+  "clips_beyond_video_end": 594,
+  "cue_time_over_video_duration": {
+   "n": 12850,
+   "mean": 0.8126318275451903,
+   "p01": 0.22321044324603184,
+   "p05": 0.509094043279845,
+   "p25": 0.7544047394308452,
+   "p50": 0.8518324610616348,
+   "p75": 0.9150521248559125,
+   "p95": 0.976743170526534,
+   "p99": 0.9974627929339768,
+   "max": 3.0479916718935276
+  },
+  "per_sign_language": {
+   "ase": {
+    "videos": 5090,
+    "clips": 292949,
+    "hours": 358.6367174999245,
+    "words": 2498236
+   },
+   "ils": {
+    "videos": 502,
+    "clips": 41160,
+    "hours": 72.76608000000012,
+    "words": 322209
+   },
+   "bfi": {
+    "videos": 681,
+    "clips": 28425,
+    "hours": 41.76835305555511,
+    "words": 240491
+   },
+   "hsh": {
+    "videos": 1262,
+    "clips": 27293,
+    "hours": 46.46996500000018,
+    "words": 232624
+   },
+   "ise": {
+    "videos": 741,
+    "clips": 27021,
+    "hours": 38.9570633333329,
+    "words": 262518
+   },
+   "bzs": {
+    "videos": 397,
+    "clips": 26381,
+    "hours": 39.74160194444414,
+    "words": 242133
+   },
+   "jsl": {
+    "videos": 484,
+    "clips": 21462,
+    "hours": 24.172484999999078,
+    "words": 28010
+   },
+   "pso": {
+    "videos": 324,
+    "clips": 18798,
+    "hours": 25.875066944444193,
+    "words": 135048
+   },
+   "aed": {
+    "videos": 146,
+    "clips": 18699,
+    "hours": 26.69681972222192,
+    "words": 169869
+   },
+   "ssp": {
+    "videos": 521,
+    "clips": 16823,
+    "hours": 20.176568888888685,
+    "words": 133345
+   },
+   "asf": {
+    "videos": 429,
+    "clips": 16558,
+    "hours": 19.654345000000088,
+    "words": 148585
+   },
+   "ins": {
+    "videos": 488,
+    "clips": 14662,
+    "hours": 33.99452499999991,
+    "words": 163857
+   },
+   "swl": {
+    "videos": 316,
+    "clips": 10370,
+    "hours": 13.90175666666666,
+    "words": 102353
+   },
+   "asq": {
+    "videos": 163,
+    "clips": 9711,
+    "hours": 10.237709166666676,
+    "words": 70418
+   },
+   "gsg": {
+    "videos": 144,
+    "clips": 9599,
+    "hours": 14.005388888888913,
+    "words": 78404
+   },
+   "isg": {
+    "videos": 34,
+    "clips": 5726,
+    "hours": 9.043079444444485,
+    "words": 78590
+   },
+   "fsl": {
+    "videos": 141,
+    "clips": 5711,
+    "hours": 6.099721388888905,
+    "words": 48787
+   },
+   "tsm": {
+    "videos": 134,
+    "clips": 5117,
+    "hours": 13.62838916666676,
+    "words": 61747
+   },
+   "sgg": {
+    "videos": 57,
+    "clips": 5026,
+    "hours": 4.782672500000001,
+    "words": 32017
+   },
+   "rsl": {
+    "videos": 104,
+    "clips": 4267,
+    "hours": 5.624668055555601,
+    "words": 31954
+   },
+   "csn": {
+    "videos": 39,
+    "clips": 3813,
+    "hours": 5.584616388888904,
+    "words": 37372
+   },
+   "fcs": {
+    "videos": 18,
+    "clips": 3499,
+    "hours": 3.720444166666672,
+    "words": 22329
+   },
+   "kvk": {
+    "videos": 48,
+    "clips": 3148,
+    "hours": 4.260911666666669,
+    "words": 18428
+   },
+   "icl": {
+    "videos": 83,
+    "clips": 2533,
+    "hours": 4.68272916666667,
+    "words": 28300
+   },
+   "svk": {
+    "videos": 59,
+    "clips": 2186,
+    "hours": 3.1095819444444506,
+    "words": 20598
+   },
+   "cse": {
+    "videos": 25,
+    "clips": 1368,
+    "hours": 1.568025277777782,
+    "words": 12153
+   },
+   "csc": {
+    "videos": 23,
+    "clips": 1287,
+    "hours": 1.7295744444444445,
+    "words": 13914
+   },
+   "sls": {
+    "videos": 24,
+    "clips": 1203,
+    "hours": 1.3877711111111124,
+    "words": 9004
+   },
+   "ssr": {
+    "videos": 32,
+    "clips": 1043,
+    "hours": 1.6921249999999994,
+    "words": 10122
+   },
+   "psp": {
+    "videos": 14,
+    "clips": 998,
+    "hours": 1.1866894444444445,
+    "words": 9270
+   },
+   "pks": {
+    "videos": 80,
+    "clips": 994,
+    "hours": 2.4950861111111107,
+    "words": 13738
+   },
+   "tss": {
+    "videos": 15,
+    "clips": 896,
+    "hours": 1.1158936111111106,
+    "words": 1391
+   },
+   "dse": {
+    "videos": 23,
+    "clips": 889,
+    "hours": 1.4953808333333372,
+    "words": 10093
+   },
+   "fse": {
+    "videos": 25,
+    "clips": 869,
+    "hours": 1.1218027777777775,
+    "words": 5715
+   },
+   "lls": {
+    "videos": 46,
+    "clips": 819,
+    "hours": 1.5963602777777781,
+    "words": 7768
+   },
+   "slovenia": {
+    "videos": 13,
+    "clips": 629,
+    "hours": 0.820765000000001,
+    "words": 3895
+   },
+   "fss": {
+    "videos": 15,
+    "clips": 586,
+    "hours": 1.0075091666666662,
+    "words": 6032
+   },
+   "inl": {
+    "videos": 15,
+    "clips": 447,
+    "hours": 0.8420766666666668,
+    "words": 3861
+   },
+   "hks": {
+    "videos": 14,
+    "clips": 436,
+    "hours": 0.47770694444444434,
+    "words": 489
+   },
+   "nsl": {
+    "videos": 9,
+    "clips": 335,
+    "hours": 0.4610386111111114,
+    "words": 3442
+   },
+   "csg": {
+    "videos": 7,
+    "clips": 282,
+    "hours": 0.3599699999999996,
+    "words": 1896
+   },
+   "jos": {
+    "videos": 16,
+    "clips": 281,
+    "hours": 0.9574555555555555,
+    "words": 3533
+   },
+   "vietnam": {
+    "videos": 6,
+    "clips": 270,
+    "hours": 0.4172719444444444,
+    "words": 3301
+   },
+   "tsq": {
+    "videos": 13,
+    "clips": 246,
+    "hours": 1.0148074999999994,
+    "words": 607
+   },
+   "slf": {
+    "videos": 5,
+    "clips": 225,
+    "hours": 0.22910027777777794,
+    "words": 2007
+   },
+   "mfs": {
+    "videos": 5,
+    "clips": 186,
+    "hours": 0.25576444444444435,
+    "words": 1348
+   },
+   "gss": {
+    "videos": 4,
+    "clips": 157,
+    "hours": 0.10725833333333329,
+    "words": 918
+   },
+   "nzs": {
+    "videos": 6,
+    "clips": 153,
+    "hours": 0.2723213888888888,
+    "words": 1500
+   },
+   "vgt": {
+    "videos": 5,
+    "clips": 116,
+    "hours": 0.08801555555555554,
+    "words": 456
+   },
+   "csq": {
+    "videos": 2,
+    "clips": 62,
+    "hours": 0.12762527777777785,
+    "words": 558
+   },
+   "dsl": {
+    "videos": 2,
+    "clips": 54,
+    "hours": 0.03861111111111111,
+    "words": 282
+   },
+   "prl": {
+    "videos": 3,
+    "clips": 39,
+    "hours": 0.03657777777777778,
+    "words": 226
+   },
+   "isr": {
+    "videos": 0,
+    "clips": 0,
+    "hours": 0.0,
+    "words": 0
+   },
+   "???": {
+    "videos": 0,
+    "clips": 0,
+    "hours": 0.0,
+    "words": 0
+   },
+   "eso": {
+    "videos": 0,
+    "clips": 0,
+    "hours": 0.0,
+    "words": 0
+   }
+  },
+  "identical_caption_groups": 45,
+  "identical_caption_videos": 91,
+  "identical_caption_examples": [
+   [
+    "0Tvq-jiew6M",
+    "0mlv4bOMghw"
+   ],
+   [
+    "16yp4zWo9Jo",
+    "Jycw3co4j50"
+   ],
+   [
+    "1IMJXby62gg",
+    "nFZ0bHyHQGU"
+   ],
+   [
+    "1MyoQ7RBWN0",
+    "pnhQtk3kihU"
+   ],
+   [
+    "1hKx1BL1vVE",
+    "KZSOf4ffSRM"
+   ],
+   [
+    "1mUrdx7JT70",
+    "u_PbkfRSa38"
+   ],
+   [
+    "1uDhBBpmxC8",
+    "Psvycoi5dR8"
+   ],
+   [
+    "2FqUerxjxXY",
+    "AH2cQwb-GQ8"
+   ],
+   [
+    "2JCl-r94LLM",
+    "CIek3BLP6QE"
+   ],
+   [
+    "2dHbhuSEPis",
+    "fAdQzF4C8So"
+   ]
+  ],
+  "clips_same_text_and_timing_elsewhere": 5612
+ },
+ "channels": {
+  "videos_with_channel": 13455,
+  "channels": 1958,
+  "videos_per_channel": {
+   "n": 1958,
+   "mean": 6.871807967313585,
+   "p01": 1.0,
+   "p05": 1.0,
+   "p25": 1.0,
+   "p50": 1.0,
+   "p75": 3.0,
+   "p95": 24.149999999999864,
+   "p99": 105.15000000000032,
+   "max": 1019.0
+  },
+  "gini_videos_per_channel": 0.7675973215299057,
+  "top10_channels_share": 0.23448532144184317,
+  "top1pct_channels_share": 0.3180230397621702,
+  "channels_with_one_video": 1131,
+  "channels_spanning_languages": 15,
+  "channels_per_language": {
+   "ase": 1538,
+   "bfi": 46,
+   "gsg": 44,
+   "pso": 29,
+   "bzs": 26,
+   "swl": 21,
+   "asf": 21,
+   "jsl": 20,
+   "ise": 20,
+   "fsl": 19,
+   "ssp": 13,
+   "asq": 11,
+   "ils": 10,
+   "cse": 10,
+   "hsh": 9,
+   "aed": 9,
+   "kvk": 9,
+   "fse": 8,
+   "rsl": 8,
+   "ins": 7,
+   "dse": 6,
+   "csc": 6,
+   "isr": 5,
+   "sgg": 5,
+   "hks": 5,
+   "fcs": 5,
+   "sls": 5,
+   "nzs": 5,
+   "tsm": 4,
+   "nsl": 4,
+   "icl": 4,
+   "lls": 4,
+   "fss": 4,
+   "svk": 4,
+   "csg": 4,
+   "tss": 3,
+   "csn": 3,
+   "slovenia": 3,
+   "vgt": 3,
+   "eso": 3,
+   "isg": 2,
+   "ssr": 2,
+   "psp": 2,
+   "slf": 2,
+   "prl": 2,
+   "pks": 1,
+   "jos": 1,
+   "tsq": 1,
+   "???": 1,
+   "vietnam": 1,
+   "mfs": 1,
+   "inl": 1,
+   "gss": 1,
+   "dsl": 1,
+   "csq": 1
+  },
+  "upload_years": {
+   "2008": 1,
+   "2009": 15,
+   "2010": 82,
+   "2011": 187,
+   "2012": 250,
+   "2013": 365,
+   "2014": 509,
+   "2015": 735,
+   "2016": 715,
+   "2017": 1265,
+   "2018": 1608,
+   "2019": 1461,
+   "2020": 2294,
+   "2021": 1910,
+   "2022": 1103,
+   "2023": 824,
+   "2024": 131
+  },
+  "top_channels": [
+   [
+    "UC75cYKm6WbSk-se1deWaD0g",
+    1019
+   ],
+   [
+    "UCWif2ls3MB_CDmg4z17y6tA",
+    480
+   ],
+   [
+    "UC5H_CO6QGwd9hilVnfujz_w",
+    243
+   ],
+   [
+    "UChTbPO97Nt0OTDvqSBjhrVQ",
+    234
+   ],
+   [
+    "UCuyQHJ4y76-i0w9N33vT-kg",
+    218
+   ],
+   [
+    "UC99w_Bzj8ikOz8Gpv0prbNg",
+    207
+   ],
+   [
+    "UCs98soN6aBb6gnfbrLl-W0w",
+    193
+   ],
+   [
+    "UCqLGAeTQmlRVfLK6jAWvDxA",
+    193
+   ],
+   [
+    "UCAPKIo9ykV8iShMmG7c-BQA",
+    187
+   ],
+   [
+    "UC7fVfWv6FL7HeTFeSLz-muQ",
+    181
+   ]
+  ]
+ },
+ "splits": {
+  "train": {
+   "videos": 11437,
+   "channels": 1586,
+   "clips": 515231,
+   "clip_hours": 705.2179586111112,
+   "video_hours": 885.6546143997223,
+   "languages": 55
+  },
+  "validation": {
+   "videos": 1179,
+   "channels": 173,
+   "clips": 68042,
+   "clip_hours": 100.62128166666666,
+   "video_hours": 119.65911316777779,
+   "languages": 11
+  },
+  "test": {
+   "videos": 839,
+   "channels": 199,
+   "clips": 52534,
+   "clip_hours": 64.65460416666666,
+   "video_hours": 76.65969716861112,
+   "languages": 10
+  },
+  "unassigned": {
+   "videos": 81,
+   "channels": 0,
+   "clips": 0,
+   "clip_hours": 0.0,
+   "video_hours": 5.827398135,
+   "languages": 7
+  },
+  "languages_with_held_out": [
+   "ase",
+   "asf",
+   "asq",
+   "bfi",
+   "bzs",
+   "fsl",
+   "gsg",
+   "ise",
+   "jsl",
+   "pso",
+   "ssp",
+   "swl"
+  ],
+  "languages_train_only": [
+   "???",
+   "aed",
+   "csc",
+   "cse",
+   "csg",
+   "csn",
+   "csq",
+   "dse",
+   "dsl",
+   "eso",
+   "fcs",
+   "fse",
+   "fss",
+   "gss",
+   "hks",
+   "hsh",
+   "icl",
+   "ils",
+   "inl",
+   "ins",
+   "isg",
+   "isr",
+   "jos",
+   "kvk",
+   "lls",
+   "mfs",
+   "nsl",
+   "nzs",
+   "pks",
+   "prl",
+   "psp",
+   "rsl",
+   "sgg",
+   "slovenia",
+   "sls",
+   "ssr",
+   "svk",
+   "tsm",
+   "tsq",
+   "tss",
+   "vgt",
+   "vietnam"
+  ],
+  "merged_channel_groups": 10,
+  "random_video_split_validation_videos_sharing_train_channel": {
+   "validation_videos": 1394,
+   "sharing_channel_with_train": 1259
+  }
+ }
+}

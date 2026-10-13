@@ -104,6 +104,8 @@ class DatasetSource[SettingsT: BaseModel](ABC):
     """
 
     name: ClassVar[str]
+    folder: ClassVar[str | None] = None
+    """Directory under the data root, when it is not the source name."""
     homepage: ClassVar[str]
     terms: ClassVar[str]
     access: ClassVar[Access]
@@ -112,7 +114,7 @@ class DatasetSource[SettingsT: BaseModel](ABC):
     def __init__(self, settings: SettingsT, config: AcquisitionConfig) -> None:
         self.settings = settings
         self.config = config
-        self.layout = DatasetLayout(config.data_root / self.name)
+        self.layout = DatasetLayout(config.data_root / (self.folder or self.name))
 
     @abstractmethod
     def fetch_metadata(self) -> None:

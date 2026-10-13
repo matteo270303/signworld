@@ -90,7 +90,7 @@ def read_source_manifest(source: "DatasetSource[Any]") -> Any:
 
 
 def testdata_root(dataset: "DatasetSource[Any]", settings: "AnalysisConfig") -> Path:
-    return settings.test_data.root / dataset.name
+    return settings.test_data.root / dataset.layout.root.name
 
 
 def materialized_clips(

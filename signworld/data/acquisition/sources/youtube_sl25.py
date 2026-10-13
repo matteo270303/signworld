@@ -89,6 +89,7 @@ class YouTubeSL25Source(DatasetSource[YouTubeSL25Settings]):
     """Video streams with their manual subtitles, which carry the sentence timing."""
 
     name = "youtube_sl25"
+    folder = "youtube-sl-25"
     homepage = "https://github.com/google-research/google-research/tree/master/youtube_sl_25"
     terms = "Released as video IDs; each video remains under the YouTube Terms of Service."
     access = Access.PUBLIC

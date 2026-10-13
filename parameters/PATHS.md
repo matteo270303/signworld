@@ -28,5 +28,5 @@ The `.sub` files under `slurm/condor/` keep their absolute `initialdir`.
 repository's own, empty folder: `fetch-media` would start downloading again and the analysis
 jobs would not find their inputs. On ReCaS the old roots differ (`data_root` was
 `/lustrehome/mvigone/data/signworld`, the other data paths were under `/lustrehome/mvigone/data`),
-so link each subfolder (`data/youtube_sl25`, `data/openasl`, …, `data/datiTest`, `data/openASL`,
+so link each subfolder (`data/youtube-sl-25`, `data/openasl`, …, `data/datiTest`, `data/openASL`,
 `data/training`) or set the values back, before submitting.

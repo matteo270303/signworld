@@ -66,6 +66,7 @@ CALLS: dict[tuple[str, ...], Call] = {
     ("fetch-metadata",): user_error("csl_daily", "-c", "{acq}"),
     ("fetch-media",): user_error("csl_daily", "-c", "{acq}"),
     ("probe-youtube",): Call(("youtube_sl25", "-c", "{acq}", "--video", "dQw4w9WgXcQ")),
+    ("adopt",): user_error("youtube_sl25", "-c", "{acq}"),
     ("status",): user_error("youtube_sl25", "-c", "{acq}"),
     ("manifest", "build"): user_error("youtube_sl25", "-c", "{ana}"),
     **{

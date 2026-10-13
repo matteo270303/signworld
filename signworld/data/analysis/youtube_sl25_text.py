@@ -1,7 +1,7 @@
 """Captions and channels of a retrieved YouTube-SL-25: clips, text statistics and splits.
 
 The release carries no split. This module measures what the retrieved subset allows
-(channels from ``info/*.json``, clips from the subtitle tracks), and writes a deterministic
+(channels from ``raw/videos/*.info.json``, clips from the subtitle tracks), and writes a deterministic
 split proposal by channel, following §3.4: never by clip, never by video.
 
 Clips follow ``corpus.builders.YouTubeSL25Manifest``: one clip per cue of the single track
@@ -58,16 +58,15 @@ def _quantiles(values: Sequence[float]) -> dict[str, float]:
 def gather(root: Path, probe_cache: Path) -> dict[str, object]:
     release = dict(reversed(sl.read_release(root / "youtube-sl-25-metadata.csv")))
     probe = {r["video_id"]: r for r in pq.read_table(probe_cache).to_pylist() if r["ok"]}
-    videos = root / "videos"
+    videos = sl.videos_dir(root)
     tracks: dict[str, dict[str, Path]] = defaultdict(dict)
     for path in videos.iterdir():
         match = sl.SUBTITLE_NAME.match(path.name)
         if match:
             tracks[match["id"]][match["lang"]] = path
     info: dict[str, dict] = {}
-    for path in (root / "info").glob("*.json"):
-        if not path.name.endswith(".info.json"):
-            info[path.stem] = json.loads(path.read_text())
+    for video_id, path in sl.info_files(videos).items():
+        info[video_id] = json.loads(path.read_text())
 
     rows, clips = [], []
     for video_id, row in probe.items():

@@ -47,6 +47,7 @@ Each dataset lands in `data/<source>/{metadata,raw,extracted,ledgers}`.
 uv run signworld fetch-metadata csl_news                 # annotation files, with provenance
 uv run signworld fetch-media csl_news --limit 100        # pilot run: at most 100 items
 uv run signworld fetch-media youtube_sl25 --shard 0 --num-shards 4
+uv run signworld adopt youtube_sl25 --unavailable data/youtube-sl-25/failed_unavailable.txt   # videos already on disk
 uv run signworld status csl_news                         # settled, failing, still to fetch
 uv run signworld probe-youtube youtube_sl25              # account refusal or network refusal?
 ```

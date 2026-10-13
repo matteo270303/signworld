@@ -71,34 +71,34 @@ retry() {
   done
 }
 
-[ -d "$SRC/videos" ] || { echo "manca $SRC/videos" >&2; exit 1; }
-echo "sorgente: $SRC ($(du -sh "$SRC/videos" | cut -f1) di video)"
+[ -d "$SRC/raw/videos" ] || { echo "manca $SRC/raw/videos" >&2; exit 1; }
+echo "sorgente: $SRC ($(du -sh "$SRC/raw/videos" | cut -f1) di video)"
 echo "destinazione: $DEST"
 
 # 1) file piccoli: metadati, info, liste
-echo "== file fuori da videos/ =="
-retry "${RSYNC[@]}" --info=progress2 --exclude='/videos/' "$SRC/" "$DEST/"
+echo "== file fuori da raw/videos/ =="
+retry "${RSYNC[@]}" --info=progress2 --exclude='/raw/videos/' "$SRC/" "$DEST/"
 
 # 2) video e sottotitoli, opzionalmente in parallelo (un rsync per blocco di file)
 if [ "$JOBS" -le 1 ]; then
-  echo "== videos/ =="
-  retry "${RSYNC[@]}" --info=progress2 "$SRC/videos/" "$DEST/videos/"
+  echo "== raw/videos/ =="
+  retry "${RSYNC[@]}" --info=progress2 "$SRC/raw/videos/" "$DEST/raw/videos/"
 else
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   # split -n l/N richiede un file normale (non una pipe): prima scrivo l'elenco completo
-  (cd "$SRC/videos" && find . -type f -printf '%P\n' \
+  (cd "$SRC/raw/videos" && find . -type f -printf '%P\n' \
      | { grep -vE '\.(part|ytdl)$' || true; } | sort) > "$tmp/all"
   split -n "l/$JOBS" "$tmp/all" "$tmp/list_"
   # una prima passata crea la cartella di destinazione (la lista è vuota)
-  retry "${RSYNC[@]}" --files-from=/dev/null "$SRC/videos/" "$DEST/videos/"
+  retry "${RSYNC[@]}" --files-from=/dev/null "$SRC/raw/videos/" "$DEST/raw/videos/"
   total=$(wc -l < "$tmp/all")
-  echo "== videos/: $total file, $JOBS rsync in parallelo =="
+  echo "== raw/videos/: $total file, $JOBS rsync in parallelo =="
   : > "$tmp/done.log"
   pids=()
   for list in "$tmp"/list_*; do
     # --out-format scrive un nome per ogni file trasferito: serve a contare l'avanzamento
-    retry "${RSYNC[@]}" --out-format='%n' --files-from="$list" "$SRC/videos/" "$DEST/videos/" \
+    retry "${RSYNC[@]}" --out-format='%n' --files-from="$list" "$SRC/raw/videos/" "$DEST/raw/videos/" \
       >> "$tmp/done.log" &
     pids+=($!)
   done
@@ -115,7 +115,7 @@ fi
 
 # 3) verifica: file e byte dei video e dei sottotitoli, sorgente contro destinazione
 if [ "$CHECK" -eq 1 ] && [ -z "$DRY" ]; then
-  count='find videos -type f \( -name "*.mp4" -o -name "*.vtt" \) -printf "%s\n" | awk "{n++; s+=\$1} END {print n, s}"'
+  count='find raw/videos -type f \( -name "*.mp4" -o -name "*.vtt" \) -printf "%s\n" | awk "{n++; s+=\$1} END {print n, s}"'
   loc=$(cd "$SRC" && bash -c "$count")
   if [[ $DEST == *:* ]]; then
     rem=$("${SSHA[@]}" "${DEST%%:*}" "cd '${DEST#*:}' && $count")

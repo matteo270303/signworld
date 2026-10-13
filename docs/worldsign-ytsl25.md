@@ -8,7 +8,7 @@
 | ------------------------------------------- | --------------------------------------------------------------------------- |
 | ID nel rilascio                             | 39.197 (tutti unici, 56 lingue dei segni)                                   |
 | Video scaricati e validi                    | **13.536 (34,5 %)**, 1.088 ore, 542 GB                                      |
-| Video con metadati (`info/*.json`)          | 13.455                                                                      |
+| Video con metadati (`raw/videos/*.info.json`)          | 13.455                                                                      |
 | Video con almeno una traccia di sottotitoli | 13.454                                                                      |
 | Video con la traccia nella propria lingua   | 12.852                                                                      |
 | ID non scaricati                            | 25.661: 22.383 mai provati, 2.640 «non disponibili», 561 blocchi bot, 77 altro |

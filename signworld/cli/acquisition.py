@@ -1,4 +1,4 @@
-"""``signworld sources|fetch-metadata|fetch-media|probe-youtube|status``: the raw datasets."""
+"""``signworld sources|fetch-metadata|fetch-media|adopt|probe-youtube|status``: the raw datasets."""
 
 from collections import Counter
 from pathlib import Path
@@ -132,3 +132,25 @@ def status(source: SourceArgument, config: ConfigOption = DEFAULT_CONFIG) -> Non
         typer.echo(f"  {state:<22}{counts[state]}")
     typer.echo(f"  {f'failed {max_attempts}+ times':<22}{abandoned}")
     typer.echo(f"  {'to fetch':<22}{len(keys) - settled}")
+
+
+@reports_user_errors
+def adopt(
+    source: SourceArgument,
+    config: ConfigOption = DEFAULT_CONFIG,
+    unavailable: Annotated[
+        Path | None,
+        typer.Option(
+            exists=True, dir_okay=False, help="IDs (one per line) to record as unavailable."
+        ),
+    ] = None,
+) -> None:
+    """Record in the ledgers the videos already on disk, so `status` and the manifest see them."""
+    from signworld.data.acquisition.adopt import adopt_downloads
+
+    result = adopt_downloads(_open(source, config), unavailable)
+    typer.echo(
+        f"{source}: {result.done} done, {result.unavailable} unavailable recorded; "
+        f"{result.already_recorded} already in the ledgers; "
+        f"{result.without_info} videos without .info.json left to fetch-media"
+    )

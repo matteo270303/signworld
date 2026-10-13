@@ -3,7 +3,7 @@
     python -m signworld.data.analysis.youtube_sl25_report \\
         --root /path/to/youtube-sl-25 --out reports/youtube_sl25
 
-``--root`` holds ``youtube-sl-25-metadata.csv``, ``videos/`` and the downloader's
+``--root`` holds ``youtube-sl-25-metadata.csv``, ``raw/videos/`` and the downloader's
 ``failed_*.txt`` lists (and any ``failed_backup*`` directories). Writes ``report.md``,
 ``summary.json``, ``languages.csv``, ``anomalies.csv``, ``probe.parquet`` (a cache: later runs
 probe only new or changed files) and the figures. Needs numpy, scipy, pyarrow, matplotlib and
@@ -55,7 +55,7 @@ class Study:
 
             self.probe = pq.read_table(cache).to_pylist()
         else:
-            self.probe = sl.probe_directory(root / "videos", cache, workers)
+            self.probe = sl.probe_directory(sl.videos_dir(root), cache, workers)
         self.stray = [r["video_id"] for r in self.probe if r["video_id"] not in self.language_of]
         good = [r for r in self.probe if r["ok"] and r["video_id"] in self.language_of]
         bad = {r["video_id"] for r in self.probe if not r["ok"]}
@@ -78,7 +78,7 @@ class Study:
         self.anomalies = sl.anomalies(self.probe)
         self.duplicates = sl.near_duplicates(self.probe)
         self.subtitles = sl.subtitle_stats(
-            root / "videos", {r["video_id"]: r["duration_s"] for r in good}
+            sl.videos_dir(root), {r["video_id"]: r["duration_s"] for r in good}
         )
 
     # one row per language, for the CSV and the tables

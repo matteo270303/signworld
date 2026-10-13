@@ -37,6 +37,7 @@ def _scan(videos: Path) -> dict[str, list[Path]]:
         groups["temp" if path.name.endswith(TEMP_SUFFIXES) or FORMAT_FRAGMENT.search(path.name)
                else "video" if sl.VIDEO_NAME.match(path.name)
                else "subtitle" if sl.SUBTITLE_NAME.match(path.name)
+               else "info" if path.name.endswith(sl.INFO_SUFFIX)
                else "other"].append(path)  # fmt: skip
     return groups
 
@@ -45,8 +46,9 @@ def check(root: Path, out: Path, workers: int = 32) -> dict[str, object]:
     """All checks; returns a JSON-serialisable report."""
     release = sl.read_release(root / "youtube-sl-25-metadata.csv")
     in_release = {video_id for video_id, _ in release}
-    groups = _scan(root / "videos")
-    probe = sl.probe_directory(root / "videos", out / "probe.parquet", workers)
+    videos_dir = sl.videos_dir(root)
+    groups = _scan(videos_dir)
+    probe = sl.probe_directory(videos_dir, out / "probe.parquet", workers)
     probed = {row["video_id"]: row for row in probe}
 
     videos_by_id: dict[str, list[Path]] = defaultdict(list)
@@ -138,19 +140,16 @@ def check(root: Path, out: Path, workers: int = 32) -> dict[str, object]:
     }  # fmt: skip
     report["video_without_subtitle"] = sorted(valid - set(subs_by_id))
     report["video_without_subtitle_but_with_info"] = sorted(
-        (valid - set(subs_by_id)) & {p.stem for p in (root / "info").glob("*.json")}
+        (valid - set(subs_by_id)) & set(sl.info_files(videos_dir))
     )
     report["video_without_usable_subtitle"] = sorted(valid - usable_subs)
     report["paired"] = len(valid & usable_subs)
 
     # ── info json ──
-    info_dir = root / "info"
     infos = {}
-    for path in info_dir.glob("*.json"):
-        if path.name.endswith(".info.json"):
-            continue
+    for video_id, path in sl.info_files(videos_dir).items():
         try:
-            infos[path.stem] = json.loads(path.read_text())
+            infos[video_id] = json.loads(path.read_text())
         except json.JSONDecodeError:
             report.setdefault("info_corrupt", []).append(path.name)
     report["video_without_info"] = sorted(set(videos_by_id) - set(infos))
@@ -177,7 +176,7 @@ def quarantine(root: Path, report: dict[str, object]) -> list[str]:
     names = [f"{i}.mp4" for i in report["video_unreadable"]] + list(report["subtitle_empty"])
     moved = []
     for name in names:
-        source = root / "videos" / name
+        source = sl.videos_dir(root) / name
         if source.is_file():
             shutil.move(source, target / name)
             moved.append(name)

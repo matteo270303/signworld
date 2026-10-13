@@ -26,6 +26,7 @@ app.add_typer(train_app, name="train")
 app.command()(acquisition.sources)
 app.command("fetch-metadata")(acquisition.fetch_metadata)
 app.command("fetch-media")(acquisition.fetch_media)
+app.command()(acquisition.adopt)
 app.command("probe-youtube")(acquisition.probe_youtube)
 app.command()(acquisition.status)
 

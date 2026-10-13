@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 UNKNOWN: Final = "???"
 VIDEO_NAME: Final = re.compile(r"^(?P<id>[A-Za-z0-9_-]{11})\.(?P<ext>mp4|mkv|webm|mov)$")
+INFO_SUFFIX: Final = ".info.json"
 ISO_639_3: Final = re.compile(r"^[a-z]{3}$")
 FAILURE_FILES: Final = {
     "unavailable": "failed_unavailable.txt",
@@ -200,6 +201,16 @@ def probe_file(path: Path) -> dict[str, object]:
             "no audio stream" if audio is None else "zero duration"
         )  # fmt: skip
     return row
+
+
+def videos_dir(root: Path) -> Path:
+    """Where the downloader puts videos, subtitles and ``<id>.info.json`` under a dataset root."""
+    return root / "raw" / "videos"
+
+
+def info_files(videos: Path) -> dict[str, Path]:
+    """``<id>.info.json`` of every video, by ID."""
+    return {p.name.removesuffix(INFO_SUFFIX): p for p in videos.glob(f"*{INFO_SUFFIX}")}
 
 
 def probe_directory(videos: Path, cache: Path, workers: int = 32) -> list[dict[str, object]]:

@@ -24,7 +24,9 @@
 # usare tmux e rilanciare lo stesso comando se scade).
 #
 # È riprendibile (--partial): se si interrompe, rilanciare lo stesso comando. Non cancella
-# nulla in destinazione. Esclude cookie, liste di fallimenti, log e cartelle di quarantena.
+# nulla in destinazione. Copia la cartella intera (crea <dest>/<nome cartella>) con tutto il
+# contenuto, sottocartelle comprese; esclude solo cookie e file temporanei (.part, .ytdl).
+# Mostra l'avanzamento (percentuale/velocità, o file copiati ogni 15s in modalità parallela).
 set -euo pipefail
 
 DEFAULT_DEST="ecolonna@login.leonardo.cineca.it:/leonardo_scratch/large/userexternal/ecolonna"
@@ -36,12 +38,13 @@ while getopts "s:nb:p:e:i:r:d:kch" o; do
     s) SRC=$OPTARG ;; n) DRY="--dry-run" ;; b) BW="--bwlimit=$OPTARG" ;;
     p) JOBS=$OPTARG ;; e) SSH=$OPTARG ;; c) CHECK=1 ;;
     i) IDENTITY=$OPTARG ;; r) RETRIES=$OPTARG ;; d) RETRY_DELAY=$OPTARG ;; k) INSECURE=1 ;;
-    *) sed -n '2,30p' "$0"; exit 1 ;;
+    *) sed -n '2,32p' "$0"; exit 1 ;;
   esac
 done
 shift $((OPTIND - 1))
 DEST=${1:-$DEFAULT_DEST}
 SRC=${SRC%/}
+DEST="${DEST%/}/$(basename "$SRC")"
 
 [[ $RETRIES =~ ^[0-9]+$ && $RETRIES -ge 1 ]] || { echo "-r deve essere un intero >= 1" >&2; exit 2; }
 [[ $RETRY_DELAY =~ ^[0-9]+$ ]] || { echo "-d deve essere un intero >= 0" >&2; exit 2; }
@@ -54,9 +57,7 @@ SSHA=($SSH -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
 [ -z "$IDENTITY" ] || SSHA+=(-i "$IDENTITY")
 SSH_E=$(printf '%q ' "${SSHA[@]}")
 
-EXCLUDES=(--exclude='cookies*' --exclude='failed_*' --exclude='video_ids_missing*'
-          --exclude='logs_*' --exclude='nohup*' --exclude='quarantine*'
-          --exclude='*.part' --exclude='*.ytdl' --exclude='*.info.json')
+EXCLUDES=(--exclude='cookies*' --exclude='*.part' --exclude='*.ytdl')
 # Niente -z: mp4 e vtt sono già compressi o piccoli.
 RSYNC=(rsync -a --partial --human-readable -e "$SSH_E" $DRY $BW "${EXCLUDES[@]}")
 
@@ -75,27 +76,40 @@ echo "sorgente: $SRC ($(du -sh "$SRC/videos" | cut -f1) di video)"
 echo "destinazione: $DEST"
 
 # 1) file piccoli: metadati, info, liste
-retry "${RSYNC[@]}" --exclude='/videos/' "$SRC/" "$DEST/"
+echo "== file fuori da videos/ =="
+retry "${RSYNC[@]}" --info=progress2 --exclude='/videos/' "$SRC/" "$DEST/"
 
 # 2) video e sottotitoli, opzionalmente in parallelo (un rsync per blocco di file)
 if [ "$JOBS" -le 1 ]; then
+  echo "== videos/ =="
   retry "${RSYNC[@]}" --info=progress2 "$SRC/videos/" "$DEST/videos/"
 else
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   # split -n l/N richiede un file normale (non una pipe): prima scrivo l'elenco completo
-  (cd "$SRC/videos" && find . -maxdepth 1 -type f -printf '%f\n' \
-     | { grep -vE '\.(part|ytdl)$|\.f[0-9]+\.' || true; } | sort) > "$tmp/all"
+  (cd "$SRC/videos" && find . -type f -printf '%P\n' \
+     | { grep -vE '\.(part|ytdl)$' || true; } | sort) > "$tmp/all"
   split -n "l/$JOBS" "$tmp/all" "$tmp/list_"
   # una prima passata crea la cartella di destinazione (la lista è vuota)
   retry "${RSYNC[@]}" --files-from=/dev/null "$SRC/videos/" "$DEST/videos/"
+  total=$(wc -l < "$tmp/all")
+  echo "== videos/: $total file, $JOBS rsync in parallelo =="
+  : > "$tmp/done.log"
   pids=()
   for list in "$tmp"/list_*; do
-    retry "${RSYNC[@]}" --files-from="$list" "$SRC/videos/" "$DEST/videos/" &
+    # --out-format scrive un nome per ogni file trasferito: serve a contare l'avanzamento
+    retry "${RSYNC[@]}" --out-format='%n' --files-from="$list" "$SRC/videos/" "$DEST/videos/" \
+      >> "$tmp/done.log" &
     pids+=($!)
   done
+  # avanzamento: file trasferiti in questa esecuzione (quelli già presenti non contano)
+  (while sleep 15; do
+     echo "[$(date +%H:%M:%S)] trasferiti $(grep -vc '/$' "$tmp/done.log" || true) / $total file"
+   done) &
+  mon=$!
   fail=0
   for p in "${pids[@]}"; do wait "$p" || fail=1; done
+  kill "$mon" 2>/dev/null || true
   [ $fail -eq 0 ] || { echo "un rsync è fallito: rilanciare" >&2; exit 1; }
 fi
 

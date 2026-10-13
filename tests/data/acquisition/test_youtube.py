@@ -81,12 +81,14 @@ def test_options_follow_the_configuration(tmp_path: Path) -> None:
         pot_server_home=tmp_path / "server",
         max_height=480,
         ip_version=6,
+        concurrent_fragments=4,
     ):
         options = factory.clients[0].options
         private_cookies = Path(options["cookiefile"]).read_text(encoding="utf-8")
 
     assert private_cookies == cookies.read_text(encoding="utf-8")
     assert options["source_address"] == "::"
+    assert options["concurrent_fragment_downloads"] == 4
     assert options["extractor_args"] == {
         "youtubepot-bgutilscript": {"server_home": [str(tmp_path / "server")]}
     }

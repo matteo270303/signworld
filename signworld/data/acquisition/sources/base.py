@@ -5,7 +5,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cached_property
@@ -175,8 +175,39 @@ class DatasetSource[SettingsT: BaseModel](ABC):
         counts: Counter[Status] = Counter()
         settled = 0
         stopped_early = refused = False
-        with self.session():
-            for position, key in enumerate(batch, start=1):
+
+        def record(entry_outcome: Outcome, position: int) -> bool:
+            """Write one outcome to the ledger; ``False`` once the host has refused too often."""
+            nonlocal settled, stopped_early, refused
+            entry = ledger.record(entry_outcome)
+            counts[entry.status] += 1
+            settled += entry.is_settled(max_attempts)
+            logger.info(
+                "[%d/%d] %s %s %s", position, len(batch), entry.key, entry.status, entry.detail
+            )
+            if backoff.should_continue(entry.status):
+                return True
+            logger.error(
+                "%s %s: stopping after %d consecutive refusals",
+                self.name,
+                shard.label,
+                backoff.streak,
+            )
+            stopped_early = refused = True
+            return False
+
+        workers = min(self.config.workers, len(batch))
+        with ExitStack() as stack:
+            pool = None
+            if workers > 1:
+                from ..parallel import WorkerPool  # noqa: PLC0415 (parallel imports this module)
+
+                pool = stack.enter_context(WorkerPool(self, workers))
+                outcomes = pool.outcomes(batch)
+            else:
+                stack.enter_context(self.session())
+                outcomes = (self.fetch_isolated(key) for key in batch)
+            for position in range(1, len(batch) + 1):
                 if budget is not None and monotonic() - started > budget:
                     logger.info(
                         "%s %s: run budget of %.0f s spent; resting before the next run",
@@ -186,21 +217,14 @@ class DatasetSource[SettingsT: BaseModel](ABC):
                     )
                     stopped_early = True
                     break
-                entry = ledger.record(self._fetch_isolated(key))
-                counts[entry.status] += 1
-                settled += entry.is_settled(max_attempts)
-                logger.info(
-                    "[%d/%d] %s %s %s", position, len(batch), key, entry.status, entry.detail
-                )
-                if not backoff.should_continue(entry.status):
-                    logger.error(
-                        "%s %s: stopping after %d consecutive refusals",
-                        self.name,
-                        shard.label,
-                        backoff.streak,
-                    )
-                    stopped_early = refused = True
+                if not record(next(outcomes), position):
                     break
+            if pool is not None:
+                # Items already handed to the workers were fetched: their files are on disk.
+                for late in pool.drain():
+                    entry = ledger.record(late)
+                    counts[entry.status] += 1
+                    settled += entry.is_settled(max_attempts)
         return ShardReport(
             self.name,
             shard,
@@ -210,7 +234,7 @@ class DatasetSource[SettingsT: BaseModel](ABC):
             refused=refused,
         )
 
-    def _fetch_isolated(self, key: str) -> Outcome:
+    def fetch_isolated(self, key: str) -> Outcome:
         try:
             return self.fetch_item(key)
         except Exception as error:  # one broken item must not abort the rest of the shard

@@ -54,6 +54,8 @@ class YouTubeConfig(FrozenModel):
     sleep_min_s: NonNegativeFloat = 10.0
     sleep_max_s: NonNegativeFloat = 20.0
     sleep_subtitles_s: NonNegativeFloat = 5.0
+    concurrent_fragments: PositiveInt = 1
+    """Fragments of one video fetched at once (DASH streams); 1 is yt-dlp's default."""
 
     @model_validator(mode="after")
     def _ordered_sleep_bounds(self) -> Self:
@@ -65,6 +67,8 @@ class YouTubeConfig(FrozenModel):
 class AcquisitionConfig(FrozenModel):
     data_root: Path
     max_attempts: PositiveInt = 3
+    workers: PositiveInt = 1
+    """Processes fetching the items of a shard at once; each paces itself and holds a client."""
     run_budget_s: PositiveFloat | None = None
     """Stop a run after this long, before a host that limits sustained activity refuses us.
 

@@ -216,6 +216,7 @@ class YouTubeDownloader:
             "sleep_interval": config.sleep_min_s,
             "max_sleep_interval": config.sleep_max_s,
             "sleep_interval_subtitles": config.sleep_subtitles_s,
+            "concurrent_fragment_downloads": config.concurrent_fragments,
             "quiet": True,
             "no_warnings": False,
             "noprogress": True,

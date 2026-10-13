@@ -60,13 +60,20 @@ def fetch_media(
     limit: Annotated[
         int | None, typer.Option(min=1, help="Fetch at most this many items (pilot runs).")
     ] = None,
+    workers: Annotated[
+        int | None,
+        typer.Option(min=1, help="Processes fetching at once (default: `workers` of the config)."),
+    ] = None,
 ) -> None:
     """Fetch the media items of one shard, resuming from the ledgers.
 
     Exits with 0 once every item of the shard is settled, with 4 if the host refused the run,
     and with 3 while items remain for any other reason.
     """
-    report = _open(source, config).fetch_media(Shard(shard, num_shards), limit=limit)
+    dataset = _open(source, config)
+    if workers is not None:
+        dataset.config = dataset.config.model_copy(update={"workers": workers})
+    report = dataset.fetch_media(Shard(shard, num_shards), limit=limit)
     summary = ", ".join(f"{status}={count}" for status, count in sorted(report.counts.items()))
     reason = (
         " (stopped by refusals)"

@@ -4,7 +4,7 @@ from unittest import mock
 
 import pytest
 
-from signworld.data.acquisition.config import AcquisitionConfig
+from signworld.data.acquisition.config import AcquisitionConfig, RefusalPolicy
 from signworld.data.acquisition.ledger import read_ledgers
 from signworld.data.acquisition.outcome import Outcome, Status
 from signworld.data.acquisition.sharding import Shard
@@ -115,6 +115,35 @@ def test_limit_caps_the_items_of_a_run(config: AcquisitionConfig) -> None:
 
     assert source.calls == ["a", "b"]
     assert report.remaining == 1
+
+
+def test_items_are_fetched_by_several_worker_processes(config: AcquisitionConfig) -> None:
+    keys = [f"k{i}" for i in range(7)]
+    script = dict.fromkeys(keys, Status.DONE) | {"k3": Status.UNAVAILABLE}
+    source = _ScriptedSource(config.model_copy(update={"workers": 3}), script)
+
+    report = source.fetch_media(Shard.whole(), sleep=_no_sleep)
+
+    assert report.counts == {Status.DONE: 6, Status.UNAVAILABLE: 1}
+    assert report.complete
+    ledger = read_ledgers(source.layout.ledgers)
+    assert {key: entry.status for key, entry in ledger.items()} == script
+    assert source.calls == []  # the items ran in the workers, not in this process
+
+
+def test_parallel_run_stops_on_refusals_and_keeps_what_was_in_flight(
+    config: AcquisitionConfig,
+) -> None:
+    refusing = config.model_copy(
+        update={"workers": 2, "refusals": RefusalPolicy(max_consecutive=2, cooldown_s=0.0)}
+    )
+    keys = [f"k{i}" for i in range(12)]
+    source = _ScriptedSource(refusing, dict.fromkeys(keys, Status.BLOCKED))
+
+    report = source.fetch_media(Shard.whole(), sleep=_no_sleep)
+
+    assert report.refused and not report.complete
+    assert 2 <= len(read_ledgers(source.layout.ledgers)) < len(keys)
 
 
 def test_a_run_stops_when_its_time_budget_is_spent(config: AcquisitionConfig) -> None:

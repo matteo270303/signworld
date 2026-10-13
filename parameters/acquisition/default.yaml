@@ -7,6 +7,11 @@ data_root: data
 # An item that fails this many times (refusals excluded) is abandoned.
 max_attempts: 3
 
+# Processes fetching the items of a shard at once (each with its own yt-dlp client and
+# cookie copy). Requests multiply with it: lower it, or raise the pauses below, if YouTube
+# starts refusing (`fetch-media --workers N` overrides it for one run).
+workers: 8
+
 # YouTube refused every shard after about an hour of continuous downloading on
 # 2026-09-16 and 2026-09-17, whatever the pace. A run therefore stops before that
 # hour and the job rests instead of waiting for the refusal.
@@ -42,12 +47,14 @@ youtube:
   retries: 5
   socket_timeout_s: 30
   # A video still downloading after this long is abandoned for this run.
-  item_timeout_s: 3600
-  # Pacing close to yt-dlp's "sleep" preset: a pause between API requests, a
-  # random 10-20 s pause before each video, and one before each subtitle file.
+  item_timeout_s: 900
+  # Fragments of one video fetched at once (yt-dlp's parallel DASH download).
+  concurrent_fragments: 4
+  # Pacing of each worker: a pause between API requests, a random 5-10 s pause before
+  # each video, and one before each subtitle file.
   sleep_requests_s: 0.75
-  sleep_min_s: 10
-  sleep_max_s: 20
+  sleep_min_s: 5
+  sleep_max_s: 10
   sleep_subtitles_s: 3
 
 sources:

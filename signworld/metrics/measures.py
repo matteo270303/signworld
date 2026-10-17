@@ -37,8 +37,8 @@ from tqdm import tqdm  # type: ignore[import-untyped]
 from signworld.data.pose.tokens import JOINT_ARTICULATOR
 from signworld.experiment.train.config import WorldSignConfig
 from signworld.experiment.train.distributed import SINGLE, Distributed
-from signworld.experiment.train.validation import RetrievalScores, retrieval, similarity
-from signworld.loss.worldsign import uniformity
+from signworld.experiment.train.validation import RetrievalScores, retrieval, scoring, similarity
+from signworld.loss.worldsign import semantic_energy, uniformity
 from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
 from signworld.models.worldsign.readout import membership
 
@@ -222,6 +222,7 @@ def split_measures(
         durations=t.get("durations"),
         words=t.get("words"),
         bootstrap=bootstrap,
+        energy=scoring(config.losses),
     )
     out = scores.as_log()
     physical = {k: v for k, v in collected.averages.items() if not k.startswith("loss_")}
@@ -264,17 +265,17 @@ def split_measures(
         )
 
     if "noise" in t:
-        noisy = retrieval(t["noise"], texts, t["rows"])
+        noisy = retrieval(t["noise"], texts, t["rows"], energy=scoring(losses))
         out |= {f"noise_{direction}_r1": value for direction, value in noisy.r1.items()}
         out["noise_drop"] = (
             1 - noisy.decision / scores.decision if scores.decision > 0 else math.nan
         )
     nearest = min(10, len(texts))
-    for direction, (scored,) in both_ways(similarity(predicted, texts)).items():
+    for direction, (scored,) in both_ways(similarity(predicted, texts, scoring(losses))).items():
         out[f"hubness_{direction}"] = hubness(scored, nearest)
     out["modality_gap"] = modality_gap(predicted[:, 0], texts)
     if "e_fis" in t:
-        semantic = 1 - functional.cosine_similarity(predicted.mean(1), texts, dim=-1)
+        semantic = semantic_energy(predicted, texts[:, None], scoring(losses)).amin(dim=1)
         out |= energy_table(t["e_fis"], semantic)
     return scores, out
 

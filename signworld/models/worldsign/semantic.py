@@ -2,9 +2,10 @@
 
 The encoder's tokens of the whole clip (no mask) are projected to the predictor's width and
 joined by learned queries; bidirectional attention with 3D RoPE on the video tokens runs over
-both; the query outputs are averaged and projected to the caption space, giving ŷ, the
-retrieval vector. With ``hypotheses = K > 1`` (ESP-4, optional) the queries form K groups and
-each group's mean is one hypothesis ŷ_k, at zero extra parameters (§4.5.9).
+both; the query outputs are averaged and projected to the caption space, then batch-normalised
+(``batch_norm``), giving ŷ, the retrieval vector. With ``hypotheses = K > 1`` (ESP-4, optional)
+the queries form K groups and each group's mean is one hypothesis ŷ_k, at zero extra
+parameters (§4.5.9); the BatchNorm then runs over every hypothesis of the batch.
 """
 
 from typing import cast
@@ -84,6 +85,9 @@ class SemanticPredictor(nn.Module):
         )
         self.norm = nn.LayerNorm(width)
         self.outputs = nn.Linear(width, settings.output_dim)
+        self.output_norm: nn.Module = (
+            nn.BatchNorm1d(settings.output_dim) if settings.batch_norm else nn.Identity()
+        )
 
     def _inputs(self, tokens: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         if tokens.shape[1] != self.grid.size:
@@ -103,7 +107,8 @@ class SemanticPredictor(nn.Module):
     def project(self, queries: Tensor) -> Tensor:
         """Query outputs to (batch, K, output_dim): the mean of each group of queries."""
         groups = queries.view(len(queries), self.settings.hypotheses, -1, queries.shape[-1])
-        predicted: Tensor = self.outputs(groups.mean(dim=2))
+        projected = self.outputs(groups.mean(dim=2))
+        predicted: Tensor = self.output_norm(projected.flatten(0, 1)).view_as(projected)
         return predicted
 
     def forward(self, tokens: Tensor) -> Tensor:

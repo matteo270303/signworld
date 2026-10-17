@@ -2,21 +2,24 @@
 
 ``L = (1 - λ_P) · (L_inv + L_anchor) + λ_P · SIGReg_posa
     + (1 - λ) · (E_fis + L_pred_sem) + λ · SIGReg_sem``,
-λ_P = 0.04 for the pose (posa §4.2) and λ = 0.04 above it (loss §8.5), with ``L_pred_sem`` and
-``SIGReg_sem`` set by the arm of ESP-1:
+λ_P = 0.04 for the pose (posa §4.2) and λ = 0.1 above it (``LossSettings.sigreg_weight``),
+with ``L_pred_sem`` and ``SIGReg_sem`` set by the arm of ESP-1:
 
-    A₀   E_sem                                  —
     A    E_sem                                  ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
-    V    E_sem + 0.5·Σ v + 0.02·Σ c (VICReg)    —
-    B₀   E_sem + L_unif / 3                     —
-    B    E_sem + L_unif / 3                     ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
+    V    E_sem + 0.5·Σ v + 0.04·Σ c (VICReg)    —
+    B₀   E_sem + (2/3)·L_unif                   —
+    B    E_sem + (2/3)·L_unif                   ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
     C    InfoNCE                                ½ [SIGReg({ŷ}) + SIGReg({ẽ})]
 
-The weights inside an arm come from the closest literature (``LossSettings``): VICReg's
-25/25/1, with E_sem in place of its MSE (2·E_sem at unit variance); Wang and Isola's
-0.75·L_align + 0.5·L_unif at batch 128, with L_align = 2·E_sem on the sphere. InfoNCE treats
-clips with the same caption as positives and drops from its denominators the clips of the
-same video and the false negatives of GloFND, read on the frozen caption embeddings.
+E_sem is the squared error of ŷ against LN(sg(ẽ)) (``semantic_energy``): the physical level's
+target with the squared error of LeJEPA, LeWM, LeVLJEPA and VICReg; the cosine form,
+symmetric and without a stop-gradient, collapsed in the OpenASL trial v4. The weights inside
+an arm come from the closest literature (``LossSettings``): VICReg's 25/25/1 as in its code,
+with E_sem as its ``F.mse_loss``; Wang and Isola's 0.75·L_align + 0.5·L_unif at batch 128, with
+L_align = E_sem on vectors of norm √d.
+InfoNCE treats clips with the same caption as positives and drops from its denominators the
+clips of the same video and the false negatives of GloFND, read on the frozen caption
+embeddings.
 
 SIGReg is applied to each modality apart, as LeJEPA applies it to each view, with the same
 random directions for both. On the pose it is applied to each of the four views at each step
@@ -107,19 +110,27 @@ def invariance(views: Tensor, present: Tensor) -> Tensor:
     return (squared * weights).sum() / weights.sum().clamp_min(1.0)
 
 
-def semantic_energy(predicted: Tensor, target: Tensor) -> Tensor:
-    """(batch,) E_sem = 1 - cos(ŷ, ẽ)."""
-    energy: Tensor = 1.0 - functional.cosine_similarity(predicted, target, dim=-1)
-    return energy
+def semantic_energy(predicted: Tensor, target: Tensor, kind: str = "l2") -> Tensor:
+    """E_sem of every pair, over the last dimension (``LossSettings.semantic_energy``).
+
+    ``l2``: the squared error against the target layer-normalised over its d channels without
+    parameters, averaged over the channels; the caller stops the target's gradient.
+    ``cosine``: ``1 - cos(ŷ, ẽ)``.
+    """
+    if kind == "cosine":
+        cosine: Tensor = 1.0 - functional.cosine_similarity(predicted, target, dim=-1)
+        return cosine
+    normalized = functional.layer_norm(target.float(), (target.shape[-1],))
+    return (predicted.float() - normalized).pow(2).mean(dim=-1)
 
 
-def free_energy(predicted: Tensor, target: Tensor, relaxation: float) -> Tensor:
+def free_energy(predicted: Tensor, target: Tensor, relaxation: float, kind: str = "l2") -> Tensor:
     """(batch,) energy over K hypotheses (batch, K, d): relaxed minimum (§4.5.9).
 
     ``(1 - ε) · min_k E_k + ε · mean_k E_k``: losing hypotheses still get a share ε of the
     gradient, so they are not stranded when every target falls in one Voronoi cell.
     """
-    energies = semantic_energy(predicted, target[:, None, :])
+    energies = semantic_energy(predicted, target[:, None, :], kind)
     return (1.0 - relaxation) * energies.min(dim=1).values + relaxation * energies.mean(dim=1)
 
 
@@ -308,6 +319,7 @@ class Objective(nn.Module):
     ) -> None:
         super().__init__()
         self.settings = losses
+        self.energy = losses.semantic_energy
         self.relaxation = semantic.relaxation if semantic.hypotheses > 1 else 0.0
         self.physical = physical
         self.collective = collective
@@ -368,9 +380,11 @@ class Objective(nn.Module):
             )
             self.last_diagnostics = self._pair_diagnostics(everyone, every_row, excluded)
         elif predicted.shape[1] > 1:
-            terms["e_sem"] = free_energy(predicted, text, self.relaxation).mean()
+            target = self._energy_target(text)
+            terms["e_sem"] = free_energy(predicted, target, self.relaxation, self.energy).mean()
         else:
-            terms["e_sem"] = semantic_energy(predicted[:, 0], text).mean()
+            target = self._energy_target(text)
+            terms["e_sem"] = semantic_energy(predicted[:, 0], target, self.energy).mean()
         if self.uses_uniformity:
             terms["unif"] = 0.5 * (
                 uniformity(gather(predicted.flatten(0, 1)), self.settings.uniformity_t)
@@ -389,6 +403,18 @@ class Objective(nn.Module):
         if self.uses_sigreg:
             terms["sigreg_sem"] = self.sigreg([predicted.flatten(0, 1), text], generator)
         return terms
+
+    def _energy_target(self, text: Tensor) -> Tensor:
+        """ẽ as E_sem reads it: in the l2 form with its gradient stopped, as E_fis reads sg(s);
+        the text head then follows only the arm's regulariser on ẽ."""
+        return text.detach() if self.energy == "l2" else text
+
+    @torch.no_grad()
+    def clip_energy(self, predicted: Tensor, text: Tensor) -> Tensor:
+        """(batch,) E_sem of every clip through its best hypothesis: ``predicted`` (batch, K, d),
+        ``text`` (batch, d). Arm C, trained on cosines, is read with the cosine form."""
+        kind = "cosine" if self.infonce is not None else self.energy
+        return semantic_energy(predicted, text[:, None], kind).amin(dim=1)
 
     @torch.no_grad()
     def _pair_diagnostics(
@@ -426,8 +452,8 @@ class Objective(nn.Module):
         invariance, variance, covariance = s.vicreg_coefficients
         relative = {
             "unif": s.uniformity_weight,
-            "vicreg_var": variance / (2 * invariance),
-            "vicreg_cov": covariance / (2 * invariance),
+            "vicreg_var": variance / (2 * invariance),  # VICReg's code: the branches' mean
+            "vicreg_cov": covariance / invariance,  # and the branches' sum
         }
         out = {}
         for name in names:

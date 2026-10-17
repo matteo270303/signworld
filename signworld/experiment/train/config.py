@@ -18,9 +18,9 @@ from pydantic import Field, PositiveFloat, PositiveInt, model_validator
 from signworld.data.acquisition.config import FrozenModel
 from signworld.metrics.directions import Bidirectional
 
-Arm = Literal["A0", "A", "V", "B0", "B", "C"]
-"""Loss arms of ESP-1 (§4.14): alignment with SIGReg (A), with VICReg instead (V), with or
-without SIGReg and L_unif, or InfoNCE."""
+Arm = Literal["A", "V", "B0", "B", "C"]
+"""Loss arms of ESP-1 (§4.14): alignment with SIGReg (A), with VICReg instead (V), with L_unif
+with or without SIGReg (B, B₀), or InfoNCE (C). A₀, alignment alone, is out of the plan."""
 
 
 class LoRASettings(FrozenModel):
@@ -132,8 +132,14 @@ class SemanticSettings(FrozenModel):
     """[Aperto: PC7] §4.11 asks for dropout without a value."""
     drop_path: float = 0.1
     """[Aperto: PC7] stochastic depth, §4.11."""
-    layer_scale: float = 1e-4
-    """[Aperto: PC7] initial LayerScale of the residual branches, §4.11."""
+    layer_scale: float = 0.1
+    """Initial LayerScale of the residual branches, §4.11. 0.1, not 1e-4: at 1e-4 the four
+    blocks barely read the video at the start, ŷ was the same for every clip, and the semantic
+    level collapsed in the OpenASL trial (v4, 17/10)."""
+    batch_norm: bool = True
+    """BatchNorm on ŷ after the output layer, synchronised across the GPUs: the embeddings start
+    and stay at unit scale per dimension, where SIGReg acts, as in LeVLJEPA's heads. Without it
+    ŷ started nearly constant, and SIGReg, flat near a point mass, could not spread it."""
     trains_encoder: bool = False
     """False: the hierarchy trained level by level, the semantic level reads the video encoder
     without changing it (``sg(Enc(x))``). True: the «global» ablation, E_sem reaches the LoRA."""
@@ -149,10 +155,21 @@ class LossSettings(FrozenModel):
     """Objective of §4.5.7: ``(1 - λ)·(predictive terms) + λ·(SIGReg terms)``, level by level."""
 
     arm: Arm = "A"
-    sigreg_weight: float = Field(default=0.04, gt=0.0, lt=1.0)
-    """λ of the semantic level: E_sem = m/2 for N(0, I) vectors (m the MSE per dimension),
-    so the loss is ``m + 2λ/(1-λ)·SIGReg``; LeWM (m + 0.09·SIGReg, N = 128) gives 0.043,
-    LeJEPA (two views 0.01 at N = 256, invariance m/4) gives 0.039 (loss §8.5)."""
+    semantic_energy: Literal["l2", "cosine"] = "l2"
+    """Form of E_sem. ``l2``: ``(1/d)‖ŷ - LN(sg(ẽ))‖²``, the physical level's target (layer
+    norm without parameters over the d channels, gradient stopped) with the squared error of
+    LeJEPA, LeWM, LeVLJEPA and VICReg, the works the weights below come from; the text head is
+    then shaped only by the arm's regulariser. ``cosine``: ``1 - cos(ŷ, ẽ)``, symmetric, the
+    form of the OpenASL trial v4, which collapsed onto a constant ŷ = ẽ. Arm C's InfoNCE is not
+    affected."""
+    sigreg_weight: float = Field(default=0.1, gt=0.0, lt=1.0)
+    """λ of the semantic level, on ½[SIGReg(ŷ) + SIGReg(ẽ)] against the l2 E_sem: ŷ sees
+    SIGReg at λ/2 against (1 - λ) of E_sem, 0.056 at λ = 0.1. LeJEPA recommends λ = 0.05 on
+    each view against its squared prediction loss, i.e. 0.053 (§6.1, Eq. 9; batch ≥ 128).
+    LeWM, at our batch of 128, uses L_pred + 0.1·SIGReg, peaks near 0.09 and stays above 80 %
+    success for λ in [0.01, 0.2] (App. G), i.e. our λ in [0.02, 0.29]. LeVLJEPA's 0.01 per
+    modality (stable 0.005-0.04) is at batch 4096, where the statistic of a given deviation is
+    32 times ours. The text head receives only SIGReg(ẽ), so λ does not change its update."""
     pose_sigreg_weight: float = Field(default=0.04, gt=0.0, lt=1.0)
     """λ of the pose level (posa §4.2): LeJEPA's 0.02 for four views at 256 samples per
     SIGReg, doubled for the ≤ 128 clips of each step, since the statistic grows with N."""
@@ -161,17 +178,18 @@ class LossSettings(FrozenModel):
     sigreg_knots: PositiveInt = 17
     uniformity_t: PositiveFloat = 2.0
     """t of Wang and Isola's L_unif [Lett. 40]: their value with batch 128 (NYU-Depth) and 768."""
-    uniformity_weight: PositiveFloat = 1 / 3
+    uniformity_weight: PositiveFloat = 2 / 3
     """Weight of L_unif against E_sem in arms B₀ and B. Wang and Isola, batch 128 and t = 2
-    (NYU-Depth): 0.75·L_align + 0.5·L_unif; on the sphere L_align(alpha = 2) = 2·E_sem, so
-    1.5·E_sem + 0.5·L_unif, i.e. E_sem + L_unif / 3 (their range is stable below a ratio
-    align / unif of about 4; ImageNet-100 at batch 128 used 3 : 1)."""
+    (NYU-Depth, Tab. 2): 0.75·L_align(alpha = 2) + 0.5·L_unif, both modalities averaged in
+    L_unif as in their code. On vectors of norm √d the l2 E_sem is ‖u - v‖² of the unit
+    vectors, i.e. L_align, so E_sem + (2/3)·L_unif (ImageNet-100 at batch 128: 3 : 1)."""
     vicreg_coefficients: tuple[PositiveFloat, PositiveFloat, PositiveFloat] = (25.0, 25.0, 1.0)
     """lambda, mu, nu of VICReg (invariance, variance, covariance): Bardes et al., ICLR 2022,
     the best of their grid (Tab. 7: 25/25/1 = 68.6; 5/5/1 = 68.1, 50/50/1 = 68.3; lambda and
-    mu apart: unstable). Arm V keeps E_sem as invariance; at unit variance the per-dimension
-    MSE is 2·E_sem, so the terms weigh ``E_sem + mu/(2 lambda)·Σ v + nu/(2 lambda)·Σ c``,
-    summed over ŷ and ẽ: ``E_sem + 0.5·Σ v + 0.02·Σ c``."""
+    mu apart: unstable). In their code the invariance is ``F.mse_loss`` (the l2 E_sem), the
+    variance hinge averages the two branches (``/ 2``) and the covariance sums them, so arm V
+    weighs ``E_sem + mu/(2 lambda)·Σ v + nu/lambda·Σ c = E_sem + 0.5·Σ v + 0.04·Σ c``, the
+    sums over ŷ and ẽ."""
     vicreg_gamma: PositiveFloat = 1.0
     """Target standard deviation of every dimension (VICReg §4.2)."""
     vicreg_epsilon: PositiveFloat = 1e-4
@@ -289,6 +307,10 @@ class TextSettings(FrozenModel):
     """d of ẽ, the same as ŷ's: E_sem compares them."""
     dropout: float = 0.1
     """Between the two layers of the head: «dropout nelle teste» of §4.11 [Aperto: PC7]."""
+    batch_norm: bool = True
+    """BatchNorm on ẽ after the last layer, as on ŷ (``SemanticSettings.batch_norm``): with
+    EmbeddingGemma's unit vectors (≈0.03 per dimension) the head's bias dominated and ẽ was born
+    nearly constant (pair cosine 0.96 at initialisation in the OpenASL trial)."""
 
 
 class StageSettings(FrozenModel):

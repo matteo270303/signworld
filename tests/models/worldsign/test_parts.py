@@ -7,7 +7,12 @@ from torch import nn
 
 from signworld.data.augmentation import ClipAugmenter, View
 from signworld.data.sampling import MotionGuidedSampler, UniformSampler
-from signworld.experiment.train.config import AugmentationSettings, MaskSpec, SamplingSettings
+from signworld.experiment.train.config import (
+    AugmentationSettings,
+    MaskSpec,
+    SamplingSettings,
+    SemanticSettings,
+)
 from signworld.models.encoders.video_encoders import box_pool
 from signworld.models.worldsign.lora import LoRALinear, adapter_parameters, inject
 from signworld.models.worldsign.masking import (
@@ -21,6 +26,7 @@ from signworld.models.worldsign.masking import (
 )
 from signworld.models.worldsign.readout import box_sum, membership, pool
 from signworld.models.worldsign.rope import RoPE3D
+from signworld.models.worldsign.semantic import SemanticPredictor
 
 GRID = TokenGrid()
 
@@ -190,3 +196,32 @@ def test_rope_rotates_video_tokens_only_and_keeps_norms() -> None:
     assert torch.equal(y[..., grid.size :, :], x[..., grid.size :, :])  # queries unrotated
     assert torch.allclose(y[..., 0, :], x[..., 0, :])  # position (0, 0, 0): identity
     assert not torch.allclose(y[..., 1, :], x[..., 1, :])
+
+
+# ----------------------------------------------------------------------------- semantic predictor
+
+
+def _mean_pair_cosine(x: torch.Tensor) -> float:
+    unit = torch.nn.functional.normalize(x, dim=-1)
+    return float((unit @ unit.T)[~torch.eye(len(x), dtype=torch.bool)].mean())
+
+
+def test_the_semantic_predictor_reads_the_clip_from_the_start_at_unit_scale() -> None:
+    """With LayerScale 1e-4 and no BatchNorm, ŷ was born the same for every clip (the OpenASL
+    trial v4 collapsed there); LayerScale 0.1 and the BatchNorm spread it at unit scale."""
+    grid = TokenGrid(steps=2, rows=2, columns=2)
+    tokens = torch.randn(32, grid.size, 16, generator=torch.Generator().manual_seed(0))
+    torch.manual_seed(0)
+    predictor = SemanticPredictor(16, SemanticSettings(width=48, heads=4, depth=2), grid)
+    torch.manual_seed(0)
+    old = SemanticSettings(width=48, heads=4, depth=2, layer_scale=1e-4, batch_norm=False)
+    before = SemanticPredictor(16, old, grid)
+
+    with torch.no_grad():
+        predicted = predictor(tokens)[:, 0]
+        constant = before(tokens)[:, 0]
+
+    assert all(float(b.gamma1[0]) == pytest.approx(0.1) for b in predictor.blocks)  # type: ignore[union-attr]
+    assert predicted.std(dim=0).mean() == pytest.approx(1.0, rel=0.05)
+    assert _mean_pair_cosine(predicted) < 0.2
+    assert _mean_pair_cosine(constant) > 0.99

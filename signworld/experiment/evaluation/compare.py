@@ -22,7 +22,7 @@ import torch
 
 from .report import analyse_run
 
-ESP1: Final = ("A0", "A", "V", "B0", "B", "C")
+ESP1: Final = ("A", "V", "B0", "B", "C")
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +35,8 @@ class Contrast:
 
 
 PLAN: Final = (
-    Contrast("A", "A0", "what SIGReg adds", "≫"),
     Contrast("A", "V", "the whole distribution (SIGReg) against its second moments (VICReg)", None),
     Contrast("A", "B0", "distributional constraint against pairwise uniformity (H1)", "≈"),
-    Contrast("B0", "A0", "what pairwise uniformity adds", ">"),
     Contrast("B", "A", "do SIGReg and L_unif add up", "≈"),
     Contrast("A", "C", "what negatives add at the same batch and data", "≈"),
     Contrast("θ*", "ESP-2", "does the physical level help the semantic one (H3)", ">"),

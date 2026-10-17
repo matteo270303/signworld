@@ -55,13 +55,50 @@ def test_physical_energy_ignores_steps_without_confidence_and_averages_masks() -
     assert physical_energy([good, off], target, confidence, 0.5).item() == pytest.approx(0.5)
 
 
-def test_semantic_and_free_energy() -> None:
+def test_semantic_and_free_energy_in_the_cosine_form() -> None:
     target = torch.tensor([[1.0, 0.0]])
     hypotheses = torch.tensor([[[0.0, 1.0], [1.0, 0.0]]])  # one orthogonal, one exact
 
-    assert semantic_energy(target, target).item() == pytest.approx(0.0)
-    assert free_energy(hypotheses, target, relaxation=0.0).item() == pytest.approx(0.0)
-    assert free_energy(hypotheses, target, relaxation=0.5).item() == pytest.approx(0.25)
+    assert semantic_energy(target, target, "cosine").item() == pytest.approx(0.0)
+    assert free_energy(hypotheses, target, 0.0, "cosine").item() == pytest.approx(0.0)
+    assert free_energy(hypotheses, target, 0.5, "cosine").item() == pytest.approx(0.25)
+
+
+def test_semantic_energy_in_the_l2_form_reads_the_layer_normalised_target() -> None:
+    pattern = torch.tensor([[1.0, -1.0, 1.0, -1.0]])  # zero mean, unit variance
+    target = 3.0 * pattern + 5.0  # its layer norm is the pattern
+
+    assert semantic_energy(pattern, target).item() == pytest.approx(0.0, abs=1e-5)
+    assert semantic_energy(pattern + 2.0, target).item() == pytest.approx(4.0, rel=1e-4)
+    hypotheses = torch.stack([pattern[0] + 2.0, pattern[0]])[None]  # one off by 2, one exact
+    # (1 - ε)·min + ε·mean = 0.5·0 + 0.5·2
+    assert free_energy(hypotheses, target, 0.5).item() == pytest.approx(1.0, rel=1e-4)
+
+
+@pytest.mark.parametrize(("form", "reaches_text"), [("l2", False), ("cosine", True)])
+def test_the_l2_energy_stops_the_gradient_of_the_caption_target(
+    form: str, reaches_text: bool
+) -> None:
+    """As E_fis reads sg(s): in the l2 form only the regulariser shapes ẽ."""
+    settings = LossSettings(arm="A", semantic_energy=form)  # type: ignore[arg-type]
+    objective = Objective(settings, SemanticSettings(), physical=True)
+    predicted = torch.randn(8, 1, 16, requires_grad=True)
+    text = torch.randn(8, 16, requires_grad=True)
+
+    terms = objective.semantic_terms(predicted, text, list("abcdefgh"), torch.Generator())
+    terms["e_sem"].backward()
+
+    assert predicted.grad is not None
+    assert (text.grad is not None) == reaches_text
+
+
+def test_each_clip_is_read_with_its_arm_s_energy() -> None:
+    predicted, text = torch.randn(4, 1, 16), torch.randn(4, 16)
+    energy = Objective(LossSettings(arm="A"), SemanticSettings(), physical=True).clip_energy
+    cosine = Objective(LossSettings(arm="C"), SemanticSettings(), physical=True).clip_energy
+
+    assert torch.allclose(energy(predicted, text), semantic_energy(predicted[:, 0], text))
+    assert torch.allclose(cosine(predicted, text), semantic_energy(predicted[:, 0], text, "cosine"))
 
 
 def test_uniformity_is_lower_for_spread_points() -> None:
@@ -84,15 +121,14 @@ def test_infonce_does_not_use_clips_of_the_same_video_as_negatives() -> None:
     assert same_video < other_videos
 
 
-RELATIVE = {"unif": 1 / 3, "vicreg_var": 25 / (2 * 25), "vicreg_cov": 1 / (2 * 25)}
-"""Weights against E_sem from the literature: Wang and Isola's 0.75·L_align + 0.5·L_unif
-with L_align = 2·E_sem; VICReg's 25/25/1 with its MSE = 2·E_sem."""
+RELATIVE = {"unif": 0.5 / 0.75, "vicreg_var": 25 / (2 * 25), "vicreg_cov": 1 / 25}
+"""Weights against E_sem from the literature: Wang and Isola's 0.75·L_align + 0.5·L_unif with
+L_align = E_sem; VICReg's code, 25·mse + 25·(v_x + v_y)/2 + 1·(c_x + c_y), with mse = E_sem."""
 
 
 @pytest.mark.parametrize(
     ("arm", "expected"),
     [
-        ("A0", {"e_sem"}),
         ("A", {"e_sem", "sigreg_sem"}),
         ("V", {"e_sem", "vicreg_var", "vicreg_cov"}),
         ("B0", {"e_sem", "unif"}),

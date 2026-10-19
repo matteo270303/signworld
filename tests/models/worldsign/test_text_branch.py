@@ -53,7 +53,7 @@ def test_the_means_and_their_languages_survive_a_checkpoint() -> None:
     assert torch.equal(restored.means, fitted.means)
 
 
-def test_the_head_is_768_512_256_with_gelu_and_trains() -> None:
+def test_the_head_is_768_512_256_with_gelu_and_a_batch_norm_and_trains() -> None:
     branch = TextBranch(TextSettings())
     embeddings, languages = _captions()
     branch.centering.fit(embeddings, languages)
@@ -64,8 +64,33 @@ def test_the_head_is_768_512_256_with_gelu_and_trains() -> None:
     assert target.shape == (40, 256)
     assert (
         sum(p.numel() for p in branch.parameters() if p.requires_grad)
-        == 768 * 512 + 512 + 512 * 256 + 256
-    )  # §4.8
-    assert [type(m).__name__ for m in branch.head] == ["Linear", "GELU", "Dropout", "Linear"]
+        == 768 * 512 + 512 + 512 * 256 + 256 + 2 * 256
+    )  # §4.8, and the BatchNorm's scale and shift
+    assert [type(m).__name__ for m in branch.head] == [
+        "Linear",
+        "GELU",
+        "Dropout",
+        "Linear",
+        "BatchNorm1d",
+    ]
     assert all(p.grad is not None for p in branch.head.parameters())
     assert not branch.centering.means.requires_grad
+
+
+def test_the_target_starts_at_unit_scale_whatever_the_size_of_the_captions() -> None:
+    """Unit-norm EmbeddingGemma rows (≈0.04 per dimension) used to give a target dominated by
+    the head's bias and below BatchNorm's ε: scaled by √768 and batch-normalised, ẽ starts at
+    unit scale."""
+    embeddings, languages = _captions()
+    rows = torch.nn.functional.normalize(embeddings, dim=-1)
+    branch = TextBranch(TextSettings())
+    branch.centering.fit(rows, languages)
+    index = branch.centering.index(languages)
+
+    with torch.no_grad():
+        inputs = branch.centering(rows, index) * branch.input_scale
+        target = branch(rows, index)
+
+    assert 0.5 < inputs.std(dim=0).mean() < 1.5  # of order one (the centring removes a share)
+    assert (inputs / branch.input_scale).std(dim=0).mean() < 0.05  # what the head used to see
+    assert target.std(dim=0).mean() == pytest.approx(1.0, rel=0.05)

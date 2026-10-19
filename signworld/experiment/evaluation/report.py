@@ -48,7 +48,7 @@ TRIAGE: Final[dict[str, Triage]] = {
     ),
     "y_rank": Triage(
         "gamma_sem -> SIGReg_sem (or VICReg / L_unif in its arm) -> the query outputs",
-        "expected without a regulariser (A0); otherwise the regulariser's weight",
+        "the regulariser's weight, or its form (BatchNorm on the outputs, the l2 energy)",
     ),
     "text_effective_rank": Triage(
         "the text head's Spearman, SIGReg on ẽ",

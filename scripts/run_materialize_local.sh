@@ -7,7 +7,7 @@
 # degli altri. Ogni processo tiene 20-25 GB di RAM: il numero e' limitato anche da quella.
 # Misurato il 14/10/2026 su GPU 0 (RTX PRO 6000, condivisa con altri job al 99 %), 499 GB di RAM:
 #   1 processo  ~0,19 clip/s | 8 processi ~1,25 clip/s | 16 processi ~1,85 clip/s (384 GB di RAM)
-# Default 12: lascia margine di RAM per tutto il giorno; 16 e' il massimo su questa macchina.
+# Default 12; con le variabili malloc sotto la RAM per processo e' ~2 GB, quindi 16 ci sta.
 #
 # Si riprende da solo: le clip gia' negli indici (di qualunque shard) vengono saltate, quindi si puo'
 # rilanciare, anche cambiando WORKERS. Prima di ogni avvio toglie l'ultima riga rotta degli indici.
@@ -18,7 +18,7 @@
 #   SOURCE=youtube_sl25 OUTPUT=data/training/youtube_sl25 slurm/run_materialize_local.sh
 #
 # Variabili: SOURCE, OUTPUT, GPU (default 0), WORKERS (default 12), CONFIG,
-#            RAM_PER_WORKER_GB (28, anche tetto rigido di RAM di ogni processo, senza swap),
+#            RAM_PER_WORKER_GB (8, anche tetto rigido di RAM di ogni processo, senza swap),
 #            STAGGER_S (20, pausa tra un avvio e l'altro: evita il picco di RAM al caricamento),
 #            MAX_RETRIES (3, per processo, se muore con errore).
 #            MEM_RESERVE_GB (48, RAM lasciata sempre libera al sistema),
@@ -42,7 +42,7 @@ OUTPUT=${OUTPUT:-data/training/youtube_sl25}
 GPU=${GPU:-0}
 WORKERS=${WORKERS:-12}
 CONFIG=${CONFIG:-parameters/analysis/default.yaml}
-RAM_PER_WORKER_GB=${RAM_PER_WORKER_GB:-28}
+RAM_PER_WORKER_GB=${RAM_PER_WORKER_GB:-8}
 STAGGER_S=${STAGGER_S:-20}
 MAX_RETRIES=${MAX_RETRIES:-3}
 LOGS=${LOGS:-logs}
@@ -76,6 +76,11 @@ THREADS=$((cores / WORKERS))
 ((THREADS >= 1)) || THREADS=1
 export OMP_NUM_THREADS=$THREADS MKL_NUM_THREADS=$THREADS OPENBLAS_NUM_THREADS=$THREADS
 export OPENCV_FOR_THREADS_NUM=$THREADS
+# La RAM di ogni processo cresceva fino a 20-28 GB perche' decord decodifica in avanti in un thread di
+# fondo finche' il VideoReader resta aperto (corretto in materialize.py: ora lo libera subito; picco
+# ~2-3 GB per processo, misurato il 15/10/2026). Le variabili malloc limitano in piu' la frammentazione
+# di glibc sui buffer grandi; non cambiano la velocita'.
+export MALLOC_ARENA_MAX=2 MALLOC_TRIM_THRESHOLD_=131072 MALLOC_MMAP_THRESHOLD_=131072
 
 # Tetto rigido di RAM per processo (cgroup v2 via systemd, senza permessi di root).
 LIMIT=()

@@ -3,8 +3,9 @@
 import pytest
 import torch
 
-from signworld.experiment.train.config import WorldSignConfig
-from signworld.experiment.train.validation import retrieval
+from signworld.experiment.train.config import LossSettings, WorldSignConfig
+from signworld.experiment.train.validation import retrieval, scoring, similarity
+from signworld.loss.worldsign import semantic_energy
 from signworld.metrics.measures import Collected, split_measures
 from signworld.metrics.retrieval import ranking_measures
 
@@ -82,3 +83,18 @@ def test_alignment_is_zero_and_geometry_is_read_when_predictions_equal_captions(
     assert out["loss_total"] == 1.5 and out["val_r2_visible"] == 0.5
     assert out["val_e_sem_en"] == 0.0
     assert {"y_effective_rank", "y_isoscore", "y_condition_number", "text_sigreg"} <= set(out)
+
+
+def test_retrieval_ranks_by_the_energy_the_arm_trains() -> None:
+    """«Retrieval returns the lowest energy»: minus E_sem of every caption with every clip."""
+    generator = torch.Generator().manual_seed(0)
+    predicted = torch.randn(6, 1, 16, generator=generator)
+    texts = torch.randn(6, 16, generator=generator)
+
+    scores = similarity(predicted, texts, "l2")
+    energies = semantic_energy(predicted[None, :, 0], texts[:, None])  # (texts, clips)
+    measures = retrieval(predicted, texts, torch.arange(6), energy="l2").measures
+
+    assert torch.allclose(scores, -energies, atol=1e-5)
+    assert scoring(LossSettings()) == "l2" and scoring(LossSettings(arm="C")) == "cosine"
+    assert {"cosine_t2v_r1", "cosine_v2t_r1"} <= set(measures)

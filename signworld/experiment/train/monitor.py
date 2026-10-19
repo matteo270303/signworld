@@ -66,7 +66,7 @@ from signworld.models.worldsign.readout import StepReadout, membership
 from .config import DiagnosticsSettings, WorldSignConfig
 from .curriculum import POSE, VIDEO_LORA, Stage, families
 from .distributed import SINGLE, Distributed
-from .validation import R1_INTERVALS, RetrievalScores, retrieval
+from .validation import R1_INTERVALS, RetrievalScores, retrieval, scoring
 
 PARTS = ("body", "left", "right", "face")
 
@@ -364,7 +364,12 @@ class Monitor:
                 seed=seed,
                 desc=f"[val train subset] step {step}",
             ).tensors
-            subset = retrieval(train["predicted"], train["texts"], train["rows"])
+            subset = retrieval(
+                train["predicted"],
+                train["texts"],
+                train["rows"],
+                energy=scoring(self.config.losses),
+            )
             for direction, value in subset.r1.items():
                 readings[f"train_{direction}_r1"] = value
                 readings[f"gap_{direction}_r1"] = value - readings[f"{direction}_r1"]

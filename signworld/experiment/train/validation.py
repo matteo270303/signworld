@@ -34,6 +34,8 @@ from signworld.metrics.retrieval import (
     recall_at_k,
 )
 
+from .config import LossSettings
+
 EVERY_INTERVAL = tuple(f"{d}_r{k}" for d in DIRECTIONS for k in KS)
 R1_INTERVALS = tuple(f"{d}_r1" for d in DIRECTIONS)
 """The bootstrap intervals of validation: R@1 in both directions."""
@@ -67,11 +69,26 @@ class RetrievalScores:
         return self.measures | extra
 
 
-def similarity(predicted: Tensor, text: Tensor) -> Tensor:
-    """(texts, clips) cosine of each caption with each clip's best hypothesis."""
-    unit_text = functional.normalize(text.float(), dim=-1)
-    unit_video = functional.normalize(predicted.float(), dim=-1)
-    return torch.einsum("td,vkd->tvk", unit_text, unit_video).amax(dim=-1)
+def scoring(losses: LossSettings) -> str:
+    """What retrieval ranks by: the arm's own energy, and the cosine for arm C's InfoNCE."""
+    return "cosine" if losses.arm == "C" else losses.semantic_energy
+
+
+def similarity(predicted: Tensor, text: Tensor, energy: str = "cosine") -> Tensor:
+    """(texts, clips) score of each caption with each clip's best hypothesis; higher is better.
+
+    ``cosine``: their cosine. ``l2``: minus E_sem, the mean squared error of ŷ against the
+    caption's LN(ẽ), so that retrieval returns the lowest energy, as training reads it.
+    """
+    if energy == "cosine":
+        unit_text = functional.normalize(text.float(), dim=-1)
+        unit_video = functional.normalize(predicted.float(), dim=-1)
+        return torch.einsum("td,vkd->tvk", unit_text, unit_video).amax(dim=-1)
+    target = functional.layer_norm(text.float(), (text.shape[-1],))
+    video = predicted.float()
+    cross = torch.einsum("td,vkd->tvk", target, video)
+    squared = video.pow(2).sum(-1)[None] - 2 * cross + target.pow(2).sum(-1)[:, None, None]
+    return (-squared / text.shape[-1]).amax(dim=-1)
 
 
 def _bands(values: Tensor, bands: Sequence[tuple[float, float]], name: str) -> dict[str, Tensor]:
@@ -120,18 +137,24 @@ def retrieval(  # noqa: PLR0913 (the embeddings and what splits the queries)
     durations: Tensor | None = None,
     words: Tensor | None = None,
     bootstrap: Sequence[str] = (),
+    energy: str = "cosine",
 ) -> RetrievalScores:
     """Every retrieval measure of the clips, both ways; ``rows`` are their caption rows.
 
     ``bootstrap`` names the R@k that get a 95 % interval, as ``t2v_r1`` or ``v2t_r5``.
+    ``energy`` is what the clips are ranked by (``scoring``); ranked by an energy, the R@1 of
+    the cosine is kept as ``cosine_{direction}_r1``, the score the literature reports.
     """
     unknown = sorted(set(bootstrap) - set(EVERY_INTERVAL))
     if unknown:
         raise ValueError(f"no R@k named {unknown}; known: {list(EVERY_INTERVAL)}")
-    scores = similarity(predicted, texts)
+    scores = similarity(predicted, texts, energy)
     relevance = grouped_relevance(rows.tolist(), rows.tolist())
     directions = both_ways(scores, relevance)
     measures = bidirectional_measures(scores, relevance)
+    if energy != "cosine":
+        for direction, (s, r) in both_ways(similarity(predicted, texts), relevance).items():
+            measures[f"cosine_{direction}_r1"] = recall_at_k(s, r, (1,))[1]
     generator = torch.Generator().manual_seed(0)
     for direction, (s, r) in directions.items():
         for k in KS:

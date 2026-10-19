@@ -19,7 +19,7 @@ def test_the_base_file_is_arm_a_with_the_documented_sizes() -> None:
     assert config.physical.enabled and config.physical.target_dim == config.pose_encoder.output_dim
 
 
-@pytest.mark.parametrize("arm", ["A0", "A", "V", "B0", "B", "C"])
+@pytest.mark.parametrize("arm", ["A", "V", "B0", "B", "C"])
 def test_every_arm_overlay_sets_its_arm(arm: str) -> None:
     assert load_config(BASE, ABLATIONS / f"arm_{arm}.yaml").losses.arm == arm
 
@@ -39,7 +39,7 @@ def test_inherits_and_merge(tmp_path: Path) -> None:
 
     config = load_config(child)
 
-    assert (config.name, config.losses.arm, config.losses.sigreg_weight) == ("child", "C", 0.04)
+    assert (config.name, config.losses.arm, config.losses.sigreg_weight) == ("child", "C", 0.1)
     assert merge({"a": {"b": 1, "c": 2}}, {"a": {"b": 3}}) == {"a": {"b": 3, "c": 2}}
 
 
@@ -70,6 +70,7 @@ def test_the_literature_weights_of_the_arms() -> None:
     losses = load_config(BASE).losses
 
     assert losses.vicreg_coefficients == (25.0, 25.0, 1.0)  # Bardes et al., Tab. 7
-    assert losses.uniformity_t == 2.0 and losses.uniformity_weight == pytest.approx(1 / 3)
+    assert losses.uniformity_t == 2.0 and losses.uniformity_weight == pytest.approx(2 / 3)
+    assert losses.semantic_energy == "l2" and losses.sigreg_weight == 0.1  # LeJEPA, LeWM
     assert losses.infonce_temperature == 0.07 and losses.infonce_min_temperature == 0.01
     assert losses.false_negative_alpha == 1e-3  # GloFND, bimodal (FastCLIP, CC3M)

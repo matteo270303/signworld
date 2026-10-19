@@ -22,7 +22,6 @@ from typing import Any
 import numpy as np
 import torch
 from torch import Tensor, nn
-from torch.nn import functional
 
 from signworld.experiment.train.config import WorldSignConfig
 from signworld.experiment.train.distributed import SINGLE, Distributed
@@ -294,16 +293,12 @@ class WorldSign(nn.Module):
         combined = self.objective.combine(terms)
         return LossTerms(combined.total, combined.parts, diagnostics, self._per_clip(seen))
 
-    @staticmethod
     @torch.no_grad()
-    def _per_clip(seen: dict[str, Any]) -> dict[str, Tensor]:
+    def _per_clip(self, seen: dict[str, Any]) -> dict[str, Tensor]:
         """Each clip's energies: E_sem through its best hypothesis, E_fis over the step's masks."""
         out: dict[str, Tensor] = {}
         if "predicted" in seen:
-            cosine = functional.cosine_similarity(
-                seen["predicted"], seen["target"][:, None], dim=-1
-            )
-            out["e_sem"] = (1 - cosine.amax(dim=1)).float()
+            out["e_sem"] = self.objective.clip_energy(seen["predicted"], seen["target"]).float()
         if "physical" in seen and "teacher" in seen:
             output = seen["physical"]
             out["e_fis"] = token_energy_per_clip(

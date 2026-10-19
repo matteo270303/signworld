@@ -26,7 +26,7 @@ from torch import Tensor
 from torch.nn import functional
 
 from signworld.experiment.train.config import WorldSignConfig
-from signworld.experiment.train.validation import EVERY_INTERVAL, similarity
+from signworld.experiment.train.validation import EVERY_INTERVAL, scoring, similarity
 from signworld.metrics.directions import Bidirectional
 from signworld.metrics.measures import collect, model_measures, pose_target_measures, split_measures
 from signworld.metrics.probes import video_split
@@ -167,7 +167,10 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     if channels is not None:
         t = seen.tensors
         measures |= error_sources(
-            similarity(t["predicted"], t["texts"]), t["rows"], videos, channels
+            similarity(t["predicted"], t["texts"], scoring(config.losses)),
+            t["rows"],
+            videos,
+            channels,
         )
     decision = None
     if gate:
@@ -185,7 +188,8 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
     ranks = {
         direction: match_ranks(scored, relevant).tolist()
         for direction, (scored, relevant) in both_ways(
-            similarity(seen.tensors["predicted"], seen.tensors["texts"]), relevance
+            similarity(seen.tensors["predicted"], seen.tensors["texts"], scoring(config.losses)),
+            relevance,
         ).items()
     }
     return EvaluationReport(measures, decision, tests, probes, groups, ranks)

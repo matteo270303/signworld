@@ -46,12 +46,14 @@ semantic:                     # §4.4.6: VL-JEPA's scheme, 4 blocks at 384, from
   mlp_ratio: 4.0
   dropout: 0.1                # [Aperto: PC7]
   drop_path: 0.1              # [Aperto: PC7]
-  layer_scale: 1.0e-4         # [Aperto: PC7]
+  layer_scale: 0.1            # 1e-4 left the blocks blind to the video: collapse in trial v4 (17/10)
+  batch_norm: true            # BatchNorm on ŷ, synced across GPUs: unit scale, where SIGReg acts
   trains_encoder: false       # level by level: reads sg(Enc(x)); true = the «global» ablation
 
 losses:                       # §4.5.7
   arm: A
-  sigreg_weight: 0.04         # λ of the semantic level: LeWM 0.043, LeJEPA 0.039 (loss §8.5)
+  semantic_energy: l2         # squared error against LN(sg(ẽ)); the cosine collapsed in trial v4
+  sigreg_weight: 0.1          # λ: LeJEPA's default 0.05 per view; inside LeWM's [0.01, 0.2] at batch 128
   pose_sigreg_weight: 0.04    # λ of the pose: LeJEPA's 0.02 for 4 views at N = 256, x2 for N <= 128
   sigreg_directions: 1024     # LeJEPA's recommendation
   sigreg_knots: 17
@@ -100,6 +102,7 @@ text:                         # §4.4.4: EmbeddingGemma pre-computed, centred pe
   hidden: 512                 # head 768 -> 512 -> 256, GELU, standard initialisation
   output_dim: 256             # ẽ, the same width as ŷ
   dropout: 0.1                # [Aperto: PC7]
+  batch_norm: true            # BatchNorm on ẽ: the head's bias no longer dominates the target
 
 training:                     # §4.10 and docs/worldsign-gerarchia.md §6
   batch_size: 128

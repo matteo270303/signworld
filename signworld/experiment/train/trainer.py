@@ -135,6 +135,11 @@ class Trainer:
         self.config = config
         self.collective = collective
         self.device = collective.device
+        if collective.active and self.device.type == "cuda":
+            # The BatchNorm of ŷ and ẽ normalises over the whole batch, as SIGReg reads it; the
+            # conversion keeps the same parameters, so the families below are unchanged.
+            # SyncBatchNorm runs on GPUs only: on CPU (the tests) each process uses its share.
+            nn.SyncBatchNorm.convert_sync_batchnorm(model)  # type: ignore[no-untyped-call]
         self.model = model.to(self.device)
         self.trainable = families(model)
         names = trainable_names(model)

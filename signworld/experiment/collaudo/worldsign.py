@@ -20,7 +20,7 @@ from torch.utils.flop_counter import FlopCounterMode
 
 from signworld.experiment.train.curriculum import STAGES, Curriculum, families
 from signworld.experiment.train.trainer import Trainer
-from signworld.experiment.train.validation import similarity
+from signworld.experiment.train.validation import scoring, similarity
 from signworld.metrics.readings import physical_readings
 from signworld.metrics.retrieval import grouped_relevance, recall_at_k
 from signworld.models.worldsign.model import StepRandomness, WorldSign, WorldSignBatch
@@ -62,7 +62,8 @@ def overfit(
         if batch.caption_rows is not None
         else list(range(len(batch.videos)))
     )
-    scores = similarity(record["predicted"].cpu(), record["target"].cpu())
+    energy = scoring(model.objective.settings)
+    scores = similarity(record["predicted"].cpu(), record["target"].cpu(), energy)
     r1 = recall_at_k(scores, grouped_relevance(rows, rows), (1,))[1]
     r2 = float("nan")
     if "latent" in record:

@@ -150,19 +150,26 @@ class ClipMaterializer:
 
     def materialize(self, source: Path, cut: ClipCut, root: Path) -> MaterializedRecord | None:
         """Write the cropped clip and its poses under ``root``; ``None`` without a signer."""
-        reader = decord.VideoReader(str(source))
+        # num_threads=1: decord's threaded decoder fails on VP9 (avcodec_send_packet -11) and runs away on RAM.
+        # decord keeps decoding ahead in a background thread (~2.5 GB/s) until the reader is
+        # freed, so a reader open during detection and pose grows to 10-28 GB: free it at once.
+        reader = decord.VideoReader(str(source), num_threads=1)
         fps = float(reader.get_avg_fps())
         first = round(cut.start_s * fps)
         last = min(round(cut.end_s * fps), len(reader))
         if last - first < 2:  # noqa: PLR2004 (motion needs two frames)
             return None
         probes = np.linspace(first, last - 1, self._detection_frames).round().astype(int)
-        boxes = [self._estimator.people(frame) for frame in reader.get_batch(probes).asnumpy()]
+        probe_frames = reader.get_batch(probes).asnumpy()
+        del reader
+        boxes = [self._estimator.people(frame) for frame in probe_frames]
         signer = signer_box(boxes, self._margin)
         if signer is None:
             return None
 
+        reader = decord.VideoReader(str(source), num_threads=1)
         cropped = np.concatenate(list(self._cropped_chunks(reader, first, last, signer.crop)))
+        del reader
         inside = signer.union_in_crop(self._size)
         video = root / "clips" / f"{cut.clip_id}.mp4"
         pose = root / "poses" / f"{cut.clip_id}.npz"

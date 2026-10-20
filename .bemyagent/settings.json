@@ -1,0 +1,9 @@
+{
+  "language": "it",
+  "interactiveMode": false,
+  "strictVerification": false,
+  "autoModelSwitching": true,
+  "autoCommit": false,
+  "obstacleThreshold": 2,
+  "contextSlicingThreshold": 200
+}

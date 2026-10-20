@@ -122,12 +122,13 @@ def crop_square(frames: np.ndarray, box: np.ndarray, size: int) -> np.ndarray:
     x0, y0 = np.round(box[:2]).astype(int)
     side = round(float(box[2] - box[0] + box[3] - box[1]) / 2)
     x1, y1 = x0 + side, y0 + side
-    canvas = np.zeros((count, side, side, 3), dtype=np.uint8)
     sx0, sy0, sx1, sy1 = max(x0, 0), max(y0, 0), min(x1, width), min(y1, height)
-    canvas[:, sy0 - y0 : sy1 - y0, sx0 - x0 : sx1 - x0] = frames[:, sy0:sy1, sx0:sx1]
-    return np.stack(
-        [cv2.resize(frame, (size, size), interpolation=cv2.INTER_AREA) for frame in canvas]
-    )
+    out = np.empty((count, size, size, 3), dtype=np.uint8)
+    for i in range(count):  # one frame at a time: a whole-chunk canvas reached GBs on wide boxes
+        canvas = np.zeros((side, side, 3), dtype=np.uint8)
+        canvas[sy0 - y0 : sy1 - y0, sx0 - x0 : sx1 - x0] = frames[i, sy0:sy1, sx0:sx1]
+        out[i] = cv2.resize(canvas, (size, size), interpolation=cv2.INTER_AREA)
+    return out
 
 
 class ClipMaterializer:
@@ -206,7 +207,9 @@ class ClipMaterializer:
     ) -> Iterator[np.ndarray]:
         for start in range(first, last, DECODE_CHUNK):
             indices = list(range(start, min(start + DECODE_CHUNK, last)))
-            yield crop_square(reader.get_batch(indices).asnumpy(), box, self._size)
+            frames = reader.get_batch(indices).asnumpy()
+            yield crop_square(frames, box, self._size)
+            del frames
 
 
 def _read_video(path: Path) -> np.ndarray:
@@ -244,6 +247,14 @@ class MaterializedIndex:
                     MaterializedRecord(**json.loads(line)) for line in stream if line.strip()
                 )
         return records
+
+    def clip_ids(self) -> set[str]:
+        """IDs of every record of every shard, without keeping the records (resume of 600k clips)."""
+        ids: set[str] = set()
+        for path in sorted(self.root.glob("index*.jsonl")):
+            with path.open(encoding="utf-8") as stream:
+                ids.update(json.loads(line)["clip_id"] for line in stream if line.strip())
+        return ids
 
     def append(self, record: MaterializedRecord) -> None:
         self.root.mkdir(parents=True, exist_ok=True)

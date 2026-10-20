@@ -146,7 +146,7 @@ def materialize(
     options = settings.test_data
     part = Shard(shard, num_shards)
     index = MaterializedIndex(output, part if num_shards > 1 else None)
-    done = {record.clip_id for record in index.records()}
+    done = index.clip_ids()
     columns = ["clip_id", "video_id", "start_s", "end_s", "video_available"]
     rows = read_source_manifest(dataset).select(columns).to_pylist()
     cuts = [

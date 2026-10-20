@@ -10,7 +10,7 @@ OUTPUT=${OUTPUT:-data/training/youtube_sl25}
 RUNLOG=logs/run_materialize.log
 mkdir -p logs
 count() { cat "$OUTPUT"/index*.jsonl 2>/dev/null | wc -l; }
-running() { pgrep -f "scripts/run_materialize_local.sh" >/dev/null; }
+running() { pgrep -f "^/bin/bash scripts/run_materialize_local.sh" >/dev/null; }
 last=$(count); stalls=0
 echo "[$(date +%T)] monitor attivo, clip nell'indice: $last"
 while :; do
@@ -28,7 +28,7 @@ while :; do
     echo "[$(date +%T)] fermo $stalls volte di fila senza progresso, mi fermo: guarda $RUNLOG"; exit 1
   fi
   echo "[$(date +%T)] run fermo (clip $now), lo rilancio"
-  pgrep -af "train materialize" | grep -q -- "--shard" && { echo "processi residui, aspetto"; continue; }
+  pgrep -f "^/home/emanuele/Workspace/signworld/.venv/bin/python .*train materialize" >/dev/null && { echo "processi residui, aspetto"; continue; }
   cp "$RUNLOG" "logs/run_materialize.$(date +%m%d_%H%M).log" 2>/dev/null
   GPU=${GPU:-0} WORKERS=${WORKERS:-16} setsid nohup scripts/run_materialize_local.sh > "$RUNLOG" 2>&1 < /dev/null &
   last=$now

@@ -90,5 +90,17 @@ sources:
   phoenix14t:
     url: https://www-i6.informatik.rwth-aachen.de/ftp/pub/rwth-phoenix/2016/phoenix-2014-T.v3.tar.gz
     size_bytes: 41699758035
+    # The release already extracted here: nothing is downloaded, `fetch-media` encodes the frame
+    # folders to raw/videos/<sentence>.mp4. Remove local_root to download the archive instead.
+    local_root: data/PHOENIX-2014-T
+    annotation_dir: annotations/manual
+    frames_dir: features/fullFrame-210x260px   # 210 x 260, the native aspect ratio
+    fps: 25
 
-  csl_daily: {}
+  csl_daily:
+    # The release as received. Without local_root, fetching explains how to obtain it.
+    local_root: data/CSLDaily
+    labels_file: sentence_label/csl2020ct_v2.pkl
+    split_file: sentence_label/split_1.txt
+    frames_dir: data/frames_512x512
+    fps: 30

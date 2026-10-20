@@ -1,0 +1,6 @@
+# Percorsi di stage 0 per il run su YouTube-SL-25. Dopo worldsign.yaml + youtube_sl25.yaml + arm.
+name: worldsign-youtube-sl25
+data:
+  index: data/training/youtube_sl25/index.parquet
+  embeddings: data/youtube-sl-25/text/2fdc70f119730c4c
+  manifest: data/youtube-sl-25/manifest/clips.parquet

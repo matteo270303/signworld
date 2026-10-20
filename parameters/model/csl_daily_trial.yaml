@@ -1,0 +1,18 @@
+# Run di prova su csl_daily da solo: split ufficiali del corpus (un solo canale: niente split per canale).
+# worldsign.yaml + ablation/arm_A.yaml + questo file.
+name: worldsign-csl_daily
+data:
+  index: data/training/csl_daily/index.parquet
+  embeddings: data/csl_daily/text/2fdc70f119730c4c
+  split_source: manifest
+  validation_split: valid
+  validation_clips: 1077
+  statistics_clips: 5000
+training:
+  epochs: 15
+  validation_every: 50       # il default 4000 non scatterebbe mai su un corpus cosi' piccolo
+  log_every: 10
+diagnostics:
+  cadence: epoch
+augmentation:
+  enabled: false

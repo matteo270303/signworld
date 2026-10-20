@@ -86,3 +86,29 @@ La possibile soluzione é applicare un at pool e un projector finale togliendo q
   - quasi-duplicati e parafrasi nella galleria;
   - gli errori «video giusto, frase sbagliata»;
   - il peso di ‖ŷ‖² nell'energia (in T2V: R@1 per energia 20,8% contro 24,0% per coseno).
+
+## Dalla fine della run (19/10/2026, passo 10.770)
+
+**12. La loss della posa è sbilanciata.**
+- Osservato, sui valori pesati: 0,96·`L_anchor` = 0,018, 0,96·`L_inv` = 0,004, 0,04·`SIGReg_posa` = 0,070. `SIGReg_posa` vale il 76% della loss di posa.
+- Quote del gradiente su G_ω: àncora da 86% a 36%, SIGReg da 14% a 58%, invarianza da 0% a 6%. I coseni fra i gradienti sono circa 0: non c'è conflitto, solo pesi diversi.
+- Lettura:
+  - l'àncora è già risolta (1,7% della varianza dei keypoint);
+  - l'invarianza non porta quasi segnale, perché le viste sono troppo facili;
+  - resta attivo solo `SIGReg_posa`, che però non corregge l'anisotropia: rango effettivo di s 40 su 192, IsoScore 0,06, mentre la statistica per step sulla vista pulita è 0,96 volte quella gaussiana. Lungo una direzione casuale in 192 dimensioni la varianza è circa la media degli autovalori, quindi le proiezioni casuali vedono poco l'anisotropia.
+- Componenti: λ_P = 0,04 viene da LeJEPA, dove il termine predittivo è l'invarianza fra viste. Qui la parte predittiva è àncora + invarianza, entrambe quasi a zero; in più le viste sono deboli.
+- Da valutare: bilanciare i termini sul gradiente o sul valore iniziale, rafforzare le viste, misurare l'isotropia di s e non solo SIGReg.
+
+**13. Il retrieval non era ancora a convergenza.**
+- Osservato: l'R@1 di validazione è salito fino all'ultima epoca:
+  - epoca 13: 36,7 / 31,6;
+  - modello finale: 40,1 / 33,8, con intervallo al 95% di 37,0–43,4 in T2V e 30,9–37,0 in V2T;
+  - circa +1 punto per epoca nelle epoche 10–13, poi +3,2 / +1,6 nel cooldown;
+  - nello stesso tempo il rango effettivo di ŷ è passato da 104 a 196 e `y_sigreg` da 80 a 5,6.
+- Da tenere in conto:
+  - 15 epoche non dicono dov'è il tetto;
+  - confronti fra bracci a parità di epoche premiano chi converge prima.
+- Allo stesso tempo cresce il divario fra training e validazione:
+  - R@1 sul sottoinsieme di training 75,6 / 54,2, con un divario di 35 / 20 punti (era 5 / 2 all'epoca 6);
+  - `E_sem` di validazione è ferma dall'epoca 8 (da 1,29 a 1,27), mentre quella di training scende (da 1,20 a 1,09).
+- Da valutare per YouTube-SL-25 (circa 23 volte le clip di OpenASL): la durata, il cooldown, la regolarizzazione del livello semantico e lo stop sul criterio.

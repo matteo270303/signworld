@@ -9,6 +9,7 @@
 | Task | Descrizione | Stato |
 |---|---|---|
 | 1.1 | Suddividere `docs/problems.md` in task | todo |
+| 1.2 | Check dei dataset (youtube_sl25, csl_daily, phoenix14t) e avvio dei 3 `run_train_*.sh` — report `docs/dataset-status.md` | done |
 
 ## Backlog (non pianificato)
 

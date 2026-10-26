@@ -27,6 +27,9 @@ N/A — solo CLI. Ingresso: `signworld.cli:app` (`signworld/cli/__init__.py`), s
 | `signworld/loss/worldsign.py` | loss per livello | loss scalari per livello |
 | `signworld/experiment/train/config.py` | fusione degli overlay YAML | configurazione della run |
 | `signworld/experiment/evaluation/worldsign.py` | run + indice + split | JSON di retrieval |
+| `scripts/check_datasets.py` | audit di download, manifest, embedding, clip/pose, indice (`--deep`: ffprobe + pose) | `reports/dataset_check/<source>/*.txt` |
+| `scripts/complete_ytsl25.sh` | `download` / `refresh` / `check` di YouTube-SL-25 (F1→F4→F3b→F5) | ledger, manifest, embedding, clip, indice |
+| `scripts/run_train_*.sh` | indice (se manca o senza split `test`) + train + evaluate + report | `runs/<source>-<arm>/` |
 
 ## Schemi dei dati
 

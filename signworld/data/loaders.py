@@ -91,13 +91,15 @@ def assign_splits(
     split[held] = VALIDATION_LANGUAGE
     rest = np.flatnonzero(~held)
     test = channel_split(channels[rest], sign_languages[rest], settings.validation_fraction)
-    split[rest[test]] = VALIDATION_CHANNEL
+    # Chosen per language, held out whole: a channel signing two languages, held out for one,
+    # would otherwise leave its other clips in training.
+    split[rest[np.isin(channels[rest], channels[rest[test]])]] = VALIDATION_CHANNEL
     if settings.test_fraction > 0:
         # The next channels in the same hash order: a share of what validation left.
         left = np.flatnonzero(split == TRAIN)
         share = settings.test_fraction / (1 - settings.validation_fraction)
         tested = channel_split(channels[left], sign_languages[left], share)
-        split[left[tested]] = TEST_CHANNEL
+        split[left[np.isin(channels[left], channels[left[tested]])]] = TEST_CHANNEL
     if videos is not None:
         seen = (split == TRAIN) & video_split(videos, settings.seen_video_fraction)
         split[seen] = VALIDATION_VIDEO

@@ -28,6 +28,7 @@ from torch import Tensor
 
 from signworld.data.augmentation import ClipAugmenter
 from signworld.data.corpus.manifest import read_manifest
+from signworld.data.loaders import TRAIN, VALIDATION_VIDEO
 from signworld.data.negatives import UNUSED
 from signworld.data.pose.tokens import JOINTS, STEPS, TOKEN_CHANNELS
 from signworld.data.pose.wholebody import LEFT_SHOULDER, RIGHT_SHOULDER
@@ -46,8 +47,6 @@ logger = logging.getLogger(__name__)
 
 TRAINABLE_CEILING: Final = 30_000_000
 """§3.4 and posa §3: the ceiling of trainable parameters, raised to 30 M for the pose encoder."""
-EFFECTIVE_BATCH: Final = 128
-"""§4.14: the one effective batch of every run."""
 V_JEPA_SPECS: Final = (
     MaskSpec(blocks=8, spatial_scale=0.15),
     MaskSpec(blocks=2, spatial_scale=0.7),
@@ -92,7 +91,10 @@ def _check(code: str, ok: bool, detail: str) -> Assertion:
 
 
 def p1_channels(train: pa.Table, held_out: Sequence[pa.Table], official: bool = False) -> Assertion:
-    """No channel in common between training and the held-out splits."""
+    """No channel in common between training and the held-out splits.
+
+    ``val_video`` is left out: its new videos of seen channels share them by design (§4.13.4).
+    """
     if official:
         return Assertion("P1", Status.SKIP, "the benchmark's own splits, not ours by channel")
     seen = set(train.column("channel_id").to_pylist())
@@ -403,9 +405,9 @@ def p15_infonce(model: WorldSign) -> Assertion:
 
 
 def p16_batch(config: WorldSignConfig, collective: Distributed, per_gpu: int) -> Assertion:
-    """SIGReg sees the whole effective batch: 128 clips over every GPU."""
+    """SIGReg sees the whole effective batch: 128 clips over every GPU (``effective_batch``)."""
     total = int(collective.all_sum(torch.tensor(float(per_gpu), device=collective.device)).item())
-    ok = config.training.batch_size == EFFECTIVE_BATCH == total
+    ok = config.training.batch_size == config.training.effective_batch == total
     return _check(
         "P16",
         ok,
@@ -465,7 +467,7 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
 ) -> PreflightReport:
     """Every assertion of §4.13.2 on the model, the data and one batch of this GPU."""
     train = splits["train"]
-    held_out = [table for name, table in splits.items() if name != "train"]
+    held_out = [table for name, table in splits.items() if name not in {TRAIN, VALIDATION_VIDEO}]
     augmenter = ClipAugmenter(config.augmentation)
     generator = torch.Generator().manual_seed(0)
     clip_ids = {c for table in splits.values() for c in table.column("clip_id").to_pylist()}

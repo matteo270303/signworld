@@ -26,17 +26,34 @@ def run(
     ] = False,
 ) -> None:
     """Train, or resume, one run; launch with torchrun for several GPUs."""
-    from signworld.experiment.train.config import load_config
+    from signworld.experiment.train.config import describe, load_config
     from signworld.experiment.train.distributed import Distributed
+    from signworld.experiment.train.provenance import config_hash
     from signworld.experiment.train.run import run as start
 
+    settings = load_config(*config)
     collective = Distributed.from_environment()
+    if collective.is_main:  # what the run trains with, before anything starts
+        typer.echo(f"{output}: run {settings.name}, configuration {config_hash(settings)[:12]}")
+        typer.echo(describe(settings, config))
     try:
-        state = start(load_config(*config), output, collective, allow_code_change=allow_code_change)
+        state = start(settings, output, collective, allow_code_change=allow_code_change)
     finally:
         collective.shutdown()
     if collective.is_main:
         typer.echo(f"{output}: finished at step {state.step}, best at {state.best_step}")
+
+
+@train_app.command("config")
+@reports_user_errors
+def config_command(config: ConfigFiles) -> None:
+    """Print the files and every resolved parameter a run with ``config`` trains with."""
+    from signworld.experiment.train.config import describe, load_config
+    from signworld.experiment.train.provenance import config_hash
+
+    settings = load_config(*config)
+    typer.echo(f"run {settings.name}, configuration {config_hash(settings)[:12]}")
+    typer.echo(describe(settings, config))
 
 
 @train_app.command("ridge-baseline")

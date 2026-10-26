@@ -13,7 +13,9 @@ from ..acquisition.ledger import read_ledgers
 from ..acquisition.outcome import Status
 from ..acquisition.sources import UnknownSourceError, build_source
 from ..acquisition.sources.base import DatasetSource
+from ..acquisition.sources.csl_daily import CSLDailySource
 from ..acquisition.sources.openasl import COLUMNS, OpenASLSource
+from ..acquisition.sources.phoenix14t import Phoenix14TSource
 from ..acquisition.sources.youtube_sl25 import YouTubeSL25Source, read_metadata
 from .languages import own_language_track
 from .manifest import Clip, write_manifest
@@ -138,8 +140,54 @@ class YouTubeSL25Manifest(ManifestBuilder[YouTubeSL25Source]):
                 )
 
 
+class CSLDailyManifest(ManifestBuilder[CSLDailySource]):
+    """One clip per sentence, with the official split and the signer as channel."""
+
+    source_type = CSLDailySource
+
+    def clips(self) -> Iterator[Clip]:
+        videos = self.source.layout.raw / "videos"
+        for sentence in self.source.sentences:
+            yield Clip(
+                clip_id=sentence.name,
+                video_id=sentence.name,
+                start_s=0.0,
+                end_s=sentence.frames / self.source.settings.fps,
+                caption=sentence.caption,
+                caption_language="zh",
+                sign_language="csl",
+                channel_id=f"signer:{sentence.signer}",
+                split=sentence.split,
+                video_available=(videos / f"{sentence.name}.mp4").is_file(),
+            )
+
+
+class Phoenix14TManifest(ManifestBuilder[Phoenix14TSource]):
+    """One clip per sentence (German translation), with the official split and the signer."""
+
+    source_type = Phoenix14TSource
+
+    def clips(self) -> Iterator[Clip]:
+        videos = self.source.layout.raw / "videos"
+        for sentence in self.source.sentences:
+            video = videos / f"{sentence.name}.mp4"
+            yield Clip(
+                clip_id=sentence.name,
+                video_id=sentence.name,
+                start_s=0.0,
+                end_s=self.source.frame_count(sentence) / self.source.settings.fps,
+                caption=sentence.translation,
+                caption_language="de",
+                sign_language="gsg",
+                channel_id=f"signer:{sentence.speaker}",
+                split=sentence.split,
+                video_available=video.is_file(),
+            )
+
+
 BUILDERS: Final[dict[str, type[ManifestBuilder[Any]]]] = {
-    builder.source_type.name: builder for builder in (OpenASLManifest, YouTubeSL25Manifest)
+    builder.source_type.name: builder
+    for builder in (OpenASLManifest, YouTubeSL25Manifest, CSLDailyManifest, Phoenix14TManifest)
 }
 
 

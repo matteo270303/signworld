@@ -126,6 +126,12 @@ def materialize(
     device: Annotated[str, typer.Option(help="Device of the detector and pose model.")] = "cuda",
     shard: Annotated[int, typer.Option(min=0, help="Index of this shard.")] = 0,
     num_shards: Annotated[int, typer.Option(min=1, help="Total number of shards.")] = 1,
+    min_duration_s: Annotated[
+        float | None, typer.Option(min=0, help="Shortest clip; default: test_data.min_duration_s.")
+    ] = None,
+    max_duration_s: Annotated[
+        float | None, typer.Option(min=0, help="Longest clip; default: test_data.max_duration_s.")
+    ] = None,
 ) -> None:
     """Stage 0 on the whole corpus: crop, 64 frames, pose, for every captioned clip (§3.6).
 
@@ -147,6 +153,8 @@ def materialize(
     part = Shard(shard, num_shards)
     index = MaterializedIndex(output, part if num_shards > 1 else None)
     done = index.clip_ids()
+    shortest = options.min_duration_s if min_duration_s is None else min_duration_s
+    longest = options.max_duration_s if max_duration_s is None else max_duration_s
     columns = ["clip_id", "video_id", "start_s", "end_s", "video_available"]
     rows = read_source_manifest(dataset).select(columns).to_pylist()
     cuts = [
@@ -155,7 +163,7 @@ def materialize(
         if row["video_available"]
         and part.owns(row["clip_id"])
         and row["clip_id"] not in done
-        and options.min_duration_s <= row["end_s"] - row["start_s"] <= options.max_duration_s
+        and shortest <= row["end_s"] - row["start_s"] <= longest
     ]
     materializer = ClipMaterializer(
         WholebodyEstimator(device=device),

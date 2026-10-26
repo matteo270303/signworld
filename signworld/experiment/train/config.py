@@ -9,6 +9,7 @@ encoder is described in ``docs/worldsign-posa.md``, the stages and learning rate
 ``docs/worldsign-gerarchia.md``.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Literal, Self
 
@@ -326,6 +327,9 @@ class TrainingSettings(FrozenModel):
     """Starting values of §4.10, to be calibrated in the dry run (PC7)."""
 
     batch_size: PositiveInt = 128
+    effective_batch: PositiveInt = 128
+    """P16: the batch SIGReg must see over every GPU. Lowered only by the local single-GPU
+    trial (``parameters/model/local_single_gpu.yaml``), whose runs are not the paper's."""
     epochs: PositiveInt = 15
     patience: PositiveInt = 3
     """Epochs without a better decision metric before the cooldown, counted in stage F only."""
@@ -556,3 +560,12 @@ def load_config(*paths: Path) -> WorldSignConfig:
     for path in paths:
         merged = merge(merged, _read(path))
     return WorldSignConfig.model_validate(merged)
+
+
+def describe(config: WorldSignConfig, paths: Sequence[Path]) -> str:
+    """The overlays in the order they were laid and every resolved parameter, as YAML."""
+    layers = "\n".join(f"  {index}. {path}" for index, path in enumerate(paths, 1))
+    body = yaml.safe_dump(
+        config.model_dump(mode="json"), sort_keys=False, allow_unicode=True, default_flow_style=None
+    )
+    return f"configuration files:\n{layers}\nresolved parameters:\n{body}"

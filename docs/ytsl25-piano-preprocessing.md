@@ -8,13 +8,13 @@ Dove non ho provato sul campo lo dico.
 
 ## 0. Stato di partenza
 
-| Cosa        | Valore                                                                          |
-| ----------- | ------------------------------------------------------------------------------- |
-| Dati        | `data/youtube-sl-25` → `~/dataset/youtube-sl-25` (video in `raw/videos/`)       |
-| Ledger      | `data/youtube-sl-25/ledgers/adopted.jsonl` (13.455 `done`, 2.640 `unavailable`) |
-| Manifest    | `data/youtube-sl-25/manifest/clips.parquet`, 635.807 clip, 12.850 video         |
-| Embedding   | non ancora fatti                                                                |
-| Clip e pose | non ancora fatte (`data/training/youtube_sl25`)                                 |
+| Cosa        | Valore                                                                                 |
+| ----------- | -------------------------------------------------------------------------------------- |
+| Dati        | `data/youtube-sl-25` → `~/dataset/youtube-sl-25` (video in `raw/videos/`)              |
+| Ledger      | `data/youtube-sl-25/ledgers/adopted.jsonl` (13.455 `done`, 2.640 `unavailable`)        |
+| Manifest    | `data/youtube-sl-25/manifest/clips.parquet`, 635.807 clip, 12.850 video                |
+| Embedding   | non ancora fatti                                                                       |
+| Clip e pose | non ancora fatte (`data/training/youtube_sl25`)                                        |
 | Risorse     | **solo la GPU 0** è utilizzabile (96 GB, ~25 GB occupati da altri), 96 CPU, 499 GB RAM |
 
 ## 1. Regole d'oro (leggile prima di lanciare qualsiasi cosa)

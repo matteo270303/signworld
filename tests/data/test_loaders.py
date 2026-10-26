@@ -171,3 +171,20 @@ def test_the_test_split_takes_other_channels_and_leaves_validation_alone() -> No
     held = set(channels[after == TEST_CHANNEL])
     assert len(held) == 20 and not held & set(channels[after == VALIDATION_CHANNEL])
     assert {str(language) for language in languages[after == TEST_CHANNEL]} == {"ase", "gsg"}
+
+
+def test_a_channel_held_out_for_one_language_is_held_out_whole() -> None:
+    import numpy as np  # noqa: PLC0415
+
+    from signworld.data.loaders import TRAIN, assign_splits  # noqa: PLC0415
+    from signworld.experiment.train.config import DataSettings  # noqa: PLC0415
+
+    channels = np.array([f"c{i}" for i in range(40) for _ in range(2)], dtype=object)
+    languages = np.array(["ase", "gsg"] * 40)  # every channel signs both languages
+    settings = DataSettings(validation_fraction=0.2, test_fraction=0.2, seen_video_fraction=0.0)
+
+    split = assign_splits(channels, languages, settings)
+
+    for channel in set(channels):
+        assert len(set(split[channels == channel])) == 1
+    assert {TRAIN, "val_channel", "test_channel"} == set(split)

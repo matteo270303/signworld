@@ -20,7 +20,8 @@
 # Variabili: SOURCE, OUTPUT, GPU (default 0), WORKERS (default 12), CONFIG,
 #            RAM_PER_WORKER_GB (8, anche tetto rigido di RAM di ogni processo, senza swap),
 #            STAGGER_S (20, pausa tra un avvio e l'altro: evita il picco di RAM al caricamento),
-#            MAX_RETRIES (3, per processo, se muore con errore).
+#            MAX_RETRIES (3, per processo, se muore con errore),
+#            EXTRA_ARGS (opzioni in piu' di `train materialize`, es. "--min-duration-s 0").
 #            MEM_RESERVE_GB (48, RAM lasciata sempre libera al sistema),
 #            MEM_MIN_FREE_GB (32, sotto questa RAM disponibile il watchdog ferma il processo piu' grosso),
 #            SWAP_MAX_MB (512, sopra questo swap usato il watchdog ferma il processo piu' grosso).
@@ -45,6 +46,7 @@ CONFIG=${CONFIG:-parameters/analysis/default.yaml}
 RAM_PER_WORKER_GB=${RAM_PER_WORKER_GB:-8}
 STAGGER_S=${STAGGER_S:-20}
 MAX_RETRIES=${MAX_RETRIES:-3}
+EXTRA_ARGS=${EXTRA_ARGS:-}
 LOGS=${LOGS:-logs}
 MEM_RESERVE_GB=${MEM_RESERVE_GB:-48}
 MEM_MIN_FREE_GB=${MEM_MIN_FREE_GB:-32}
@@ -136,7 +138,7 @@ run_worker() {
     # oom_score_adj=1000: in caso di OOM del kernel muoiono questi processi, non il resto del PC.
     CUDA_VISIBLE_DEVICES=$GPU "${LIMIT[@]}" bash -c 'echo 1000 > /proc/self/oom_score_adj 2>/dev/null; exec "$@"' _ \
       uv run --no-sync signworld train materialize "$SOURCE" \
-      --output "$OUTPUT" --device cuda --shard "$shard" --num-shards "$WORKERS" -c "$CONFIG" \
+      --output "$OUTPUT" --device cuda --shard "$shard" --num-shards "$WORKERS" -c "$CONFIG" $EXTRA_ARGS \
       >> "$LOGS/materialize_${WORKERS}_${shard}.log" 2>&1
     local rc=$?
     ((rc == 0)) && return 0

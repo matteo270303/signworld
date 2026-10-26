@@ -1,0 +1,9 @@
+# Prova locale su UNA sola GPU (questa macchina: solo la GPU 0 è utilizzabile, le altre sono in
+# compute mode Prohibited). Il batch 128 su una GPU non entra (~2 GiB per clip, docs/worldsign-gpu.md):
+# 32 clip, lo stesso carico per GPU della configurazione 4 x 32. SIGReg vede 32 clip invece di 128,
+# quindi queste run servono a provare la pipeline, non sono quelle dell'articolo.
+# Va per ultimo: worldsign.yaml + [dataset] + arm + [trial] + questo file (gli script run_train_*.sh
+# lo aggiungono da soli quando GPUS indica una sola GPU).
+training:
+  batch_size: 32
+  effective_batch: 32

@@ -103,6 +103,7 @@ CALLS: dict[tuple[str, ...], Call] = {
         "youtube_sl25", "-c", "{ana}", "--run", "vjepa2_1_vitl-256", "--device", "cpu"
     ),
     ("experiment", "video-probes"): user_error("youtube_sl25", "-c", "{ana}"),
+    ("train", "config"): Call(("-c", str(MODEL / "worldsign.yaml"))),
     ("train", "toyworld"): Call(("--output", "{tmp}/toy", "--clips", "4")),
     ("train", "toyworld-embed"): Call(("--output", "{toy}", "--device", "cpu")),
     ("train", "index"): Call(
@@ -226,6 +227,8 @@ def settings(tmp_path: Path) -> dict[str, str]:
     acquisition["data_root"] = str(tmp_path / "data")
     acquisition["youtube"]["cookies_file"] = str(tmp_path / "cookies.txt")
     acquisition["youtube"]["pot_server_home"] = str(tmp_path / "pot")
+    for local in ("csl_daily", "phoenix14t"):  # the real copies would be encoded by the tests
+        acquisition["sources"][local].pop("local_root")
     acquisition_path = tmp_path / "acquisition.yaml"
     acquisition_path.write_text(yaml.safe_dump(acquisition), "utf-8")
     analysis = yaml.safe_load((PARAMETERS / "analysis" / "default.yaml").read_text("utf-8"))

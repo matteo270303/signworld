@@ -1,0 +1,16 @@
+# Collaudo del carico su Leonardo (slurm/launch_experiment.sh debug): stesso modello, stesso batch
+# per GPU e stessi frame del run vero, su un indice ridotto (slurm/make_debug_index.py): 2.048 clip
+# di train = 16 passi per epoca da 128, una epoca per stage (P, F0, F). Memoria e secondi per passo
+# di ogni stage finiscono in metrics.jsonl ogni 4 passi. Va per ultimo, dopo arm e ablation.
+data:
+  index: data/training/youtube_sl25/index.debug.parquet
+  statistics_clips: 1000
+  validation_clips: 256
+training:
+  epochs: 3
+  stages: {pose_epochs: 1, heads_epochs: 1}
+  log_every: 4
+pose_encoder:
+  warmup_epochs: 1.0          # entro lo stage P, che qui dura una epoca
+diagnostics:
+  gate_stops: false           # 48 passi non bastano ai criteri F1-F3: il debug arriva allo stage F

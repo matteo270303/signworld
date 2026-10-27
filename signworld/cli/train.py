@@ -40,7 +40,9 @@ def run(
         state = start(settings, output, collective, allow_code_change=allow_code_change)
     finally:
         collective.shutdown()
-    if collective.is_main:
+    if collective.is_main and not state.finished:
+        typer.echo(f"{output}: paused at step {state.step} before the walltime; launch it again")
+    elif collective.is_main:
         typer.echo(f"{output}: finished at step {state.step}, best at {state.best_step}")
 
 

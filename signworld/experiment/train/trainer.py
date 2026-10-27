@@ -14,7 +14,9 @@ boundaries: F1 at the end of P, F2 at the end of F0, F3 at the end of the first 
 
 Validation and a checkpoint come every ``validation_every`` steps and at every epoch end; a run
 killed at any point resumes from its last checkpoint, at the same place in the sampler's
-order. With ``diagnostics.cadence = epoch`` every diagnostic runs at the end of each epoch
+order. A job that sets ``SIGNWORLD_STOP_AT`` (Unix time, before its walltime) saves ``latest``
+at the first log step past it and returns unfinished: the next job resumes from there.
+With ``diagnostics.cadence = epoch`` every diagnostic runs at the end of each epoch
 instead, and ``validation_every`` only spaces the checkpoints. Every ``latest`` checkpoint
 also writes the energies of every training clip since the previous one
 (``checkpoints/energies``), for the audit of the high-energy tail (§4.13.4). What the run
@@ -25,6 +27,7 @@ is ``reporting``'s, set up as in the worldSign runs.
 import dataclasses
 import json
 import math
+import os
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -55,6 +58,10 @@ from .validation import RetrievalScores
 
 class NonFiniteLossError(RuntimeError):
     """A NaN or Inf in the loss of some GPU: the run stops (§4.13.3)."""
+
+
+class StopTimeReachedError(RuntimeError):
+    """``SIGNWORLD_STOP_AT`` has passed: ``latest`` is saved and the job hands over to the next."""
 
 
 @dataclasses.dataclass
@@ -192,6 +199,11 @@ class Trainer:
         self.rates: dict[str, float] = {}
         """Every family's learning rate at the current step, for the logs."""
         self.checkpoints = CheckpointStore(output / "checkpoints", names, collective)
+        stop_at = os.environ.get("SIGNWORLD_STOP_AT")
+        self.stop_at = float(stop_at) if stop_at else None
+        """Unix time past which the run saves ``latest`` and returns: the job's walltime minus a
+        margin, set by the launch script. Not part of the configuration: every job of a run has
+        its own."""
         settings = config.diagnostics.wandb
         mirror = (
             WandbMirror(
@@ -279,6 +291,9 @@ class Trainer:
         except RunStoppedError:
             self._save("stopped", state)
             raise
+        except StopTimeReachedError as stop:
+            self.report.say(f"[run] {stop}; the next job resumes from latest")
+            return state
         finally:
             if self.log.mirror is not None:
                 self.log.mirror.finish()
@@ -381,6 +396,10 @@ class Trainer:
                     bar.set_postfix_str(self._postfix(state), refresh=False)
                 if self._after_step(state):
                     return
+                if self._stop_time_reached(state):
+                    self._drain()
+                    self._save("latest", state)
+                    raise StopTimeReachedError(f"stop time reached at step {state.step}")
         finally:
             bar.close()
         self._drain()
@@ -388,6 +407,13 @@ class Trainer:
         state.position = 0
         if state.cooldown_start is None:
             self._end_of_epoch(state)
+
+    def _stop_time_reached(self, state: TrainingState) -> bool:
+        """Past ``stop_at`` on any GPU, read at the log steps only: there the GPUs already wait
+        for each other, so the check adds no stall and every GPU stops at the same step."""
+        if self.stop_at is None or state.step % self.config.training.log_every:
+            return False
+        return self.collective.any(time.time() >= self.stop_at)
 
     def _after_step(self, state: TrainingState) -> bool:
         """Validation, checkpoints and phase changes; True when the order of clips changes."""

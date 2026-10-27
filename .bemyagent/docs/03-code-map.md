@@ -30,6 +30,10 @@ N/A — solo CLI. Ingresso: `signworld.cli:app` (`signworld/cli/__init__.py`), s
 | `scripts/check_datasets.py` | audit di download, manifest, embedding, clip/pose, indice (`--deep`: ffprobe + pose) | `reports/dataset_check/<source>/*.txt` |
 | `scripts/complete_ytsl25.sh` | `download` / `refresh` / `check` di YouTube-SL-25 (F1→F4→F3b→F5) | ledger, manifest, embedding, clip, indice |
 | `scripts/run_train_*.sh` | indice (se manca o senza split `test`) + train + evaluate + report | `runs/<source>-<arm>/` |
+| `slurm/launch_experiment.sh` | Leonardo: `setup` / `check` / `debug` / `report` / `train` / `status` / `cancel`; esperimenti in `slurm/experiments.sh` | job `sw-*`, `runs/<esp>/`, `runs/debug/<esp>/`, `out/sw-*.log` |
+| `slurm/experiment_job`, `slurm/experiment_exe` | un nodo da 4 GPU per esperimento; `SIGNWORLD_STOP_AT` = fine del job − margine | segmento del run, `gpu.csv`, `FAILED` se esce ≠ 0 |
+| `slurm/make_debug_index.py`, `slurm/run_report.py` | indice ridotto (2.048 clip di train) per `parameters/model/debug_cluster.yaml`; lettura di debug e stato | `index.debug.parquet`; verdetto OOM per esperimento |
+| `Trainer._stop_time_reached` (`trainer.py`) | `SIGNWORLD_STOP_AT` letto ai passi di log | salva `latest`, `fit()` ritorna non finito |
 
 ## Schemi dei dati
 

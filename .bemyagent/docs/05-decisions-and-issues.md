@@ -23,6 +23,18 @@
 - **Decisione**: `training.effective_batch` (default 128, P16 lo confronta) + overlay `parameters/model/local_single_gpu.yaml` (batch 32 = carico per GPU di 4×32), aggiunto dagli script quando `GPUS` ha una sola GPU.
 - **Compromesso**: SIGReg/InfoNCE vedono 32 clip: run di prova della pipeline, non dell'articolo.
 
+#### Resume a scadenza su Leonardo
+
+- **Problema**: `latest` si salvava solo ogni `validation_every` (4.000 passi, ~20 h in stage F su A100) e a fine epoca: il kill al walltime (24 h `normal`, 4 giorni `boost_qos_lprod`) perdeva fino a ~20 h per segmento.
+- **Decisione**: variabile d'ambiente `SIGNWORLD_STOP_AT` (non nella config: ogni job ha la sua, e la config deve restare uguale fra i resume), letta ai passi di log con `collective.any`; il trainer salva `latest` e ritorna. I segmenti sono job in catena `afterok` + `--kill-on-invalid-dep`; un'uscita ≠ 0 scrive `<run>/FAILED` e ferma la catena.
+- **Compromesso**: margine di 45 min (validazione + diagnostiche rare devono finire prima del walltime); se il margine non basta, Slurm uccide il job (TIMEOUT) e la catena si ferma: si rilancia a mano.
+
+#### Debug del carico a indice ridotto
+
+- **Problema**: `train benchmark` misura solo lo stage P (`TrainingState` nuovo) e `train overfit` gira su un GPU senza DDP: nessuno dei due misura lo stage F del run vero.
+- **Decisione**: `train run` vero (DDP, 4 GPU, stesso modello e batch per GPU) su `index.debug.parquet` (16 passi per epoca, una epoca per stage), due segmenti da 30 min su `boost_qos_dbg` (il secondo prova anche il resume), un nodo per esperimento.
+- **Compromesso**: i secondi per passo escludono validazioni e diagnostiche; la stima di durata è un minimo.
+
 ## Lezioni di ingegneria
 
 - **Indici dei benchmark**: `train index` legge `split_source` dalla configurazione: va lanciato con gli stessi overlay della run (`*_trial.yaml`), altrimenti csl_daily/phoenix14t ricevono split per canale e la valutazione su `test` è vuota.
@@ -32,5 +44,7 @@
 - **Rifiuti in acquisizione**: i rifiuti dell'host non contano mai contro un elemento; codici di uscita 0 completato / 3 elementi rimanenti / 4 rifiutato.
 
 ## Problemi noti
+
+- `tests/experiment/train/test_trainer.py::test_a_short_run_goes_through_every_stage_and_cools_down` (lento) fallisce: si aspetta gli stage `1a, 1, 2a, 2`, il codice ora li chiama `P, F0, F` (verificato il 27/10/2026, preesistente).
 
 I problemi di ricerca aperti dell'ultima run di addestramento (19/10/2026, passo 10.770) sono tracciati in `docs/problems.md` (13 punti: il bersaglio di posa non contiene la velocità, bersaglio anisotropo, predizione fisica debole, fuga di informazione dai box, deriva della LoRA dell'encoder, collasso delle query, R@1 basso, …).

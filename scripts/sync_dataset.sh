@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copia su Leonardo solo i dati di YouTube-SL-25 che servono al training:
+# Copia su Leonardo o su ReCaS solo i dati di YouTube-SL-25 che servono al training:
 #   <base>/youtube-sl-25/text/       embedding dei testi
 #   <base>/youtube-sl-25/manifest/   manifest delle clip (preflight)
 #   <base>/training/youtube_sl25/    index.parquet + clip e pose referenziate dall'indice
@@ -9,6 +9,7 @@
 #
 # Uso:
 #   scripts/sync_dataset.sh                                  # copia su Leonardo (default sotto)
+#   scripts/sync_dataset.sh recas                            # copia su ReCaS (vedi sotto)
 #   scripts/sync_dataset.sh utente@host:/percorso/base       # base di destinazione diversa
 #   scripts/sync_dataset.sh -n                               # prova (nessuna scrittura)
 #   scripts/sync_dataset.sh -p 8 -c                          # 8 rsync in parallelo + verifica finale
@@ -30,6 +31,15 @@
 # e SSH_AUTH_SOCK impostato nella shell da cui si lancia lo script (il certificato dura ~12h:
 # usare tmux e rilanciare lo stesso comando se scade).
 #
+# Destinazione "recas": RECAS_USER@RECAS_HOST:/lustrehome/RECAS_USER/workspace/signworld/data,
+# cioè la data/ del repository su ReCaS (dove i .sub hanno initialdir): i job trovano i dati in
+# data/youtube-sl-25 e data/training/youtube_sl25 senza cambiare i config. Default
+# RECAS_USER=mvigone, RECAS_HOST=frontend.recas.ba.infn.it; RECAS_DEST sostituisce l'intera base.
+#   RECAS_USER=ecolonna scripts/sync_dataset.sh -c recas
+#
+# Tutte le chiamate ssh/rsync condividono una sola connessione (ControlMaster): password o OTP
+# vengono chiesti una volta sola all'inizio, anche con -p > 1.
+#
 # È riprendibile (--partial): se si interrompe, rilanciare lo stesso comando. Non cancella
 # nulla in destinazione. Mostra l'avanzamento (file trasferiti ogni 15s).
 set -euo pipefail
@@ -50,7 +60,14 @@ while getopts "s:t:nb:p:e:i:r:d:kch" o; do
   esac
 done
 shift $((OPTIND - 1))
-DEST=${1:-$DEFAULT_DEST}
+RECAS_USER=${RECAS_USER:-mvigone}
+RECAS_HOST=${RECAS_HOST:-frontend.recas.ba.infn.it}
+RECAS_DEST=${RECAS_DEST:-$RECAS_USER@$RECAS_HOST:/lustrehome/$RECAS_USER/workspace/signworld/data}
+case ${1:-leonardo} in
+  leonardo) DEST=$DEFAULT_DEST ;;
+  recas) DEST=$RECAS_DEST ;;
+  *) DEST=$1 ;;
+esac
 DEST=${DEST%/}
 SRC=${SRC%/}
 TRAIN_SRC=${TRAIN_SRC%/}
@@ -63,19 +80,25 @@ TRAIN_SRC=${TRAIN_SRC%/}
 [ -d "$SRC/text" ] && [ -d "$SRC/manifest" ] || { echo "in $SRC mancano text/ o manifest/" >&2; exit 1; }
 [ -d "$TRAIN_SRC" ] || { echo "manca la cartella di training: $TRAIN_SRC" >&2; exit 1; }
 
+TMP=$(mktemp -d)
 # Comando ssh come array (per le chiamate dirette) e come stringa quotata (per rsync -e).
-# Keepalive per non far cadere i trasferimenti lunghi.
-SSHA=($SSH -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
+# Keepalive per non far cadere i trasferimenti lunghi; connessione condivisa (una sola
+# autenticazione), chiusa all'uscita.
+SSHA=($SSH -o ServerAliveInterval=30 -o ServerAliveCountMax=6
+  -o ControlMaster=auto -o "ControlPath=$TMP/ssh-%C" -o ControlPersist=yes)
 [ "$INSECURE" -eq 0 ] || SSHA+=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 [ -z "$IDENTITY" ] || SSHA+=(-i "$IDENTITY")
 SSH_E=$(printf '%q ' "${SSHA[@]}")
+cleanup() {
+  [[ $DEST != *:* ]] || "${SSHA[@]}" -O exit "${DEST%%:*}" 2>/dev/null || true
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
 
 EXCLUDES=(--exclude='cookies*' --exclude='*.part' --exclude='*.ytdl')
 # Niente -z: mp4 e vtt sono già compressi o piccoli.
 RSYNC=(rsync -a --partial --human-readable -e "$SSH_E" $DRY $BW "${EXCLUDES[@]}")
 
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
 
 # Elenco dei file da copiare, uno per riga, relativi alla cartella sorgente.
 DATA_LIST="$TMP/youtube-sl-25.list"
@@ -171,6 +194,10 @@ verify_list() {
 DATA_DEST="$DEST/youtube-sl-25"
 TRAIN_DEST="$DEST/training/youtube_sl25"
 echo "destinazione: $DEST"
+# Apre la connessione condivisa prima dei rsync in parallelo (qui chiede password/OTP).
+if [[ $DEST == *:* ]]; then
+  retry "${SSHA[@]}" "${DEST%%:*}" true || { echo "connessione a ${DEST%%:*} fallita" >&2; exit 1; }
+fi
 sync_list "$SRC" "$DATA_DEST" "$DATA_LIST"
 sync_list "$TRAIN_SRC" "$TRAIN_DEST" "$TRAIN_LIST"
 

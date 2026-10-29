@@ -1,8 +1,11 @@
 #!/bin/bash
-# Not offline: `text embed` resolves the pinned EmbeddingGemma commit on the Hub.
+# Offline like the training jobs: `text embed` finds the pinned EmbeddingGemma commit in the $SCRATCH cache
+# (download it once from a login node). HF_HUB_OFFLINE=0 to resolve it on the Hub (login node only).
 
 export HF_HOME=${SCRATCH:?SCRATCH must name the cache directory}
 export TORCH_HOME=$SCRATCH
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export TRANSFORMERS_OFFLINE=$HF_HUB_OFFLINE
 # Gated models (EmbeddingGemma) need the token; it never lives in the repository.
 if [[ -r "${HOME}/.secrets/hf_token" ]]; then
   HF_TOKEN="$(cat "${HOME}/.secrets/hf_token")"

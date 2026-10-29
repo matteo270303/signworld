@@ -1,7 +1,7 @@
 """Stato dei run e lettura dei job di debug. Uso (dalla radice del repo):
 
-    python slurm/run_report.py status    ultimo passo di ogni run in runs/
-    python slurm/run_report.py debug     memoria e secondi per stage dei run in runs/debug/
+    python slurm/tools/run_report.py status    ultimo passo di ogni run in runs/
+    python slurm/tools/run_report.py debug     memoria e secondi per stage dei run in runs/debug/
 
 Il debug confronta il picco di memoria di ogni GPU (gpu.csv, nvidia-smi) con la sua capienza e
 stima la durata del run vero dai secondi per passo di ogni stage (solo i passi: validazioni e

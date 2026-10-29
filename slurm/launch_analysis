@@ -15,6 +15,7 @@
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=<EMAIL>
 
-# One signworld analysis command: manifests, checks, embeddings, experiments.
+# One signworld analysis command: manifests, checks, embeddings, experiments. Offline (compute nodes
+# have no internet): the models must already be in $SCRATCH, see slurm/README.md.
 # Launch from the repository root (out/ must exist): sbatch slurm/launch_analysis text embed openasl -c parameters/analysis/default.yaml
-srun ./slurm/launch_analysis_exe "$@"
+srun -u ./slurm/launch_analysis_exe "$@"

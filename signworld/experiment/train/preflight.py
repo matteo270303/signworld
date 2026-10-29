@@ -14,6 +14,7 @@ does not produce. P17 checks that the levels are trained apart (gerarchia §3).
 import hashlib
 import json
 import logging
+import os
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
@@ -169,8 +170,11 @@ def p5_checksums(
         saved = json.loads(record.read_text())
         changed = [n for n, value in found.items() if saved.get(n) not in (None, value)]
     else:
+        # Ranks check the record concurrently: publish it whole, never half-written.
         record.parent.mkdir(parents=True, exist_ok=True)
-        record.write_text(json.dumps(found, indent=2) + "\n")
+        staging = record.with_name(record.name + f".{os.getpid()}.tmp")
+        staging.write_text(json.dumps(found, indent=2) + "\n")
+        os.replace(staging, record)
     problems = [f"{n}: not the expected file" for n in wrong] + [
         f"{n}: changed since the run began" for n in changed
     ]

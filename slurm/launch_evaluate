@@ -17,4 +17,4 @@
 
 # The test of a trained WorldSign run (§4.12) on one GPU.
 # Launch from the repository root (out/ must exist): sbatch slurm/launch_evaluate -c parameters/model/worldsign.yaml -c parameters/ablation/arm_A.yaml --run runs/worldsign-A --index data/training/openasl/index.parquet --split test --output runs/worldsign-A/test_best.json
-srun ./slurm/launch_evaluate_exe "$@"
+srun -u ./slurm/launch_evaluate_exe "$@"

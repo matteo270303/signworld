@@ -1,5 +1,5 @@
-# Collaudo del carico su Leonardo (slurm/launch_experiment.sh debug): stesso modello, stesso batch
-# per GPU e stessi frame del run vero, su un indice ridotto (slurm/make_debug_index.py): 2.048 clip
+# Collaudo del carico su Leonardo (slurm/batch/debug.sh): stesso modello, stesso batch
+# per GPU e stessi frame del run vero, su un indice ridotto (slurm/tools/make_debug_index.py): 2.048 clip
 # di train = 16 passi per epoca da 128, una epoca per stage (P, F0, F). Memoria e secondi per passo
 # di ogni stage finiscono in metrics.jsonl ogni 4 passi. Va per ultimo, dopo arm e ablation.
 data:

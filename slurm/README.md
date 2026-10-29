@@ -1,8 +1,35 @@
 # Run su Leonardo
 
-Un solo script: `slurm/launch_experiment.sh` (aiuto: lancialo senza argomenti). Ogni esperimento
-occupa **un nodo Booster da 4 A100 64 GB** (batch 128 = 32 clip per GPU, DDP). Esperimenti diversi
+Ogni job è una coppia `launch_X` (header `#SBATCH` + `srun`) / `launch_X_exe` (ambiente + comando), da
+`sbatch slurm/launch_X ...` dalla radice del repo. Per lanciare più run insieme ci sono gli script in
+`slurm/batch/`, che chiamano `sbatch` sulle coppie. Ogni esperimento di `launch_experiment` occupa **un nodo Booster da 4 A100 64 GB** (batch 128 = 32 clip per GPU, DDP). Esperimenti diversi
 vanno in parallelo su nodi diversi. Gli esperimenti sono elencati in `slurm/experiments.sh`.
+
+## Coppie e script
+
+| Coppia | Cosa fa | Risorse |
+|---|---|---|
+| `launch_experiment` | un esperimento di `experiments.sh` (resume a scadenza, `FAILED`, `gpu.csv`) | 1 nodo, 4 GPU |
+| `launch_train` | un run di training, argomenti del `signworld train run` | 1 GPU |
+| `launch_multigpu_train` | idem, DDP | 4 GPU (override per 2) |
+| `launch_evaluate` | test di un run | 1 GPU |
+| `launch_analysis` | un comando `signworld` di analisi, offline | 1 GPU |
+| `launch_fetch_media` | uno shard dei media, con rete | `lrd_all_serial`, 4 h, no GPU |
+
+| Script | Lancia |
+|---|---|
+| `batch/debug.sh [esp...]` | debug del carico (2 segmenti da 30 min, 8 nodi) |
+| `batch/wave1.sh [esp...]` | catene di training di A-gate B0 B C V |
+| `batch/wave2.sh [esp...]` | catene delle ablation su θ* (`THETA=`) |
+| `batch/pilot.sh` | pilota (account `IscrC_BRIDGEV` di default) |
+| `tools/setup.sh [check]` | setup sul login node |
+
+Un nuovo caso (per esempio tutti gli eval) è un nuovo `.sh` in `batch/`.
+
+**Internet.** I nodi di calcolo non ne hanno, i login sì: `launch_fetch_media` gira su `lrd_all_serial`
+(nodi `login08/13`, deduzione dai nomi, da provare con un job vero). `launch_analysis` è offline: i
+modelli di `text embed` vanno scaricati prima in `$SCRATCH` da un login node
+(`HF_HUB_OFFLINE=0 signworld ... text embed ...`).
 
 | Nome | Config | Ondata |
 |---|---|---|
@@ -27,7 +54,7 @@ mkdir -p $WORK/$USER && cd $WORK/$USER
 git clone -b refactor/structure https://github.com/matteo270303/signworld.git && cd signworld
 command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh    # poi riapri la shell
 export UV_CACHE_DIR=$WORK/$USER/uv-cache   # i wheel di torch fuori da $HOME (50 GB)
-slurm/launch_experiment.sh setup
+slurm/tools/setup.sh
 saldo                                       # budget prima di partire
 ```
 
@@ -49,9 +76,9 @@ a ogni epoca.
 ## 2. Debug del carico (~1 ora, 8 nodi)
 
 ```bash
-slurm/launch_experiment.sh debug            # A-gate B C V esp2 esp4 esp6 g1, un nodo ciascuno
+slurm/batch/debug.sh                       # A-gate B C V esp2 esp4 esp6 g1, un nodo ciascuno
 squeue -u $USER                             # due job sw-debug: il secondo parte dopo il primo
-slurm/launch_experiment.sh report           # quando sono finiti entrambi
+python slurm/tools/run_report.py debug    # quando sono finiti entrambi
 ```
 
 **Cosa gira.** Il `train run` vero: stesso modello, 4 GPU in DDP, 32 clip per GPU, stessi frame.
@@ -79,7 +106,7 @@ A-gate. Sono 8 nodi, il massimo per job di `boost_qos_dbg`.
 |---|---|
 | `OK` | si lancia |
 | `RISCHIO OOM` / `OOM` | non lanciarlo. Strade: backward per ramo (`docs/worldsign-gpu.md`, codice da scrivere) o 2 nodi (serve il lancio multi-nodo) |
-| `stage F non raggiunto` | `slurm/launch_experiment.sh debug <esp>`: riprende da dove era rimasto |
+| `stage F non raggiunto` | `slurm/batch/debug.sh <esp>`: riprende da dove era rimasto |
 | `FAILED` | leggi `out/sw-debug-<esp>-*.log`, poi `rm runs/debug/<esp>/FAILED` |
 
 `boost_qos_dbg` ammette 2 job per utente fra running e pending: un nuovo `debug` va lanciato
@@ -88,18 +115,18 @@ quando i due precedenti sono finiti. Per rifare un debug da zero: `rm -rf runs/d
 ## 3. Produzione
 
 ```bash
-slurm/launch_experiment.sh train A-gate                 # run di gate
+slurm/batch/wave1.sh A-gate                 # run di gate
 grep "\[stop\] F2" out/sw-train-A-gate-*.log           # F2 passato: fine dello stage F0
-slurm/launch_experiment.sh train B0 B C V               # il resto della prima ondata
-# oppure tutta la prima ondata subito:  slurm/launch_experiment.sh train wave1
-THETA=B slurm/launch_experiment.sh train esp2 esp6 g1 d4   # seconda ondata, θ* deciso
+slurm/batch/wave1.sh B0 B C V               # il resto della prima ondata
+# oppure tutta la prima ondata subito:  slurm/batch/wave1.sh
+THETA=B slurm/batch/wave2.sh esp2 esp6 g1 d4  # seconda ondata, θ* deciso
 ```
 
 `docs/worldsign-ablation.md` chiede i bracci dopo F2 della run di gate (fail-fast). Lanciare
 `wave1` subito guadagna giorni sulla scadenza CVPR, ma rischia 5 run invece di 1 se il gate fallisce.
 
 **Resume.** `boost_qos_lprod` dura **4 giorni**, non 2 (pagina Leonardo della doc CINECA). Ha un
-massimo di 8 nodi / 32 GPU per utente e per progetto: la prima ondata ne usa 5. Con `train` ogni
+massimo di 8 nodi / 32 GPU per utente e per progetto: la prima ondata ne usa 5. Con `wave1.sh` / `wave2.sh` ogni
 esperimento è una catena di `SEGMENTS` job (default 6, cioè 24 giorni), legati da `afterok`.
 
 - Ogni job si ferma `STOP_MARGIN_MIN` minuti (default 45) prima del walltime e salva `latest`.
@@ -108,7 +135,7 @@ esperimento è una catena di `SEGMENTS` job (default 6, cioè 24 giorni), legati
 - A run finito (`final.pt`), i segmenti rimasti escono subito.
 - Un errore (OOM, NaN, gate fallito) scrive `runs/<esp>/FAILED` e cancella il resto della catena.
 - Calcolo dei segmenti: giorni stimati da `report` / 3,9, più 1 di margine.
-- Con la QOS normale da 24 h: `QOS=normal TIME=24:00:00 SEGMENTS=25 slurm/launch_experiment.sh train ...`
+- Con la QOS normale da 24 h: `QOS=normal TIME=24:00:00 SEGMENTS=25 slurm/batch/wave1.sh ...`
 
 **Non cambiare il codice durante un run.** Un resume con codice diverso viene rifiutato
 (provenance). Se serve davvero: `ALLOW_CODE_CHANGE=1`; la modifica viene registrata.
@@ -116,9 +143,9 @@ esperimento è una catena di `SEGMENTS` job (default 6, cioè 24 giorni), legati
 ## 4. Controllo
 
 ```bash
-slurm/launch_experiment.sh status       # coda + ultimo passo di ogni run (stage, s/passo, GiB, ETA)
+squeue -u $USER; python slurm/tools/run_report.py status   # coda + ultimo passo di ogni run (stage, s/passo, GiB, ETA)
 tail -f out/sw-train-A-gate-<job>.log
-slurm/launch_experiment.sh cancel C     # tutti i job di C, catena compresa
+scancel --name=sw-C                     # tutti i job di C, catena compresa
 saldo
 ```
 

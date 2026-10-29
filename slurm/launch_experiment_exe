@@ -1,6 +1,6 @@
 #!/bin/bash
 # Un esperimento su un nodo (4 GPU, DDP): un segmento del run, che riparte da
-# <run>/checkpoints/latest.pt se c'è. Lanciato da slurm/experiment_job. Uso: experiment_exe debug|train <esp>
+# <run>/checkpoints/latest.pt se c'è. Lanciato da slurm/launch_experiment. Uso: launch_experiment_exe debug|train <esp>
 
 set -euo pipefail
 

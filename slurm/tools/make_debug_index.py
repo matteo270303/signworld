@@ -1,6 +1,6 @@
 """Indice ridotto per i job di debug: poche clip per split, estratte con un seme fisso.
 
-Uso (dalla radice del repo): python slurm/make_debug_index.py
+Uso (dalla radice del repo): python slurm/tools/make_debug_index.py
 Le clip restano quelle dell'indice vero, quindi i canali restano separati fra gli split.
 """
 

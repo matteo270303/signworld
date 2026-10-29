@@ -1,0 +1,15 @@
+# Pilota di costo e di gate: stessa catena del debug (indice ridotto, 2048 clip di train),
+# ma 15 epoche con la struttura vera (P 2, F0 1, F 12), gate attivi, letture a fine epoca.
+name: worldsign-A-pilot
+data:
+  index: data/training/youtube_sl25/index.debug.parquet
+  statistics_clips: 1000
+  validation_clips: 256
+pose_encoder:
+  warmup_epochs: 1.0
+training:
+  epochs: 15
+  log_every: 4
+diagnostics:
+  gate_stops: true
+  cadence: epoch

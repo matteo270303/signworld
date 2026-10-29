@@ -42,9 +42,11 @@
 
 - **Percorsi sul cluster**: su ReCaS le sottocartelle di `data/` vanno collegate con symlink alle vecchie radici prima di sottomettere i job (`parameters/PATHS.md`).
 - **Rifiuti in acquisizione**: i rifiuti dell'host non contano mai contro un elemento; codici di uscita 0 completato / 3 elementi rimanenti / 4 rifiutato.
+- **Struttura di `slurm/` (2026-10-29)**: coppie `launch_X` / `launch_X_exe`, niente launcher monolitico né `lib/env.sh` (l'ambiente è duplicato di proposito in ogni `_exe`); N run insieme = `.sh` in `slurm/batch/`. Scartati: launcher Python alla Handscribe (la griglia di parametri non serve), launcher bash unico. I nodi boost non hanno internet: `launch_fetch_media` su `lrd_all_serial` (nodi `login08/13`, deduzione dai nomi, non provato), `launch_analysis` offline con i modelli in `$SCRATCH`. Il pilota è l'esperimento `pilot` (`runs/pilot-A`, `parameters/model/pilot.yaml`).
 
 ## Problemi noti
 
 - `tests/experiment/train/test_trainer.py::test_a_short_run_goes_through_every_stage_and_cools_down` (lento) fallisce: si aspetta gli stage `1a, 1, 2a, 2`, il codice ora li chiama `P, F0, F` (verificato il 27/10/2026, preesistente).
+- Race in `p5_checksums` (`signworld/experiment/train/preflight.py:162`): al primo avvio di una `runs/` nuova un rank legge `checksums.json` mentre il rank 0 lo sta scrivendo, trova un file vuoto e muore; gli altri restano in attesa del collective di P13 fino al timeout NCCL. Pilota 62470758 (28/10/2026). Corretto con scrittura atomica (tmp + `os.replace`), test `test_the_checksum_record_is_published_whole`; pilota ri-sottomesso come 62545635. Dettagli: `docs/drafts/pilot-A-crash.md`.
 
 I problemi di ricerca aperti dell'ultima run di addestramento (19/10/2026, passo 10.770) sono tracciati in `docs/problems.md` (13 punti: il bersaglio di posa non contiene la velocità, bersaglio anisotropo, predizione fisica debole, fuga di informazione dai box, deriva della LoRA dell'encoder, collasso delle query, R@1 basso, …).

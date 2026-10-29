@@ -5,15 +5,17 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:4
 #SBATCH --mem=492000
+#SBATCH -A IscrC_SPARTAN
 
-# Job di slurm/launch_experiment.sh (account, QOS, durata, nodi e log li passa lui): un nodo con
-# 4 GPU per esperimento, un srun per nodo, in parallelo. Uso: experiment_job debug|train <esp>...
+# Esperimenti di experiments.sh: un nodo con 4 GPU per esperimento, un srun per nodo, in parallelo.
+# Account, QOS, durata, nodi e log li passano gli script in slurm/batch/ (debug.sh, wave1.sh, ...).
+# Dalla radice del repo (out/ deve esistere): sbatch slurm/launch_experiment debug|train <esp>...
 MODE=$1
 shift
 pids=()
 for exp in "$@"; do
   srun --nodes=1 --ntasks=1 --exclusive --gres=gpu:4 --cpus-per-task=32 --mem=492000 \
-    --output="out/sw-$MODE-$exp-%j.log" ./slurm/experiment_exe "$MODE" "$exp" &
+    --output="out/sw-$MODE-$exp-%j.log" ./slurm/launch_experiment_exe "$MODE" "$exp" &
   pids+=($!)
 done
 status=0

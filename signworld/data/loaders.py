@@ -15,9 +15,10 @@ can start mid-epoch, so a resumed run also keeps the sampler's order.
 """
 
 import dataclasses
+import itertools
 import logging
 from collections.abc import Iterator, Sequence
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -228,7 +229,12 @@ def read_index(path: Path, split: str | None = None) -> pa.Table:
     table = pq.read_table(path)
     if not table.schema.equals(INDEX_SCHEMA):
         raise ValueError(f"{path}: not a training index; rebuild it")
-    return table if split is None else table.filter(pc.equal(table.column("split"), split))
+    return table if split is None else select_split(table, split)
+
+
+def select_split(index: pa.Table, split: str) -> pa.Table:
+    """The rows of one split of an index already read, so it is read from disk only once."""
+    return index.filter(pc.equal(index.column("split"), split))
 
 
 def validation_subset(table: pa.Table, clips: int) -> pa.Table:
@@ -383,29 +389,42 @@ class EpochSampler(Sampler[tuple[int, int]]):
         return self.per_rank - self.start
 
 
-def caption_statistics(table: pa.Table, embeddings: np.ndarray) -> tuple[Tensor, list[str]]:
+def caption_statistics(
+    table: pa.Table, embeddings: np.ndarray, block: int = 65_536
+) -> tuple[Tensor, list[str]]:
     """Every distinct caption of the training clips with its language, for the centring.
 
-    As PC1 measured it: one row per distinct caption, not per clip.
+    As PC1 measured it: one row per distinct caption, not per clip. The store is read in
+    contiguous blocks of ``block`` rows: gathering ~900k scattered rows from the memory map
+    faults pages in one by one, which on Lustre takes minutes.
     """
     rows = table.select(["caption_row", "caption_language"]).to_pylist()
     language_of = {row["caption_row"]: row["caption_language"] for row in rows}
-    ordered = sorted(language_of)
-    captions = torch.from_numpy(np.asarray(embeddings[ordered], dtype=np.float32))
-    return captions, [language_of[row] for row in ordered]
+    ordered = np.asarray(sorted(language_of), dtype=np.int64)
+    captions = np.empty((len(ordered), embeddings.shape[1]), dtype=np.float32)
+    bounds = np.searchsorted(ordered, np.arange(0, len(embeddings) + block, block))
+    for start, (first, last) in enumerate(itertools.pairwise(bounds)):
+        if first < last:
+            stored = np.asarray(embeddings[start * block : (start + 1) * block])
+            captions[first:last] = stored[ordered[first:last] - start * block]
+    return torch.from_numpy(captions), [language_of[row] for row in ordered.tolist()]
 
 
-def keypoint_statistics(table: pa.Table, clips: int, seed: int = 0) -> tuple[Tensor, Tensor]:
-    """Step positions and weights of ``clips`` training clips, for the scale of L_anchor."""
+def keypoint_statistics(
+    table: pa.Table, clips: int, seed: int = 0, workers: int = 16
+) -> tuple[Tensor, Tensor]:
+    """Step positions and weights of ``clips`` training clips, for the scale of L_anchor.
+
+    The files are read by ``workers`` threads (opening and inflating each ``.npz`` releases
+    the GIL) in the order of the sample, so the result does not depend on ``workers``.
+    """
     rng = np.random.default_rng(seed)
     chosen = rng.choice(table.num_rows, min(clips, table.num_rows), replace=False)
     paths = table.column("pose_path").take(np.sort(chosen)).to_pylist()
-    positions, weights = [], []
-    for path in paths:
-        sequence = PoseSequence.from_track(PoseTrack.load(Path(path)))
-        if sequence is None:
-            continue
-        position, weight = sequence.step_positions()
-        positions.append(position)
-        weights.append(weight)
+    with ThreadPoolExecutor(max(1, workers)) as pool:
+        sequences = pool.map(
+            lambda path: PoseSequence.from_track(PoseTrack.load(Path(path))), paths
+        )
+        steps = [sequence.step_positions() for sequence in sequences if sequence is not None]
+    positions, weights = zip(*steps, strict=True)
     return torch.from_numpy(np.stack(positions)), torch.from_numpy(np.stack(weights))

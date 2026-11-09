@@ -22,6 +22,7 @@ from signworld.data.loaders import (
     caption_statistics,
     keypoint_statistics,
     read_index,
+    select_split,
     validation_subset,
 )
 from signworld.data.negatives import THRESHOLDS, load_thresholds
@@ -41,11 +42,16 @@ STATISTICS = "statistics.pt"
 
 
 def fit_statistics(
-    model: WorldSign, train: pa.Table, embeddings: np.ndarray, clips: int
+    model: WorldSign,
+    train: pa.Table,
+    embeddings: np.ndarray,
+    clips: int,
+    captions: tuple[torch.Tensor, list[str]] | None = None,
 ) -> dict[str, Any]:
-    """The centring means and the keypoint variance, fitted on training clips only."""
-    captions, languages = caption_statistics(train, embeddings)
-    model.text.centering.fit(captions, languages)
+    """The centring means and the keypoint variance, fitted on training clips only.
+
+    ``captions``: ``caption_statistics`` of ``train`` when already computed."""
+    model.text.centering.fit(*(captions or caption_statistics(train, embeddings)))
     if model.pose is not None:
         model.pose.fit(*keypoint_statistics(train, clips))
     return {
@@ -76,6 +82,10 @@ class Prepared:
     train: pa.Table
     train_data: ClipDataset
     embeddings: np.ndarray
+    index: pa.Table
+    """Every split of the training index, read once."""
+    captions: tuple[torch.Tensor, list[str]]
+    """``caption_statistics`` of ``train``, fitted on and checked by P11."""
 
 
 def prepare(config: WorldSignConfig, output: Path, collective: Distributed) -> Prepared:
@@ -88,16 +98,19 @@ def prepare(config: WorldSignConfig, output: Path, collective: Distributed) -> P
         config, collective=collective, false_negatives=false_negative_thresholds(config)
     )
     embeddings = EmbeddingStore(data.embeddings).embeddings()
-    train = read_index(data.index, TRAIN)
+    index = read_index(data.index)
+    train = select_split(index, TRAIN)
+    captions = caption_statistics(train, embeddings)  # every GPU, while the first fits
     statistics = output / STATISTICS
     if collective.is_main and not statistics.is_file():
         output.mkdir(parents=True, exist_ok=True)
-        torch.save(fit_statistics(model, train, embeddings, data.statistics_clips), statistics)
+        fitted = fit_statistics(model, train, embeddings, data.statistics_clips, captions)
+        torch.save(fitted, statistics)
     collective.barrier()
     load_statistics(model, torch.load(statistics, map_location="cpu", weights_only=False))
 
     known = pa.array(list(model.text.centering.languages))
-    held_out = read_index(data.index, data.validation_split)
+    held_out = select_split(index, data.validation_split)
     held_out = held_out.filter(pc.is_in(held_out.column("caption_language"), known))
     validation = validation_subset(held_out, data.validation_clips)
     logger.info("%d training clips, %d validation clips", train.num_rows, validation.num_rows)
@@ -129,7 +142,7 @@ def prepare(config: WorldSignConfig, output: Path, collective: Distributed) -> P
             box_threshold=threshold,
         ),
     )
-    return Prepared(trainer, train, train_data, embeddings)
+    return Prepared(trainer, train, train_data, embeddings, index, captions)
 
 
 def run(
@@ -155,11 +168,9 @@ def run(
     prepared = prepare(config, output, collective)
     trainer, model = prepared.trainer, prepared.trainer.model
     fresh = not trainer.checkpoints.exists("latest")
-    data = config.data
-    assert data.index is not None  # checked by prepare
-    index = read_index(data.index)
+    index = prepared.index
     names = sorted(set(index.column("split").to_pylist()))
-    splits = {name: read_index(data.index, name) for name in names}
+    splits = {name: select_split(index, name) for name in names}
     batch = (
         Collate(model.text.centering.languages)(
             [prepared.train_data[(index, 0)] for index in range(trainer.per_gpu)]
@@ -172,7 +183,7 @@ def run(
         config,
         splits,
         batch,
-        caption_statistics(prepared.train, prepared.embeddings),
+        prepared.captions,
         output / "checksums.json",
         collective,
         overfit_steps=config.training.preflight_overfit_steps if fresh else 0,

@@ -33,9 +33,14 @@ class LanguageCentering(nn.Module):
         if len(embeddings) != len(languages):
             raise ValueError(f"{len(embeddings)} embeddings for {len(languages)} languages")
         names = tuple(sorted(set(languages)))
-        labels = torch.tensor([names.index(name) for name in languages])
-        rows = embeddings.double()
-        means = torch.stack([rows[labels == index].mean(dim=0) for index in range(len(names))])
+        number = {name: index for index, name in enumerate(names)}
+        labels = torch.tensor([number[name] for name in languages])
+        # Summed in float64 a block at a time: one pass, no float64 copy of every row.
+        sums = torch.zeros(len(names), embeddings.shape[1], dtype=torch.float64)
+        for start in range(0, len(embeddings), 65_536):
+            block = slice(start, start + 65_536)
+            sums.index_add_(0, labels[block], embeddings[block].double())
+        means = sums / torch.bincount(labels, minlength=len(names))[:, None]
         self.languages = names
         self.means = means.to(self.means.device, torch.float32)
 

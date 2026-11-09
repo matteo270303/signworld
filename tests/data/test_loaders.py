@@ -138,6 +138,18 @@ def test_statistics_come_from_distinct_captions_and_sampled_poses(corpus) -> Non
     assert positions.shape == (5, 32, 69, 2) and weights.shape == (5, 32, 69)
 
 
+def test_statistics_do_not_depend_on_the_blocks_or_the_threads(corpus) -> None:  # type: ignore[no-untyped-def]
+    table = _index(corpus)
+    rows = sorted(set(table.column("caption_row").to_pylist()))
+
+    captions, _ = caption_statistics(table, corpus.embeddings, block=2)
+    serial = keypoint_statistics(table, clips=5, workers=1)
+    threaded = keypoint_statistics(table, clips=5, workers=4)
+
+    assert torch.equal(captions, torch.from_numpy(np.asarray(corpus.embeddings[rows])))
+    assert all(torch.equal(a, b) for a, b in zip(serial, threaded, strict=True))
+
+
 def test_the_validation_subset_is_fixed() -> None:
     import pyarrow as pa  # noqa: PLC0415
 

@@ -12,6 +12,7 @@
 | 1.2 | Check dei dataset (youtube_sl25, csl_daily, phoenix14t) e avvio dei 3 `run_train_*.sh` — report `docs/dataset-status.md` | done |
 | 1.3 | Lancio su Leonardo: debug del carico, catene con resume a scadenza (`slurm/batch/*.sh`, `slurm/README.md`) | in-progress — da provare sul cluster |
 | 1.4 | Riordino di `slurm/`: coppie `launch_X`/`_exe` + `batch/*.sh` (`work/1/1.4/`) | done — da provare sul cluster |
+| 1.5 | Statistiche di avvio più veloci: pose in parallelo, embedding a blocchi, caption e indice letti una volta (`work/1/1.5/`) | done — sul nodo GPU ~1 min (debug 63997298) |
 
 ## Backlog (non pianificato)
 

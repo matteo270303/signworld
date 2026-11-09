@@ -1,0 +1,8 @@
+sbatch prof (63996194) → torch ImportError libcudnn.so.9 → diagnosticare il venv
+RECORD audit → file mancanti in cudnn/cusparselt/nccl/nvshmem cu13 + opencv; torch+cu126 senza pacchetti cu12 (rimossi da uv sync 09/11 16:22) → reinstall stesse versioni + torch cu126 dall'indice PyTorch
+uv pip install torch==2.14.0+cu126 torchvision==0.29.0+cu126 → import ok → risottomettere la profilazione, poi implementare
+edit loaders.py (select_split, caption_statistics a blocchi, keypoint_statistics con ThreadPoolExecutor), text_branch.py (index_add_), run.py (Prepared.index/captions, P11 riusa) → ok → lint + test
+ruff check (file toccati) → All checks passed; mypy → solo errore preesistente text_branch.py unused-ignore → pytest
+pytest test_loaders test_text_branch test_preflight test_pose_branch → 30 passed 1 skipped; tests/experiment/train tests/cli → 179 passed 4 skipped → verifica su dati veri
+python out/check_stats.py (login node) → index 17s captions 258s fit 4.2s poses 63s; medie, lingue e varianza bit-equal ad A-gate → 04_verify
+utente: scancel --me (anche il job di profilazione 63996342); solo debug lanciato dall'utente → niente sbatch da parte mia

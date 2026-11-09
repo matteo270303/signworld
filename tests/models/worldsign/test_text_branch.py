@@ -30,6 +30,16 @@ def test_centred_captions_have_zero_mean_in_every_language() -> None:
         assert rows.mean(dim=0).abs().max() < 1e-5
 
 
+def test_the_means_are_those_of_each_language() -> None:
+    embeddings, languages = _captions()
+    centering = LanguageCentering(768)
+    centering.fit(embeddings, languages)
+
+    expected = torch.stack([embeddings[:25].double().mean(0), embeddings[25:].double().mean(0)])
+
+    assert torch.allclose(centering.means, expected.float(), atol=1e-6)
+
+
 def test_a_language_never_fitted_and_an_unfitted_centering_are_errors() -> None:
     embeddings, languages = _captions()
     centering = LanguageCentering(768)

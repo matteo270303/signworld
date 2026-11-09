@@ -14,6 +14,7 @@
 | 1.4 | Riordino di `slurm/`: coppie `launch_X`/`_exe` + `batch/*.sh` (`work/1/1.4/`) | done — da provare sul cluster |
 | 1.5 | Statistiche di avvio più veloci: pose in parallelo, embedding a blocchi, caption e indice letti una volta (`work/1/1.5/`) | done — sul nodo GPU ~1 min (debug 63997298) |
 | 1.6 | Debug 63997298: diagnostiche rare in bf16, log P una volta con descrizione e secondi, tqdm su P13/rare/statistiche, warning (`work/1/1.6/`) | done — da misurare al prossimo debug |
+| 1.7 | Cartelle dei run con la data del lancio (`RUN_STAMP` in `slurm/experiments.sh`), niente più riuso fra lanci con lo stesso nome (`work/1/1.7/`) | done — da provare sul cluster |
 
 ## Backlog (non pianificato)
 

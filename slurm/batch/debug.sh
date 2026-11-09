@@ -19,4 +19,5 @@ args=("${COMMON[@]}" --qos=boost_qos_dbg --time=00:30:00 --nodes="$#"
 first=$(STOP_MARGIN_MIN=6 sbatch "${args[@]}" slurm/launch_experiment debug "$@")
 second=$(STOP_MARGIN_MIN=6 sbatch "${args[@]}" --dependency="afterany:$first" \
   slurm/launch_experiment debug "$@")
-echo "debug di $*: job $first, poi $second (riprende); esiti in runs/debug/"
+echo "debug di $*: job $first, poi $second (riprende); esiti in runs/debug/<esp>-$RUN_STAMP"
+echo "per riprendere: RUN_STAMP=$RUN_STAMP slurm/batch/debug.sh $*"

@@ -12,10 +12,12 @@
 # Dalla radice del repo (out/ deve esistere): sbatch slurm/launch_experiment debug|train <esp>...
 MODE=$1
 shift
+# Fissa RUN_STAMP per tutti gli srun, se lo sbatch non l'ha già passata (slurm/batch/*.sh).
+source slurm/experiments.sh
 pids=()
 for exp in "$@"; do
   srun --nodes=1 --ntasks=1 --exclusive --gres=gpu:4 --cpus-per-task=32 --mem=492000 \
-    --output="out/sw-$MODE-$exp-%j.log" ./slurm/launch_experiment_exe "$MODE" "$exp" &
+    --output="out/sw-$MODE-$exp${RUN_STAMP:+-$RUN_STAMP}-%j.log" ./slurm/launch_experiment_exe "$MODE" "$exp" &
   pids+=($!)
 done
 status=0

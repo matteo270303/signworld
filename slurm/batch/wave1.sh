@@ -28,6 +28,6 @@ for name in "${NAMES[@]}"; do
       --nodes=1 --job-name="sw-$name" --output="out/sw-train-$name-%j.log" "${deps[@]}" \
       slurm/launch_experiment train "$name")
     previous=$job
-    echo "$name: segmento $k/$SEGMENTS, job $job"
+    echo "$name: segmento $k/$SEGMENTS, job $job, $(run_dir train "$name")"
   done
 done

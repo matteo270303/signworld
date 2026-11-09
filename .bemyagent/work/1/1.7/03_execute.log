@@ -1,0 +1,3 @@
+lettura experiments.sh, launch_experiment(_exe), batch/*.sh, run_report.py → run_dir senza data, RUN_STAMP da fissare allo sbatch (non nel job) → edit
+edit experiments.sh (RUN_STAMP + run_dir), launch_experiment (source + log), debug/wave1/wave2/pilot (echo cartella) → bash -n ok → simulazione run_dir
+simulazione: nuova / ereditata / vuota → come atteso → README, 03, 05, 06 → 04_verify

@@ -95,7 +95,7 @@ A-gate. Sono 8 nodi, il massimo per job di `boost_qos_dbg`.
 **Cosa legge `report`** per ogni esperimento:
 
 - Verdetto: `OK` / `RISCHIO OOM` / `OOM`. È `RISCHIO OOM` quando una GPU supera il 90 % della
-  memoria (nvidia-smi, `runs/debug/<esp>/gpu.csv`, ogni 30 s).
+  memoria (nvidia-smi, `runs/debug/<esp>-<data>/gpu.csv`, ogni 30 s).
 - Secondi per passo (mediana) e picco allocato sulla GPU 0 per stage. Il picco è cumulativo e
   include il preflight P13, che fa già 30 passi completi di stage F. In locale (Blackwell,
   32 clip, braccio A) vale 48,3 GiB: su una A100 da 64 GB resterebbero ~14 GiB di margine, da
@@ -107,10 +107,15 @@ A-gate. Sono 8 nodi, il massimo per job di `boost_qos_dbg`.
 | `OK` | si lancia |
 | `RISCHIO OOM` / `OOM` | non lanciarlo. Strade: backward per ramo (`docs/worldsign-gpu.md`, codice da scrivere) o 2 nodi (serve il lancio multi-nodo) |
 | `stage F non raggiunto` | `slurm/batch/debug.sh <esp>`: riprende da dove era rimasto |
-| `FAILED` | leggi `out/sw-debug-<esp>-*.log`, poi `rm runs/debug/<esp>/FAILED` |
+| `FAILED` | leggi `out/sw-debug-<esp>-<data>-*.log`, poi `rm runs/debug/<esp>-<data>/FAILED` |
 
 `boost_qos_dbg` ammette 2 job per utente fra running e pending: un nuovo `debug` va lanciato
-quando i due precedenti sono finiti. Per rifare un debug da zero: `rm -rf runs/debug/<esp>`.
+quando i due precedenti sono finiti.
+
+**Cartelle con la data.** Ogni lancio di `slurm/batch/*.sh` scrive in `runs/[debug/]<esp>-<data>`
+(`RUN_STAMP`, es. `A-gate-20261109-181258`): un nuovo debug parte sempre da zero. Per riprendere
+un run esistente: `RUN_STAMP=20261109-181258 slurm/batch/debug.sh A-gate`; per le cartelle
+senza data di prima: `RUN_STAMP= slurm/batch/...`.
 
 ## 3. Produzione
 
@@ -133,7 +138,7 @@ esperimento è una catena di `SEGMENTS` job (default 6, cioè 24 giorni), legati
   Il trainer lo fa da sé (`SIGNWORLD_STOP_AT`), e il job esce con 0.
 - Il job seguente riprende dallo stesso passo, nello stesso ordine di clip.
 - A run finito (`final.pt`), i segmenti rimasti escono subito.
-- Un errore (OOM, NaN, gate fallito) scrive `runs/<esp>/FAILED` e cancella il resto della catena.
+- Un errore (OOM, NaN, gate fallito) scrive `runs/<esp>-<data>/FAILED` e cancella il resto della catena.
 - Calcolo dei segmenti: giorni stimati da `report` / 3,9, più 1 di margine.
 - Con la QOS normale da 24 h: `QOS=normal TIME=24:00:00 SEGMENTS=25 slurm/batch/wave1.sh ...`
 

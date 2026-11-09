@@ -33,12 +33,18 @@ experiment_files() {  # nome -> file di configurazione, uno per riga
   printf '%s\n' "${BASE[@]}" "${files[@]}"
 }
 
+# RUN_STAMP (data del lancio) va in coda al nome: lanciare due volte lo stesso esperimento non
+# riusa la cartella. Per riprendere un run: RUN_STAMP=<la sua data>; RUN_STAMP= (vuota) per le
+# cartelle senza data di prima. Esportata: i job di una catena la ereditano da sbatch.
+export RUN_STAMP=${RUN_STAMP-$(date +%Y%m%d-%H%M%S)}
+
 run_dir() {  # debug|train, nome -> cartella del run
-  local root=runs
+  local root=runs name
   [ "$1" = debug ] && root=runs/debug
   case $2 in
-    esp2 | esp4 | esp6 | g1 | d4) echo "$root/$2-on-$THETA" ;;
-    pilot) echo "$root/pilot-A" ;;
-    *) echo "$root/$2" ;;
+    esp2 | esp4 | esp6 | g1 | d4) name=$2-on-$THETA ;;
+    pilot) name=pilot-A ;;
+    *) name=$2 ;;
   esac
+  echo "$root/$name${RUN_STAMP:+-$RUN_STAMP}"
 }

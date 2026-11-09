@@ -30,6 +30,8 @@ export HF_HOME=${SCRATCH:?SCRATCH must name the cache directory}
 export TORCH_HOME=$SCRATCH
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
+# Il rank 0 fitta da solo le statistiche (~10,5 min): il default NCCL (10 min) non basta.
+export SIGNWORLD_COLLECTIVE_TIMEOUT_MIN=${SIGNWORLD_COLLECTIVE_TIMEOUT_MIN:-60}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 

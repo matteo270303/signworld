@@ -21,11 +21,22 @@ process group and every collective is the identity.
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 import torch
 import torch.distributed as dist
 from torch import Tensor
+
+
+def collective_timeout() -> timedelta | None:
+    """``SIGNWORLD_COLLECTIVE_TIMEOUT_MIN`` minutes, or torch's default (10 min) when unset.
+
+    Rank 0 alone fits the statistics (~10.5 min on 945k clips) while the others wait at the
+    barrier, so the launch scripts raise it; a real hang costs up to this long before it is reported.
+    """
+    minutes = os.environ.get("SIGNWORLD_COLLECTIVE_TIMEOUT_MIN")
+    return None if minutes is None else timedelta(minutes=float(minutes))
 
 
 class _AllSum(torch.autograd.Function):
@@ -79,7 +90,9 @@ class Distributed:
             return cls(device=device)
         if not dist.is_initialized():
             dist.init_process_group(
-                backend or ("nccl" if cuda else "gloo"), device_id=device if cuda else None
+                backend or ("nccl" if cuda else "gloo"),
+                timeout=collective_timeout(),
+                device_id=device if cuda else None,
             )
         return cls(dist.get_rank(), world_size, local_rank, device)
 

@@ -1,5 +1,7 @@
 """The assertions before launching (§4.13.2) on tiny real modules and synthetic clips."""
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -81,6 +83,16 @@ def test_checksums_catch_a_file_that_changed(tmp_path: Path) -> None:
     assert p5_checksums({"w": weights}, {"w": "0" * 64}, tmp_path / "other.json").status == (
         Status.FAIL
     )
+
+
+def test_the_checksum_record_is_published_whole(tmp_path: Path) -> None:
+    weights = tmp_path / "weights.pt"
+    weights.write_bytes(b"first")
+    record = tmp_path / "checksums.json"
+
+    assert p5_checksums({"w": weights}, {}, record).status == Status.PASS
+    assert json.loads(record.read_text()) == {"w": hashlib.sha256(b"first").hexdigest()}
+    assert [p.name for p in tmp_path.iterdir()] == ["weights.pt", "checksums.json"]
 
 
 def test_the_effective_batch_must_be_128(setup) -> None:  # type: ignore[no-untyped-def]

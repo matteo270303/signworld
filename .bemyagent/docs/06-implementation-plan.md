@@ -13,6 +13,7 @@
 | 1.3 | Lancio su Leonardo: debug del carico, catene con resume a scadenza (`slurm/batch/*.sh`, `slurm/README.md`) | in-progress — da provare sul cluster |
 | 1.4 | Riordino di `slurm/`: coppie `launch_X`/`_exe` + `batch/*.sh` (`work/1/1.4/`) | done — da provare sul cluster |
 | 1.5 | Statistiche di avvio più veloci: pose in parallelo, embedding a blocchi, caption e indice letti una volta (`work/1/1.5/`) | done — sul nodo GPU ~1 min (debug 63997298) |
+| 1.6 | Debug 63997298: diagnostiche rare in bf16, log P una volta con descrizione e secondi, tqdm su P13/rare/statistiche, warning (`work/1/1.6/`) | done — da misurare al prossimo debug |
 
 ## Backlog (non pianificato)
 

@@ -383,13 +383,15 @@ class Monitor:
         """Temporal order ω and the plausibility tests on validation clips; drift of the video
         encoder on the probe batch."""
         readings: dict[str, float] = {}
+        bf16 = self.config.training.precision == "bf16"
         iterator = iter(batches)
         first = next(iterator, None)
         with torch.no_grad(), evaluating(self.model):
             if first is not None:
                 clips = first.take(self.settings.order_clips).to(self.device)
-                forward = self.model.video.semantic(clips.frames).float().mean(1)
-                backward = self.model.video.semantic(clips.frames.flip(1)).float().mean(1)
+                with torch.autocast(self.device.type, dtype=torch.bfloat16, enabled=bf16):
+                    forward = self.model.video.semantic(clips.frames).float().mean(1)
+                    backward = self.model.video.semantic(clips.frames.flip(1)).float().mean(1)
                 readings["order_cosine"] = float(
                     functional.cosine_similarity(forward, backward).mean()
                 )
@@ -407,7 +409,13 @@ class Monitor:
             if extra > 0:
                 chosen[-1] = chosen[-1].take(len(chosen[-1].videos) - extra)
             tests = plausibility_tests(
-                self.model, chosen, self.device, self.settings.plausibility_masks, self.collective
+                self.model,
+                chosen,
+                self.device,
+                self.settings.plausibility_masks,
+                self.collective,
+                bf16=bf16,
+                desc=f"[rare] step {step}",
             )
             readings |= as_measures(tests)
         return self._record("rare", step, readings)

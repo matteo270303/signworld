@@ -29,6 +29,7 @@ import json
 import math
 import os
 import time
+import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
@@ -511,13 +512,17 @@ class Trainer:
         self.stage = stage
         self.wrapped = self.model
         if self.collective.active:
-            self.wrapped = DistributedDataParallel(
-                self.model,
-                device_ids=[self.device.index] if self.device.type == "cuda" else None,
-                broadcast_buffers=False,
-                gradient_as_bucket_view=True,
-                find_unused_parameters=self.config.training.find_unused_parameters,
-            )
+            # torch 2.14 deprecates broadcast_buffers for forward_sync_buffers, which would
+            # still copy the first GPU's buffers (batch-norm statistics) at every rebuild here
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", "`broadcast_buffers` is deprecated")
+                self.wrapped = DistributedDataParallel(
+                    self.model,
+                    device_ids=[self.device.index] if self.device.type == "cuda" else None,
+                    broadcast_buffers=False,
+                    gradient_as_bucket_view=True,
+                    find_unused_parameters=self.config.training.find_unused_parameters,
+                )
         self.report.say(f"[stage] {stage.name} from step {step}")
 
     def _step(self, batch: WorldSignBatch, state: TrainingState) -> None:

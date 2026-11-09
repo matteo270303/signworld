@@ -53,7 +53,7 @@ def fit_statistics(
     ``captions``: ``caption_statistics`` of ``train`` when already computed."""
     model.text.centering.fit(*(captions or caption_statistics(train, embeddings)))
     if model.pose is not None:
-        model.pose.fit(*keypoint_statistics(train, clips))
+        model.pose.fit(*keypoint_statistics(train, clips, desc="[statistics] poses"))
     return {
         "centering": model.text.centering.state_dict(),
         "keypoint_variance": None if model.pose is None else model.pose.keypoint_variance,
@@ -113,7 +113,8 @@ def prepare(config: WorldSignConfig, output: Path, collective: Distributed) -> P
     held_out = select_split(index, data.validation_split)
     held_out = held_out.filter(pc.is_in(held_out.column("caption_language"), known))
     validation = validation_subset(held_out, data.validation_clips)
-    logger.info("%d training clips, %d validation clips", train.num_rows, validation.num_rows)
+    if collective.is_main:
+        logger.info("%d training clips, %d validation clips", train.num_rows, validation.num_rows)
     threshold = config.physical.box_threshold
     train_data = ClipDataset(
         train,
@@ -192,7 +193,7 @@ def run(
     if collective.is_main:
         report.write(output / "preflight.json")
         (output / "config.json").write_text(config.model_dump_json(indent=2) + "\n")
-    enforce(report)
+    enforce(report, main=collective.is_main)
     return trainer.fit()
 
 

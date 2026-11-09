@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ import torch
 from signworld.data.loaders import Collate, caption_statistics
 from signworld.experiment.train.distributed import SINGLE
 from signworld.experiment.train.preflight import (
+    CHECKS,
     PreflightError,
     Status,
     enforce,
@@ -57,6 +59,20 @@ def test_every_assertion_runs_and_the_tiny_setup_passes_but_the_batch(setup) -> 
     assert set(failed) == {"P16"}, failed  # 4 clips, not the effective batch of 128
     with pytest.raises(PreflightError, match="P16"):
         enforce(report)
+
+
+@needs_hub
+def test_the_log_has_one_line_per_assertion_with_what_it_checks(setup, caplog) -> None:  # type: ignore[no-untyped-def]
+    with caplog.at_level(logging.INFO, logger="signworld.experiment.train.preflight"):
+        report = _report(setup, overfit_steps=0)
+
+    lines = [r.getMessage().removeprefix("rank 0: ") for r in caplog.records]
+    assert [line.split()[0] for line in lines] == [a.code for a in report.assertions]
+    for line, assertion in zip(lines, report.assertions, strict=True):
+        assert CHECKS[assertion.code] in line and f"{assertion.seconds:.1f} s" in line
+    failed = [r for r in caplog.records if "FAIL" in r.getMessage()]
+    assert [r.levelno for r in failed] == [logging.ERROR]  # P16, with the rank
+    assert failed[0].getMessage().startswith("rank 0: P16")
 
 
 @slow

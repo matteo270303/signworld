@@ -14,6 +14,7 @@ both releases were trained with.
 """
 
 import sys
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,14 @@ IMAGENET_MEAN: Final = (0.485, 0.456, 0.406)
 IMAGENET_STD: Final = (0.229, 0.224, 0.225)
 PATCH: Final = 16
 TUBELET: Final = 2
+
+# Deprecations inside Meta's hub code (``checkpoints/hub/``), not ours to change: one per GPU.
+warnings.filterwarnings(
+    "ignore", r"Importing from timm\.models\.layers is deprecated", FutureWarning
+)
+warnings.filterwarnings(
+    "ignore", r"`torch\.backends\.cuda\.sdp_kernel\(\)` is deprecated", FutureWarning
+)
 
 
 def model_input(frames: Tensor) -> Tensor:

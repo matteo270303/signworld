@@ -1,0 +1,5 @@
+analisi out/sw-debug-A-gate-63997298.log + runs/debug/A-gate/metrics.jsonl → timeline in 01; rare 14,3 min in fp32; 63997299 ProvenanceError (pyproject/uv.lock 17:21) → implementare
+edit monitor.py (autocast rare), plausibility.py (bf16, desc/tqdm), evaluation/worldsign.py (bf16), preflight.py (CHECKS, seconds, log rank 0 / FAIL con rank, tqdm P13, detach), run.py (log rank 0, enforce main), trainer.py (DDP warning), video_encoders.py (filtri Meta), loaders.py (tqdm pose) → ruff/mypy
+ruff → ok dopo noqa PLR0913; mypy → solo errori preesistenti (monitor.py:298, trainer.py:372/606) → pytest
+pytest train+worldsign+loaders → 110 passed; test log nuovo → fix prefisso "rank 0:"; P13 slow FAIL → verificare su HEAD
+worktree HEAD in scratchpad: P13 slow FAIL anche lì → preesistente, annotato in 05; worktree rimossa → 04_verify

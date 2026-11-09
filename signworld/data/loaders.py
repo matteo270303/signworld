@@ -29,6 +29,7 @@ import pyarrow.parquet as pq
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset, Sampler
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 from signworld.data.corpus.materialize import MaterializedRecord
 from signworld.data.pose.boxes import step_boxes
@@ -411,12 +412,13 @@ def caption_statistics(
 
 
 def keypoint_statistics(
-    table: pa.Table, clips: int, seed: int = 0, workers: int = 16
+    table: pa.Table, clips: int, seed: int = 0, workers: int = 16, desc: str | None = None
 ) -> tuple[Tensor, Tensor]:
     """Step positions and weights of ``clips`` training clips, for the scale of L_anchor.
 
     The files are read by ``workers`` threads (opening and inflating each ``.npz`` releases
     the GIL) in the order of the sample, so the result does not depend on ``workers``.
+    ``desc``: a progress bar over the files.
     """
     rng = np.random.default_rng(seed)
     chosen = rng.choice(table.num_rows, min(clips, table.num_rows), replace=False)
@@ -425,6 +427,7 @@ def keypoint_statistics(
         sequences = pool.map(
             lambda path: PoseSequence.from_track(PoseTrack.load(Path(path))), paths
         )
-        steps = [sequence.step_positions() for sequence in sequences if sequence is not None]
+        shown = tqdm(sequences, total=len(paths), desc=desc, disable=desc is None, mininterval=10.0)
+        steps = [sequence.step_positions() for sequence in shown if sequence is not None]
     positions, weights = zip(*steps, strict=True)
     return torch.from_numpy(np.stack(positions)), torch.from_numpy(np.stack(weights))

@@ -11,12 +11,13 @@ pose.
 
 import dataclasses
 import math
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sized
 from dataclasses import dataclass
 from typing import Any
 
 import torch
 from torch import Tensor
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 from signworld.experiment.train.distributed import SINGLE, Distributed
 from signworld.loss.worldsign import physical_energy_per_clip
@@ -138,16 +139,21 @@ class PlausibilityResult:
     passed: bool
 
 
-def plausibility_tests(
+def plausibility_tests(  # noqa: PLR0913 (the tests and how they run)
     model: WorldSign,
     batches: Iterable[WorldSignBatch],
     device: torch.device,
     masks: int = 8,
     collective: Distributed = SINGLE,
+    *,
+    bf16: bool = False,
+    desc: str | None = None,
 ) -> list[PlausibilityResult]:
     """Every manipulation of §4.12.4 against the intact clips, with the same masks.
 
     Each GPU measures its own clips; the energies of every GPU are gathered before the means.
+    ``bf16``: the forwards under the training's autocast (in float32 they take ~10x longer).
+    ``desc``: a progress bar on the first GPU, one tick per batch and variant.
     """
     was_training = model.training
     model.eval()
@@ -158,11 +164,23 @@ def plausibility_tests(
     }
     intact_parts: list[Tensor] = []
     manipulated: dict[str, list[Tensor]] = {name: [] for name in chosen}
-    for batch in batches:
-        clips = batch.to(device).augmented()
-        intact_parts.append(plausibility(model, clips, masks))
-        for name, (manipulate, _) in chosen.items():
-            manipulated[name].append(plausibility(model, manipulate(clips), masks))
+    shown = tqdm(
+        total=len(batches) * (len(chosen) + 1) if isinstance(batches, Sized) else None,
+        desc=desc,
+        disable=desc is None or not collective.is_main,
+        dynamic_ncols=True,
+        mininterval=10.0,
+        leave=False,
+    )
+    with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
+        for batch in batches:
+            clips = batch.to(device).augmented()
+            intact_parts.append(plausibility(model, clips, masks))
+            shown.update()
+            for name, (manipulate, _) in chosen.items():
+                manipulated[name].append(plausibility(model, manipulate(clips), masks))
+                shown.update()
+    shown.close()
     model.train(was_training)
     local = {"intact": torch.cat(intact_parts, dim=1)} | {
         name: torch.cat(parts, dim=1) for name, parts in manipulated.items()

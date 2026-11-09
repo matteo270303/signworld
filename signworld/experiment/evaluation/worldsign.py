@@ -177,7 +177,13 @@ def evaluate(  # noqa: PLR0913 (the model, the clips, their labels and the optio
         if ridge_baseline is None:
             raise ValueError("the gate needs the ridge baseline of PC2 in both directions")
         decision = GatePolicy().final(scores.r1.scaled(100), ridge_baseline.scaled(100)).value
-    tests = plausibility_tests(model, batches, device, masks) if physical else []
+    tests = (
+        plausibility_tests(
+            model, batches, device, masks, bf16=device.type == "cuda", desc="[plausibility]"
+        )
+        if physical
+        else []
+    )
     features = _features(model, batches, device)
     probes = {
         name: language_probe(values, sign_languages, videos) for name, values in features.items()

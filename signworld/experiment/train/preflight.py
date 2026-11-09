@@ -11,11 +11,13 @@ long ones (30/9). The project document's "≈ 90 %" is V-JEPA's paper figure, wh
 does not produce. P17 checks that the levels are trained apart (gerarchia §3).
 """
 
+import dataclasses
 import hashlib
 import json
 import logging
 import os
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -26,6 +28,7 @@ import numpy as np
 import pyarrow as pa
 import torch
 from torch import Tensor
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 from signworld.data.augmentation import ClipAugmenter
 from signworld.data.corpus.manifest import read_manifest
@@ -60,11 +63,34 @@ class Status(StrEnum):
     SKIP = "skip"
 
 
+CHECKS: Final = {
+    "P1": "training and held-out splits share no channel",
+    "P2": "no training clip is a benchmark's validation or test clip",
+    "P3": "trainable parameters all in the budget, under the ceiling",
+    "P4": "only the curriculum's families can train",
+    "P5": "encoder, embeddings, index and statistics unchanged since the first launch",
+    "P6": "masked tokens out of the encoder input, context and target disjoint",
+    "P7": "mask coverage as V-JEPA's own generator",
+    "P8": "the augmentation never mirrors a clip",
+    "P9": "pose tokens: 32 steps x 69 joints x (x, y, presence)",
+    "P10": "pose in shoulder units",
+    "P11": "caption embeddings centred in every language",
+    "P12": "the augmentation moves a keypoint with its pixel",
+    "P13": "one batch overfits (predictive loss halves)",
+    "P14": "the pose never reaches the physical predictor",
+    "P15": "arm C: same-video clips and false negatives out of the InfoNCE denominators",
+    "P16": "SIGReg sees the whole effective batch",
+    "P17": "the levels are trained apart",
+}
+"""What each assertion checks, for the log."""
+
+
 @dataclass(frozen=True, slots=True)
 class Assertion:
     code: str
     status: Status
     detail: str
+    seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,12 +347,14 @@ def p13_overfit(
     learning_rate: float = 1e-3,
     *,
     bf16: bool = False,
+    progress: bool = False,
 ) -> Assertion:
     """One batch, the regularisers off (SIGReg, VICReg, L_unif): the predictive loss must fall;
     the model is restored afterwards.
 
     The forward runs under the training's autocast: in float32 the whole model on a GPU's
-    batch does not fit in memory.
+    batch does not fit in memory. ``progress``: a bar over the steps (the whole model with
+    the video LoRA trains here, minutes on a GPU's batch).
     """
     if steps == 0:
         return Assertion("P13", Status.SKIP, "done when the run began")
@@ -335,8 +363,16 @@ def p13_overfit(
     optimizer = torch.optim.AdamW(trainable, lr=learning_rate, weight_decay=0.0)
     losses = []
     device = batch.frames.device
+    shown = tqdm(
+        range(steps),
+        desc="[preflight] P13 overfit",
+        disable=not progress,
+        dynamic_ncols=True,
+        mininterval=10.0,
+        leave=False,
+    )
     try:
-        for step in range(steps):
+        for step in shown:
             with torch.autocast(device.type, dtype=torch.bfloat16, enabled=bf16):
                 terms = model.loss(batch, step, steps, StepRandomness.at(0, 0)).parts
             predictive = [v for k, v in terms.items() if not k.startswith(REGULARIZERS)]
@@ -344,7 +380,8 @@ def p13_overfit(
             optimizer.zero_grad(set_to_none=True)
             total.backward()  # type: ignore[no-untyped-call]
             optimizer.step()
-            losses.append(float(total))
+            losses.append(float(total.detach()))
+            shown.set_postfix_str(f"loss {losses[-1]:.4f}", refresh=False)
     finally:
         with torch.no_grad():
             for parameter, value in zip(trainable, saved, strict=True):
@@ -494,7 +531,13 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
             if config.augmentation.enabled
             else Assertion("P12", Status.SKIP, "augmentation off: frames and keypoints untouched")
         ),
-        lambda: p13_overfit(model, batch, overfit_steps, bf16=config.training.precision == "bf16"),
+        lambda: p13_overfit(
+            model,
+            batch,
+            overfit_steps,
+            bf16=config.training.precision == "bf16",
+            progress=collective.is_main,
+        ),
         lambda: p14_pose_isolated(model, batch, generator),
         lambda: p15_infonce(model),
         lambda: p16_batch(config, collective, len(batch.videos)),
@@ -502,10 +545,18 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
     ]
     assertions = []
     for check in checks:
+        began = time.perf_counter()
         result = check()
+        result = dataclasses.replace(result, seconds=round(time.perf_counter() - began, 1))
         assertions.append(result)
-        log = logger.error if result.status == Status.FAIL else logger.info
-        log("%s %s: %s", result.code, result.status.value, result.detail)
+        line = (
+            f"{result.code:<3} {result.status.value.upper():<4} {result.seconds:6.1f} s  "
+            f"{CHECKS.get(result.code, '')}: {result.detail}"
+        )
+        if result.status == Status.FAIL:  # every GPU: its own batch may be the one that fails
+            logger.error("rank %d: %s", collective.rank, line)
+        elif collective.is_main:  # the same on every GPU but P13, read on the first
+            logger.info("%s", line)
     return PreflightReport(assertions)
 
 
@@ -518,9 +569,14 @@ class PreflightError(RuntimeError):
         self.report = report
 
 
-def enforce(report: PreflightReport) -> None:
+def enforce(report: PreflightReport, *, main: bool = True) -> None:
+    """Raise on a failure; otherwise recall the skipped assertions (``main``: the first GPU)."""
     if not report.passed:
         raise PreflightError(report)
-    for assertion in report.assertions:
-        if assertion.status == Status.SKIP:
-            logger.warning("%s skipped: %s", assertion.code, assertion.detail)
+    skipped = [a for a in report.assertions if a.status == Status.SKIP]
+    if main and skipped:
+        logger.warning(
+            "preflight passed in %.0f s, not checked: %s",
+            sum(a.seconds for a in report.assertions),
+            "; ".join(f"{a.code} ({a.detail})" for a in skipped),
+        )

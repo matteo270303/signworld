@@ -1,0 +1,6 @@
+metrics.jsonl run b40 → P 3,34 s/passo wall, ETA 1,26 M s; 945.688 clip / 40 = 23.642 passi → 21,9 h/epoca → scrivere il profiler
+train profile --no-gpu (CPU) → clip 19,5 ms (decode 13,6), loader 16 worker 1.128 clip/s → i dati non sono il collo di bottiglia → profilo GPU b4
+train profile --clips 4 (GPU condivisa) → P 0,756 / F0 1,570 / F 2,065 s; encoder_full 69 % in P; backward 54 % in F → confronto del checkpointing
+F b2: con ckpt 1,20 s 4,7 GiB / senza ckpt 0,97 s 24,6 GiB → -19 % ma ~10 GiB/clip → provare torch.compile
+compile encoder fwd no-grad b2: 214 → 186 ms (1,15×), limite di ricompilazione raggiunto per sdp_kernel di Meta → lint
+ruff 6 errori → corretti; mypy 15 (lambda) → riscritto con context manager → 0; test 1 passed; rerun end-to-end ok → docs

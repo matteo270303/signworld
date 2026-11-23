@@ -331,6 +331,88 @@ def benchmark(
         typer.echo(f"{output}: {result.as_dict()}")
 
 
+@train_app.command("profile")
+@reports_user_errors
+def profile(  # noqa: PLR0913, PLR0917 (typer options)
+    config: ConfigFiles,
+    output: Annotated[Path, typer.Option(file_okay=False, help="Scratch run directory.")],
+    stages: Annotated[str, typer.Option(help="Stages to time, comma-separated.")] = "P,F0,F",
+    clips: Annotated[int | None, typer.Option(help="Clips per batch (default: the run's).")] = None,
+    steps: Annotated[int, typer.Option(min=1)] = 5,
+    warmup: Annotated[int, typer.Option(min=0)] = 2,
+    data_clips: Annotated[int, typer.Option(help="Clips read one by one; 0 skips.")] = 64,
+    loader_batches: Annotated[int, typer.Option(help="Batches of the loader; 0 skips.")] = 20,
+    gpu: Annotated[bool, typer.Option(help="Time the stages and the attention.")] = True,
+) -> None:
+    """Where the time of a step goes (start - end of every section, synchronised): data
+    phases, the loader, every pass of every stage, backward, AdamW, attention backends."""
+    import json
+
+    import torch
+
+    from signworld.experiment.collaudo.profiling import (
+        loader_rate,
+        profile_attention,
+        profile_clip_reads,
+        profile_stage,
+    )
+    from signworld.experiment.train.config import WorldSignConfig, load_config, merge
+    from signworld.experiment.train.distributed import Distributed
+    from signworld.experiment.train.run import prepare
+
+    settings = load_config(*config)
+    if clips is not None:
+        settings = WorldSignConfig.model_validate(
+            merge(
+                settings.model_dump(mode="json"),
+                {"training": {"batch_size": clips, "effective_batch": clips}},
+            )
+        )
+    collective = Distributed.from_environment()
+    report: dict[str, object] = {"batch_size": settings.training.batch_size}
+    try:
+        prepared = prepare(settings, output, collective)
+        trainer = prepared.trainer
+        steps_per_epoch = trainer.steps_per_epoch
+        report["steps_per_epoch"] = steps_per_epoch
+        report["train_clips"] = prepared.train.num_rows
+        if data_clips:
+            report["clip_read_seconds"] = profile_clip_reads(prepared.train_data, data_clips)
+            typer.echo(f"[profile] one clip: {report['clip_read_seconds']}")
+        if loader_batches:
+            report["loader"] = loader_rate(trainer, loader_batches)
+            typer.echo(f"[profile] loader: {report['loader']}")
+        if gpu:
+            source = iter(trainer.loader)
+            batch = next(source)
+            del source
+            for stage in [name.strip() for name in stages.split(",") if name.strip()]:
+                result = profile_stage(trainer, batch, stage, steps, warmup)
+                step = result["seconds"]["step"]
+                result["hours_per_epoch_at_this_pace"] = step * steps_per_epoch / 3600
+                report[f"stage_{stage}"] = result
+                memory = result["peak_memory_gib"]
+                typer.echo(f"\n[profile] stage {stage}: {step:.3f} s/step, {memory:.1f} GiB peak")
+                for path, seconds in sorted(result["seconds"].items()):
+                    depth = path.count("/")
+                    calls = result["calls_per_step"][path]
+                    share = 100 * seconds / step
+                    name = path.rsplit("/", 1)[-1]
+                    typer.echo(
+                        f"  {'  ' * depth}{name:<16} {seconds:8.3f} s  {share:5.1f}%  x{calls:g}"
+                    )
+                torch.cuda.empty_cache()
+            if trainer.device.type == "cuda":
+                report["attention"] = profile_attention(trainer.device, trainer.per_gpu)
+                typer.echo(f"\n[profile] attention 8192 tokens: {report['attention']}")
+    finally:
+        collective.shutdown()
+    if collective.is_main:
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "profile.json").write_text(json.dumps(report, indent=2) + "\n")
+        typer.echo(f"{output / 'profile.json'}")
+
+
 @train_app.command("toyworld")
 @reports_user_errors
 def toyworld(

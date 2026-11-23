@@ -34,6 +34,7 @@ N/A — solo CLI. Ingresso: `signworld.cli:app` (`signworld/cli/__init__.py`), s
 | `slurm/batch/{debug,wave1,wave2,pilot}.sh`, `slurm/tools/setup.sh` | sottomettono N run con `sbatch` sulle coppie (catene `afterok`, debug a 2 segmenti); setup del login node; esperimenti in `slurm/experiments.sh` | job in coda, `runs/debug/<esp>-<RUN_STAMP>/` |
 | `slurm/launch_experiment`, `launch_experiment_exe` | un nodo da 4 GPU per esperimento; `SIGNWORLD_STOP_AT` = fine del job − margine | segmento del run, `gpu.csv`, `FAILED` se esce ≠ 0 |
 | `slurm/tools/make_debug_index.py`, `slurm/tools/run_report.py` | indice ridotto (2.048 clip di train) per `parameters/model/debug_cluster.yaml`; lettura di debug e stato | `index.debug.parquet`; verdetto OOM per esperimento |
+| `signworld/experiment/collaudo/profiling.py` (`signworld train profile`) | config del run; `--clips`, `--stages P,F0,F` | secondi per passo di ogni sezione (start-end con sync), fasi della clip, clip/s del loader, backend SDPA → `<output>/profile.json` |
 | `Trainer._stop_time_reached` (`trainer.py`) | `SIGNWORLD_STOP_AT` letto ai passi di log | salva `latest`, `fit()` ritorna non finito |
 
 ## Schemi dei dati

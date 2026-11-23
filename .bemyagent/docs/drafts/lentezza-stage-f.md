@@ -1,4 +1,70 @@
-# Perché lo stage F è lento (diagnosi ipotetica, da verificare)
+# Perché lo stage F è lento, e quanto costa un'epoca
+
+## Misure del 23/11/2026 (task 1.8, `signworld train profile`)
+
+Run `runs/youtube_sl25-A-1gpu-b40`: 945.688 clip di train, batch 40, 23.642 passi per epoca.
+Nello stage P misura **3,34 s/passo di wall-clock, cioè 21,9 h/epoca**. È l'epoca più leggera.
+
+**Dati: non sono il collo di bottiglia.** Una clip letta da sola costa 19,5 ms, di cui 13,6 ms (70 %)
+per decodificare i 64 frame con decord. Il loader del run (16 worker) dà ~1.130 clip/s, contro le
+~12 clip/s che la GPU consuma: un margine di circa 100×.
+
+**GPU, per sezione** (start-end con `cuda.synchronize`; batch 4, GPU 0 condivisa col run al 100 %:
+contano i rapporti, non i tempi assoluti):
+
+| sezione | P | F0 | F |
+|---|---|---|---|
+| passo (s, b4) | 0,756 | 1,570 (2,1×) | 2,065 (2,7×) |
+| encoder intero senza grad (semantico) | **69 %** | 32 % | 23 % |
+| encoder mascherato ×2 (fisico, forward) | — | 13 % | 9 % |
+| predittore fisico ×2 (forward) | — | 11 % | 7 % |
+| backward (in F con il ricalcolo del checkpointing) | 10 % | 35 % | **54 %** |
+| posa, query, testo, augment, AdamW, copia su GPU | ~20 % | ~6 % | ~6 % |
+
+Su phoenix14t, a GPU libera, F/P valeva 3,7× (sotto). Quindi **un'epoca di F su YouTube-SL-25 a
+batch 40 dura circa 60-80 h, non 24**. Il piano a 15 epoche (2 P + 1 F0 + 12 F) fa ~34-44 giorni su
+una GPU. Da confermare a GPU libera:
+
+```bash
+uv run --no-sync signworld train profile -c parameters/model/worldsign.yaml \
+  -c parameters/model/youtube_sl25.yaml -c parameters/ablation/arm_A.yaml \
+  -c parameters/model/youtube_sl25_run.yaml -c parameters/model/local_single_gpu_max.yaml \
+  --output tmp/profile-b40      # copiarci prima runs/youtube_sl25-A-1gpu-b40/statistics.pt
+```
+
+**Esperimenti sulle leve** (stessa GPU condivisa, batch 2):
+
+- Activation checkpointing in F: con 1,20 s/passo e 4,7 GiB, senza 0,97 s e 24,6 GiB.
+  Toglierlo vale -19 %, ma costa ~10 GiB per clip invece di ~2: a 96 GB starebbero ~8 clip.
+- `torch.compile` sul forward dell'encoder senza grad: 214 → 186 ms (1,15×). Il guadagno è limitato
+  dal context `torch.backends.cuda.sdp_kernel()` in ogni blocco Meta, che esaurisce il limite di
+  ricompilazione.
+- SDPA a 8.192 token: flash fa 3,8 ms in forward e 12,8 ms in fwd+bwd; cuDNN 3,8 e 16,2;
+  efficient 7,9 e 35. Flash è già il più veloce: l'ipotesi 2 (backend sbagliato) cade, almeno
+  per l'encoder.
+
+### Leve, in ordine di guadagno
+
+1. **Quante epoche di F.** Ogni epoca di F tolta risparmia 60-80 h. `epochs: 15` è
+   `[Aperto: PC7]`, da fissare sul costo per passo, e c'è già `patience: 3`. È la leva più grande,
+   ed è una scelta di progetto.
+2. **La passata semantica sulla clip intera** (8.192 token, attention quadratica): vale il 69 % di
+   P e il ~23 % di F. Meno frame o meno risoluzione solo per questa passata (4.096 token → ~2,3×)
+   cambia il metodo (§3.6): decisione dell'utente.
+3. **Checkpointing selettivo** (solo su una parte dei blocchi): fra 0 e -19 % in F, pagato in
+   memoria. Da misurare con `profile` alla stessa dimensione di batch.
+4. **`torch.compile` dell'encoder**, dopo aver tolto il context `sdp_kernel` per blocco (come fa
+   `drop_cudnn_attention`): ≥ 1,15× sulle passate dell'encoder, cioè circa -10 % del passo. Va
+   verificato con P13 e con le tolleranze numeriche.
+5. **Non conviene**: dataloader (margine 100×, i worker si possono anzi ridurre), backend SDPA,
+   AdamW, augment e copia su GPU (< 3 %), diagnostiche (stima ~2-3 % dell'epoca: validazione ogni
+   4.000 passi, rare ogni 16.000).
+
+Le leve 3 e 4 insieme, che non cambiano il metodo, valgono circa -20 % in F (stima), cioè ~48-64 h/epoca.
+
+---
+
+## Diagnosi di ottobre (ipotesi; la 2 è smentita per l'encoder, la 5 è confermata)
 
 Run `runs/phoenix14t-A` (1 GPU, batch 32, fermata allo step 1.320). Dati da `metrics.jsonl`:
 

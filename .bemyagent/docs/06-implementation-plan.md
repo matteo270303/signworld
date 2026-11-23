@@ -17,6 +17,7 @@
 | 1.7 | Cartelle dei run con la data del lancio (`RUN_STAMP` in `slurm/experiments.sh`), niente più riuso fra lanci con lo stesso nome (`work/1/1.7/`) | done — da provare sul cluster |
 | 1.8 | Profilo del passo per stage e sezione (`signworld train profile`): dove va il tempo di un'epoca (`work/1/1.8/`, draft `lentezza-stage-f.md`) | done — rimisurato a batch 40 in 1.9 |
 | 1.9 | `torch.compile` sui blocchi dell'encoder e del predittore fisico (`encoder.compile_blocks`), -22/-30/-33 % in P/F0/F (`work/1/1.9/`) | done — da provare sul cluster (H100, DDP) |
+| 1.10 | Lingua persa nel centring (`caption_statistics` dedup per riga): KeyError `en-xgJ5vofi3O8` nella run locale youtube_sl25-A-1gpu-b40 (`work/1/1.10/`) | done — da provare alla prossima run (cancellare `statistics.pt` vecchi) |
 
 ## Backlog (non pianificato)
 

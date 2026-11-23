@@ -28,7 +28,7 @@ from torch.nn import functional
 
 from signworld.models.worldsign.text_branch import LanguageCentering
 
-from .loaders import caption_statistics
+from .loaders import distinct_captions
 
 THRESHOLDS: Final = "thresholds.npy"
 META: Final = "meta.json"
@@ -70,7 +70,7 @@ def compute_thresholds(  # noqa: PLR0913 (the inputs and the knobs of the quanti
 
     ``train``: the training clips of the index (``caption_row``, ``caption_language``).
     """
-    captions, languages = caption_statistics(train, embeddings)
+    captions, languages = distinct_captions(train, embeddings)
     rows = np.asarray(sorted(set(train.column("caption_row").to_pylist())))
     centering = LanguageCentering(captions.shape[1])
     centering.fit(captions, languages)

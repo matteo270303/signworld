@@ -395,20 +395,43 @@ def caption_statistics(
 ) -> tuple[Tensor, list[str]]:
     """Every distinct caption of the training clips with its language, for the centring.
 
-    As PC1 measured it: one row per distinct caption, not per clip. The store is read in
-    contiguous blocks of ``block`` rows: gathering ~900k scattered rows from the memory map
-    faults pages in one by one, which on Lustre takes minutes.
+    As PC1 measured it: one row per distinct caption, not per clip, but per language: a
+    caption shared by clips of two languages (the same text, one row of the store) counts once
+    in each mean. Kept to one language per row, a language whose captions are all shared would
+    get no mean and its clips would fail in ``Collate`` (task 1.10, ``en-xgJ5vofi3O8``).
+    """
+    rows = table.select(["caption_row", "caption_language"]).to_pylist()
+    pairs = sorted({(row["caption_row"], row["caption_language"]) for row in rows})
+    ordered = np.asarray([row for row, _ in pairs], dtype=np.int64)
+    return _stored_rows(embeddings, ordered, block), [language for _, language in pairs]
+
+
+def distinct_captions(
+    table: pa.Table, embeddings: np.ndarray, block: int = 65_536
+) -> tuple[Tensor, list[str]]:
+    """One row per distinct caption of ``table`` with one of its languages, in row order.
+
+    Aligned with ``sorted(set(caption_row))``, as the GloFND thresholds read them; a row shared
+    by several languages keeps the last one of the table. Not for the centring: a language may
+    be left without rows (``caption_statistics``).
     """
     rows = table.select(["caption_row", "caption_language"]).to_pylist()
     language_of = {row["caption_row"]: row["caption_language"] for row in rows}
     ordered = np.asarray(sorted(language_of), dtype=np.int64)
+    return _stored_rows(embeddings, ordered, block), [language_of[row] for row in ordered.tolist()]
+
+
+def _stored_rows(embeddings: np.ndarray, ordered: np.ndarray, block: int) -> Tensor:
+    """``embeddings[ordered]`` for sorted ``ordered`` (repeats allowed), read in contiguous
+    blocks of ``block`` rows: gathering ~900k scattered rows from the memory map faults pages
+    in one by one, which on Lustre takes minutes."""
     captions = np.empty((len(ordered), embeddings.shape[1]), dtype=np.float32)
     bounds = np.searchsorted(ordered, np.arange(0, len(embeddings) + block, block))
     for start, (first, last) in enumerate(itertools.pairwise(bounds)):
         if first < last:
             stored = np.asarray(embeddings[start * block : (start + 1) * block])
             captions[first:last] = stored[ordered[first:last] - start * block]
-    return torch.from_numpy(captions), [language_of[row] for row in ordered.tolist()]
+    return torch.from_numpy(captions)
 
 
 def keypoint_statistics(

@@ -1,0 +1,5 @@
+diagnosi: out/train_1gpu_b40.log → KeyError en-xgJ5vofi3O8 in Collate; index vero: 143 lingue nel training, 142 in statistics.pt, 3.607 caption_row con più lingue, en-xgJ5vofi3O8 è l'unica persa → piano 01/02
+edit loaders.py (caption_statistics per coppia, distinct_captions, _stored_rows), negatives.py (distinct_captions), run.py (controllo dopo load_statistics), test_loaders.py → ruff format/check ok → pytest
+pytest loaders/negatives/preflight/text_branch → 21 pass, 1 fail + 1 error estranei (checksum: ordine di iterdir, fallisce anche su 2a5e9a5; effective_batch: manca checkpoints/hub nel worktree, passa sul checkout) → verifica sui dati veri
+dati veri: vecchia caption_statistics == distinct_captions (sha 698516d8…/3fb1b3ba…, 883.929 righe); nuova 888.556 righe, 143 lingue → controllo su statistics.pt vecchio
+statistics.pt della run morta: manca en-xgJ5vofi3O8 → il controllo scatta; rifit: nessuna mancante; medie delle altre lingue: mediana 0, max 0,81 → 04_verify

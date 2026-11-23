@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
 import pytest
 import torch
 
@@ -17,6 +18,7 @@ from signworld.data.loaders import (
     EpochSampler,
     build_training_index,
     caption_statistics,
+    distinct_captions,
     keypoint_statistics,
     read_index,
     validation_subset,
@@ -133,8 +135,16 @@ def test_statistics_come_from_distinct_captions_and_sampled_poses(corpus) -> Non
 
     captions, languages = caption_statistics(table, corpus.embeddings)
     positions, weights = keypoint_statistics(table, clips=5)
+    pairs = set(
+        zip(
+            table.column("caption_row").to_pylist(),
+            table.column("caption_language").to_pylist(),
+            strict=True,
+        )
+    )
 
-    assert captions.shape == (6, 768) and len(languages) == 6
+    assert captions.shape == (len(pairs), 768) and len(languages) == len(pairs)
+    assert set(languages) == set(table.column("caption_language").to_pylist())
     assert positions.shape == (5, 32, 69, 2) and weights.shape == (5, 32, 69)
 
 
@@ -142,12 +152,42 @@ def test_statistics_do_not_depend_on_the_blocks_or_the_threads(corpus) -> None: 
     table = _index(corpus)
     rows = sorted(set(table.column("caption_row").to_pylist()))
 
+    pairs = sorted(
+        set(
+            zip(
+                table.column("caption_row").to_pylist(),
+                table.column("caption_language").to_pylist(),
+                strict=True,
+            )
+        )
+    )
+
     captions, _ = caption_statistics(table, corpus.embeddings, block=2)
+    distinct, _ = distinct_captions(table, corpus.embeddings, block=2)
     serial = keypoint_statistics(table, clips=5, workers=1)
     threaded = keypoint_statistics(table, clips=5, workers=4)
 
-    assert torch.equal(captions, torch.from_numpy(np.asarray(corpus.embeddings[rows])))
+    expected = np.asarray(corpus.embeddings[[row for row, _ in pairs]])
+    assert torch.equal(captions, torch.from_numpy(expected))
+    assert torch.equal(distinct, torch.from_numpy(np.asarray(corpus.embeddings[rows])))
     assert all(torch.equal(a, b) for a, b in zip(serial, threaded, strict=True))
+
+
+def test_a_language_whose_captions_are_all_shared_still_gets_a_mean() -> None:
+    # The run of 23/11/2026: the five clips of en-xgJ5vofi3O8 shared every caption row with
+    # clips of other languages, one language per row dropped it and Collate failed (task 1.10).
+    table = pa.table(
+        {"caption_row": [0, 0, 1, 2, 2], "caption_language": ["en", "en-x", "en", "es", "en-x"]}
+    )
+    embeddings = np.arange(4 * 3, dtype=np.float32).reshape(4, 3)
+
+    captions, languages = caption_statistics(table, embeddings, block=2)
+    distinct, one_each = distinct_captions(table, embeddings, block=2)
+
+    assert languages == ["en", "en-x", "en", "en-x", "es"]
+    assert torch.equal(captions, torch.from_numpy(embeddings[[0, 0, 1, 2, 2]]))
+    assert one_each == ["en-x", "en", "en-x"]  # one per row, the last of the table
+    assert torch.equal(distinct, torch.from_numpy(embeddings[[0, 1, 2]]))
 
 
 def test_the_validation_subset_is_fixed() -> None:

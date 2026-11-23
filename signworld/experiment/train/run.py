@@ -108,6 +108,12 @@ def prepare(config: WorldSignConfig, output: Path, collective: Distributed) -> P
         torch.save(fitted, statistics)
     collective.barrier()
     load_statistics(model, torch.load(statistics, map_location="cpu", weights_only=False))
+    missing = set(captions[1]) - set(model.text.centering.languages)
+    if missing:
+        raise ValueError(
+            f"{statistics}: no centring mean for the training languages {sorted(missing)}; "
+            "fitted before task 1.10 (one language per caption row): delete it and relaunch"
+        )
 
     known = pa.array(list(model.text.centering.languages))
     held_out = select_split(index, data.validation_split)

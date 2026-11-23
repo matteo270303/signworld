@@ -62,6 +62,18 @@ uv run --no-sync signworld train profile -c parameters/model/worldsign.yaml \
 
 Le leve 3 e 4 insieme, che non cambiano il metodo, valgono circa -20 % in F (stima), cioè ~48-64 h/epoca.
 
+### Batch 40, GPU libera (23/11/2026): la leva 4 è fatta (task 1.9)
+
+| stage | eager s/passo | compilato | h/epoca eager → compilato |
+|---|---|---|---|
+| P | 3,32 | 2,58 (-22 %) | 21,8 → 16,9 |
+| F0 | 8,90 | 6,26 (-30 %) | 58,4 → 41,1 |
+| F | 12,49 | 8,37 (-33 %) | 82,0 → 54,9 |
+
+In eager, F/P vale 3,8× a batch 40: confermata la stima alta, 82 h per epoca di F. Il piano a 15
+epoche passa da ~1.090 h (~45 giorni) a ~730 h (~31 giorni) su una GPU. La leva 3 (checkpointing
+selettivo) e le leve 1-2 restano aperte: l'utente le ha escluse perché toccano il modello.
+
 ---
 
 ## Diagnosi di ottobre (ipotesi; la 2 è smentita per l'encoder, la 5 è confermata)

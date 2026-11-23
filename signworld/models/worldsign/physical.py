@@ -31,6 +31,7 @@ from torch import Tensor, nn
 from signworld.experiment.train.config import LoRASettings
 
 from . import lora
+from .backbone import compile_blocks
 from .fusion import _Fusion
 from .masking import Mask, TokenGrid, TokenRoles
 from .readout import StepReadout, box_sum
@@ -75,6 +76,7 @@ class PhysicalPredictor(nn.Module):
         mask_index: int = 0,
         activation_checkpointing: bool = True,
         dropout: float = 0.0,
+        compiled: bool = False,
     ) -> None:
         super().__init__()
         # Meta's module is untyped; its embedding and projections are replaced here.
@@ -87,6 +89,8 @@ class PhysicalPredictor(nn.Module):
         blocks: nn.Module = released.predictor_blocks
         set_dropout(blocks, dropout)
         self.adapters = lora.inject(blocks, adapters.targets, adapters.rank, adapters.alpha)
+        if compiled:  # after the LoRA and the dropout rates, which the graphs read
+            compile_blocks(blocks)
         self.predictor: Any = released
         self.fusion = fusion
         self.readout = readout

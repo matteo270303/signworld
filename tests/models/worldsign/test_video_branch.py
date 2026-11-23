@@ -9,6 +9,7 @@ from torch import nn
 from signworld.experiment.train.budget import VideoBudget
 from signworld.experiment.train.config import FusionSettings, load_config
 from signworld.loss.worldsign import Objective, physical_energy
+from signworld.models.worldsign.backbone import compile_blocks
 from signworld.models.worldsign.masking import TokenGrid
 from signworld.models.worldsign.physical import set_rope_grid
 from signworld.models.worldsign.video_branch import assemble
@@ -19,6 +20,7 @@ from tests.worldsign import (
     full_size_stubs,
     meta_modules,
     needs_hub,
+    slow,
     tiny_config,
 )
 
@@ -125,3 +127,51 @@ def test_the_full_size_budget_matches_the_document() -> None:
     assert budget.physical_head == 4 * 384 * 192 + 192  # 0.30 M
     assert budget.encoder_norms == pytest.approx(0.10e6, rel=0.02)
     assert budget.semantic_predictor == pytest.approx(7.60e6, rel=0.01)
+
+
+@needs_hub
+def test_compiled_blocks_are_bound_to_their_block_and_follow_a_copy() -> None:
+    encoder, _ = meta_modules()
+    compile_blocks(encoder.blocks)
+    copied = copy.deepcopy(encoder)
+    for original, clone in zip(encoder.blocks, copied.blocks, strict=True):
+        assert original.forward.__self__ is original
+        assert clone.forward.__self__ is clone  # the copy runs its own weights
+
+
+def _step_gradients(compiled: bool) -> tuple[list[float], dict[str, torch.Tensor]]:
+    """Two steps of the physical and semantic passes (different masks): losses, gradients."""
+    encoder, predictor = meta_modules()
+    config = tiny_config()
+    settings = config.encoder.model_copy(update={"compile_blocks": compiled})
+    branch = assemble(encoder, predictor, config.model_copy(update={"encoder": settings}), GRID)
+    assert config.encoder.activation_checkpointing
+    assert config.physical.dropout > 0
+    frames, boxes, visible = _batch()
+    losses = []
+    for step in range(2):
+        torch.manual_seed(step)  # the predictor's dropout, replayed by the checkpointing
+        generator = torch.Generator().manual_seed(step)
+        physical = branch.physical(frames, boxes, visible, step, 100, generator)
+        total = branch.semantic(frames).square().mean()
+        for prediction in physical.predictions:
+            total = total + prediction.state.square().mean()
+        total.backward()
+        losses.append(float(total.detach()))
+    gradients = {n: p.grad.clone() for n, p in branch.named_parameters() if p.grad is not None}
+    return losses, gradients
+
+
+@slow
+@needs_hub
+def test_compiled_blocks_give_the_eager_losses_and_gradients() -> None:
+    eager_losses, eager = _step_gradients(compiled=False)
+    losses, compiled = _step_gradients(compiled=True)
+    assert losses == pytest.approx(eager_losses, rel=1e-5)
+    assert set(compiled) == set(eager)
+    largest = max(float(gradient.norm()) for gradient in eager.values())
+    for name, gradient in eager.items():
+        if gradient.norm() < 1e-3 * largest:  # zero but for rounding: biases before a BatchNorm
+            continue
+        error = (compiled[name] - gradient).norm() / gradient.norm()
+        assert error < 1e-3, name

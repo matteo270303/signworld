@@ -48,6 +48,9 @@ class EncoderSettings(FrozenModel):
     train_norms: bool = True
     """The encoder's LayerNorms train too: the 0.10 M «LayerNorm e bias» of §4.8."""
     activation_checkpointing: bool = True
+    compile_blocks: bool = False
+    """``torch.compile`` on every block of the encoder and of the physical predictor (task 1.8:
+    ~1.15x on the encoder); the first steps of each shape pay the compilation."""
 
 
 class MaskSpec(FrozenModel):

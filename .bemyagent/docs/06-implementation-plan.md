@@ -15,7 +15,8 @@
 | 1.5 | Statistiche di avvio più veloci: pose in parallelo, embedding a blocchi, caption e indice letti una volta (`work/1/1.5/`) | done — sul nodo GPU ~1 min (debug 63997298) |
 | 1.6 | Debug 63997298: diagnostiche rare in bf16, log P una volta con descrizione e secondi, tqdm su P13/rare/statistiche, warning (`work/1/1.6/`) | done — da misurare al prossimo debug |
 | 1.7 | Cartelle dei run con la data del lancio (`RUN_STAMP` in `slurm/experiments.sh`), niente più riuso fra lanci con lo stesso nome (`work/1/1.7/`) | done — da provare sul cluster |
-| 1.8 | Profilo del passo per stage e sezione (`signworld train profile`): dove va il tempo di un'epoca (`work/1/1.8/`, draft `lentezza-stage-f.md`) | done — da rimisurare a GPU libera, batch 40 |
+| 1.8 | Profilo del passo per stage e sezione (`signworld train profile`): dove va il tempo di un'epoca (`work/1/1.8/`, draft `lentezza-stage-f.md`) | done — rimisurato a batch 40 in 1.9 |
+| 1.9 | `torch.compile` sui blocchi dell'encoder e del predittore fisico (`encoder.compile_blocks`), -22/-30/-33 % in P/F0/F (`work/1/1.9/`) | done — da provare sul cluster (H100, DDP) |
 
 ## Backlog (non pianificato)
 

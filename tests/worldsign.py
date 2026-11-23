@@ -93,7 +93,8 @@ def meta_modules(frames: int = 4) -> tuple[Any, Any]:
 def tiny_config(*overlays: Path, **changes: Any) -> Any:
     """The project's YAML with the sizes of the tiny modules."""
     config = load_config(BASE, *overlays)
-    encoder = config.encoder.model_copy(update={"levels": (2, 5, 8, 11)})
+    # eager: compiling on CPU would cost every test seconds (test_video_branch compiles once)
+    encoder = config.encoder.model_copy(update={"levels": (2, 5, 8, 11), "compile_blocks": False})
     semantic = config.semantic.model_copy(
         update={"width": 24, "heads": 2, "dropout": 0.0, "drop_path": 0.0}
     )

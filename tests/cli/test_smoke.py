@@ -153,6 +153,7 @@ NEEDS_MODEL = {
     ("train", "evaluate"): "signworld.experiment.evaluation.worldsign",
     ("train", "overfit"): "signworld.experiment.collaudo.worldsign",
     ("train", "benchmark"): "signworld.experiment.collaudo.worldsign",
+    ("train", "profile"): "signworld.experiment.collaudo.profiling",
 }
 
 

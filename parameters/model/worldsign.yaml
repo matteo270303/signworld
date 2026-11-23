@@ -13,6 +13,7 @@ encoder: # §4.4.1: V-JEPA 2.1 ViT-L distilled, frozen + LoRA (PC3, 29/9)
   lora: { rank: 16, alpha: 16.0, targets: [qkv, proj, fc1, fc2] } # alpha [Aperto]
   train_norms: true # the 0.10 M «LayerNorm e bias» of §4.8
   activation_checkpointing: true
+  compile_blocks: true # torch.compile per block: -22% P, -30% F0, -33% F at batch 40 (task 1.9)
 
 masking: # §4.5.2: V-JEPA's masks unchanged, both kinds at every step
   specs:

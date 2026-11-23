@@ -8,14 +8,17 @@ where the semantic level reads it without gradient) gets no LoRA and keeps its n
 
 Meta's attention runs without cuDNN's kernel (``drop_cudnn_attention``): with torch 2.14 and
 cuDNN 9.24 on H100 its backward returns NaN on the encoder's visible tokens (P13).
+``compile_blocks`` compiles each block's ``forward`` (``EncoderSettings.compile_blocks``).
 """
 
+import types
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from typing import Any
 
 import torch
 from torch import Tensor, nn
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from signworld.experiment.train.config import EncoderSettings
 from signworld.models.encoders.video_encoders import model_input
@@ -41,15 +44,16 @@ class VideoBackbone(nn.Module):
         self.levels = levels
         self.adapted = adapted
         self.adapters: list[Any] = []
-        if not adapted:
-            return
-        self.adapters = lora.inject(
-            self._blocks(), settings.lora.targets, settings.lora.rank, settings.lora.alpha
-        )
-        if settings.train_norms:
-            for module in self._blocks().modules():
-                if isinstance(module, nn.LayerNorm):
-                    module.requires_grad_(True)
+        if adapted:
+            self.adapters = lora.inject(
+                self._blocks(), settings.lora.targets, settings.lora.rank, settings.lora.alpha
+            )
+            if settings.train_norms:
+                for module in self._blocks().modules():
+                    if isinstance(module, nn.LayerNorm):
+                        module.requires_grad_(True)
+        if settings.compile_blocks:  # after the LoRA, which replaces the blocks' layers
+            compile_blocks(self._blocks())
 
     def _blocks(self) -> nn.ModuleList:
         blocks: nn.ModuleList = self.encoder.blocks
@@ -94,11 +98,12 @@ def drop_cudnn_attention() -> None:
     which enables every backend, cuDNN included, so ``enable_cudnn_sdp(False)`` would not reach
     them. On H100 with torch 2.14 and cuDNN 9.24 torch picks cuDNN there, and its backward
     returns NaN on the encoder's visible tokens from the first step (P13, 7/10). The helper is
-    replaced by the same one with cuDNN off: flash attention serves instead. Our own predictors
-    do not call it and keep torch's choice. Idempotent.
+    replaced by ``torch.nn.attention.sdpa_kernel`` over the same backends without cuDNN: flash
+    attention serves instead. Unlike the deprecated helper, ``sdpa_kernel`` is traced by
+    ``torch.compile`` without a graph break (one graph per block instead of four). Our own
+    predictors do not call it and keep torch's choice. Idempotent.
     """
-    current = torch.backends.cuda.sdp_kernel
-    if getattr(current, "drops_cudnn", False):
+    if getattr(torch.backends.cuda.sdp_kernel, "drops_cudnn", False):
         return
 
     def sdp_kernel(
@@ -107,15 +112,91 @@ def drop_cudnn_attention() -> None:
         enable_mem_efficient: bool = True,
         enable_cudnn: bool = True,  # ignored: cuDNN stays off
     ) -> AbstractContextManager[Any]:
-        return current(
-            enable_flash=enable_flash,
-            enable_math=enable_math,
-            enable_mem_efficient=enable_mem_efficient,
-            enable_cudnn=False,
-        )
+        chosen = [
+            backend
+            for backend, enabled in (
+                (SDPBackend.FLASH_ATTENTION, enable_flash),
+                (SDPBackend.EFFICIENT_ATTENTION, enable_mem_efficient),
+                (SDPBackend.MATH, enable_math),
+            )
+            if enabled
+        ]
+        return sdpa_kernel(chosen)
 
     sdp_kernel.drops_cudnn = True  # type: ignore[attr-defined]
     torch.backends.cuda.sdp_kernel = sdp_kernel  # type: ignore[assignment]
+
+
+RECOMPILE_LIMIT = 64
+"""Graphs per compiled ``forward``: every shape (whole clip, each mask kind's visible tokens,
+the last validation batch), with and without gradient, encoder and predictor blocks."""
+
+
+def compile_blocks(blocks: nn.Module) -> None:
+    """``torch.compile`` on each block's ``forward``, not on ``__call__``.
+
+    The forward hooks of ``context_levels`` and the activation checkpointing of Meta's loop
+    stay outside the compiled code, unchanged. One compiled function per block class serves
+    every block of it (their weights are inputs of the graph, not constants). The compiled
+    function is bound to the block as a method, so a ``deepcopy`` rebinds it to the copy.
+
+    Three conditions keep the checkpointing's recomputation on the graph of the forward (else
+    ``CheckpointError``, pytorch#166926):
+
+    * the batch and the token count are dynamic from the first call (``_dynamic``): the
+      visible tokens of a mask change at every step, and a static graph that turns dynamic
+      leaves two graphs matching the same input;
+    * every call of this function compiles its own copy of the code (``_own_code``): dynamo
+      keeps graphs per code object, and the encoder's and the predictor's blocks are both
+      Meta's ``Block``;
+    * the recomputation runs in autograd's thread, whose intra-op thread count differs from
+      the main thread's: dynamo guards on it and would compile a new graph inside the
+      backward, so each call first sets the count of the thread that compiled.
+
+    Inductor draws its random numbers like eager (``fallback_random``): the recomputation must
+    replay the predictor's dropout masks of the forward exactly.
+    """
+    drop_cudnn_attention()
+    torch._dynamo.config.recompile_limit = max(
+        torch._dynamo.config.recompile_limit, RECOMPILE_LIMIT
+    )
+    torch._inductor.config.fallback_random = True
+    compiled: dict[type, Any] = {}
+    for block in blocks.children():
+        kind = type(block)
+        if kind not in compiled:
+            compiled[kind] = _dynamic(torch.compile(_own_code(kind.forward)))
+        block.forward = types.MethodType(compiled[kind], block)
+
+
+def _own_code(function: Any) -> types.FunctionType:
+    """``function`` with a code object of its own, hence a dynamo cache of its own."""
+    copy = types.FunctionType(
+        function.__code__.replace(),
+        function.__globals__,
+        function.__name__,
+        function.__defaults__,
+        function.__closure__,
+    )
+    copy.__kwdefaults__ = function.__kwdefaults__
+    return copy
+
+
+def _dynamic(compiled: Any) -> Any:
+    """``compiled`` with the batch and token dimensions of ``x`` and ``mask`` marked dynamic,
+    run with the intra-op thread count of the thread that builds it."""
+    threads = torch.get_num_threads()
+
+    def forward(self: nn.Module, x: Tensor, mask: Any = None, *args: Any, **kwargs: Any) -> Any:
+        if torch.get_num_threads() != threads:  # autograd's thread, in the recomputation
+            torch.set_num_threads(threads)
+        for tensor in (x, mask):
+            if isinstance(tensor, Tensor):
+                torch._dynamo.maybe_mark_dynamic(tensor, 0)
+                torch._dynamo.maybe_mark_dynamic(tensor, 1)
+        return compiled(self, x, mask, *args, **kwargs)
+
+    return forward
 
 
 def _capture(store: dict[int, Tensor], index: int):  # type: ignore[no-untyped-def]

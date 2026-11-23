@@ -1,0 +1,11 @@
+dynamo explain su un blocco: sdp_kernel attuale 4 grafi/3 break; sdpa_kernel 1/0 → riscrivere drop_cudnn_attention
+equivalenza F b2 (v1, compile del forward per classe) → fp32 loss identiche, errore mediano 1e-4 → profilo b4
+profilo b4 compilato: P -17 %, F0 -23 %, F CheckpointError (shape del predittore 384) → ipotesi: passaggio static→dynamic, cache condivisa
+test dyn.py, solo encoder, 5 lunghezze: nessun errore in nessuna variante → il problema è nel predittore
+v2: maybe_mark_dynamic + _own_code → F ancora CheckpointError; TORCH_LOGS=recompiles: "GLOBAL_STATE changed: num_threads" nel ricalcolo → thread di autograd
+v3: set_num_threads al valore del thread che compila → F ok: 1,033 → 0,794 s b4, 4 ricompilazioni nel warm-up
+GPU libera (run dell'utente fermo) → profilo b40: P 3,32→2,58, F0 8,90→6,26, F 12,49→8,37 s; memoria uguale
+equivalenza v3 sul modello vero: fp32 errore mediano 1e-4; bf16 alla stessa distanza da fp32 dell'eager
+test tiny: assert_close troppo stretto sui bias prima di BatchNorm (gradiente nullo) → criterio sulla norma per tensore → pass
+suite: smoke da aggiornare (train profile) → fatto; checksum FAIL anche sul codice originale (preesistente); collaudo/ mancante nel worktree
+train run e2e (compile, P13 10 passi, validazione ogni 60, rare ogni 120): P1-P17 PASS, P13 4,74→1,92, P 2,60 s/passo wall, checkpoint ok

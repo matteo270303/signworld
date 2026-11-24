@@ -9,7 +9,6 @@ ACCOUNT=${ACCOUNT:-IscrC_SPARTAN}
 QOS=${QOS:-boost_qos_lprod}
 TIME=${TIME:-4-00:00:00}
 SEGMENTS=${SEGMENTS:-6}
-mkdir -p out
 COMMON=(--account="$ACCOUNT" --parsable)
 [ -z "${MAIL:-}" ] || COMMON+=(--mail-type=END,FAIL --mail-user="$MAIL")
 NAMES=("${WAVE2[@]}")
@@ -20,12 +19,14 @@ for name in "${NAMES[@]}"; do experiment_files "$name" > /dev/null || exit 1; do
 # (STOP_MARGIN_MIN minuti prima del walltime il trainer salva e il job esce 0; vedi slurm/README.md).
 for name in "${NAMES[@]}"; do
   [ ! -f "$(run_dir train "$name")/FAILED" ] || { echo "$(run_dir train "$name")/FAILED: controlla il log, poi toglilo" >&2; exit 1; }
+  logs=$(run_dir train "$name")/logs
+  mkdir -p "$logs"  # slurm non crea la cartella di --output
   previous=""
   for ((k = 1; k <= SEGMENTS; k++)); do
     deps=()
     [ -z "$previous" ] || deps=(--dependency="afterok:$previous" --kill-on-invalid-dep=yes)
     job=$(STOP_MARGIN_MIN=${STOP_MARGIN_MIN:-45} sbatch "${COMMON[@]}" --qos="$QOS" --time="$TIME" \
-      --nodes=1 --job-name="sw-$name" --output="out/sw-train-$name-%j.log" "${deps[@]}" \
+      --nodes=1 --job-name="sw-$name" --output="$logs/train-%j.log" --open-mode=append "${deps[@]}" \
       slurm/launch_experiment train "$name")
     previous=$job
     echo "$name: segmento $k/$SEGMENTS, job $job, $(run_dir train "$name")"

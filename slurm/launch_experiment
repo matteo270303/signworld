@@ -8,16 +8,21 @@
 #SBATCH -A IscrC_SPARTAN
 
 # Esperimenti di experiments.sh: un nodo con 4 GPU per esperimento, un srun per nodo, in parallelo.
-# Account, QOS, durata, nodi e log li passano gli script in slurm/batch/ (debug.sh, wave1.sh, ...).
-# Dalla radice del repo (out/ deve esistere): sbatch slurm/launch_experiment debug|train <esp>...
+# Account, QOS, durata, nodi e log del job li passano gli script in slurm/batch/ (debug.sh, wave1.sh, ...).
+# Log: un file per job e run, <run>/logs/<mode>-<job>.log, con l'output del programma e i messaggi
+# di srun (es. "srun: error: ... exit code 1"), tutti in append.
+# Dalla radice del repo: sbatch slurm/launch_experiment debug|train <esp>...
 MODE=$1
 shift
 # Fissa RUN_STAMP per tutti gli srun, se lo sbatch non l'ha già passata (slurm/batch/*.sh).
 source slurm/experiments.sh
 pids=()
 for exp in "$@"; do
+  logs=$(run_dir "$MODE" "$exp")/logs
+  log=$logs/$MODE-${SLURM_JOB_ID:-local}.log
+  mkdir -p "$logs"
   srun --nodes=1 --ntasks=1 --exclusive --gres=gpu:4 --cpus-per-task=32 --mem=492000 \
-    --output="out/sw-$MODE-$exp${RUN_STAMP:+-$RUN_STAMP}-%j.log" ./slurm/launch_experiment_exe "$MODE" "$exp" &
+    --output="$log" --open-mode=append ./slurm/launch_experiment_exe "$MODE" "$exp" >> "$log" 2>&1 &
   pids+=($!)
 done
 status=0

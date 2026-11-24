@@ -107,7 +107,7 @@ A-gate. Sono 8 nodi, il massimo per job di `boost_qos_dbg`.
 | `OK` | si lancia |
 | `RISCHIO OOM` / `OOM` | non lanciarlo. Strade: backward per ramo (`docs/worldsign-gpu.md`, codice da scrivere) o 2 nodi (serve il lancio multi-nodo) |
 | `stage F non raggiunto` | `slurm/batch/debug.sh <esp>`: riprende da dove era rimasto |
-| `FAILED` | leggi `out/sw-debug-<esp>-<data>-*.log`, poi `rm runs/debug/<esp>-<data>/FAILED` |
+| `FAILED` | leggi `runs/debug/<esp>-<data>/logs/debug-*.log`, poi `rm runs/debug/<esp>-<data>/FAILED` |
 
 `boost_qos_dbg` ammette 2 job per utente fra running e pending: un nuovo `debug` va lanciato
 quando i due precedenti sono finiti.
@@ -121,7 +121,7 @@ senza data di prima: `RUN_STAMP= slurm/batch/...`.
 
 ```bash
 slurm/batch/wave1.sh A-gate                 # run di gate
-grep "\[stop\] F2" out/sw-train-A-gate-*.log           # F2 passato: fine dello stage F0
+grep "\[stop\] F2" runs/A-gate-<data>/logs/*.log          # F2 passato: fine dello stage F0
 slurm/batch/wave1.sh B0 B C V               # il resto della prima ondata
 # oppure tutta la prima ondata subito:  slurm/batch/wave1.sh
 THETA=B slurm/batch/wave2.sh esp2 esp6 g1 d4  # seconda ondata, θ* deciso
@@ -147,9 +147,14 @@ esperimento è una catena di `SEGMENTS` job (default 6, cioè 24 giorni), legati
 
 ## 4. Controllo
 
+**Log.** Ogni job scrive un solo file nella cartella del run: `runs/[debug/]<esp>-<data>/logs/<train|debug>-<job>.log`,
+con l'output del programma, i messaggi dello script e quelli di srun (es. `srun: error: … exit code 1`).
+I job di debug coprono più run: il log del job intero sta in `runs/debug/logs/debug-<job>.log`, quasi
+sempre vuoto. `out/` resta solo per gli altri `launch_*` (analysis, evaluate, fetch_media, train).
+
 ```bash
 squeue -u $USER; python slurm/tools/run_report.py status   # coda + ultimo passo di ogni run (stage, s/passo, GiB, ETA)
-tail -f out/sw-train-A-gate-<job>.log
+tail -f runs/A-gate-<data>/logs/train-<job>.log
 scancel --name=sw-C                     # tutti i job di C, catena compresa
 saldo
 ```

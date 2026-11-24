@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 source slurm/experiments.sh
 ACCOUNT=${ACCOUNT:-IscrC_BRIDGEV}
-mkdir -p out runs
+mkdir -p "$(run_dir train pilot)/logs"
 sbatch --account="$ACCOUNT" --qos=normal --time=01:45:00 --nodes=1 --job-name=sw-pilot \
-  --output=out/sw-pilot-%j.log slurm/launch_experiment train pilot
+  --output="$(run_dir train pilot)/logs/train-%j.log" --open-mode=append slurm/launch_experiment train pilot
 echo "pilota in $(run_dir train pilot)"

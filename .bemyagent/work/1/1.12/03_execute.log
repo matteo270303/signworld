@@ -1,0 +1,4 @@
+lettura launch_experiment(_exe), batch/*.sh, run_report.py, provenance SOURCE_PARTS (slurm/ escluso) → 4 punti con out/ → edit
+edit launch_experiment (mkdir <run>/logs, srun --output --open-mode=append, client >> stesso file), wave1/wave2/pilot (mkdir logs, sbatch --output <run>/logs/train-%j.log), debug.sh (runs/debug/logs), run_report.py (run/logs/*.log, salta runs/debug/logs) → bash -n ok, py_compile ok → simulazione
+simulazione in $CLAUDE_JOB_DIR/tmp/sim con sbatch/srun finti, RUN_STAMP=20261116-120000 → percorsi attesi, "srun: error" nel log del run → README slurm e radice, 03, 06 → 04_verify
+riporto su e78283e (24/11/2026) da backup/leonardo-1118 come 1.12: git apply -3 del solo codice → pulito (.gitignore: conflitto con .bemyagent/log/, tenute entrambe le righe) → verifica

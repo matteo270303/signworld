@@ -11,13 +11,13 @@ ACCOUNT=${ACCOUNT:-IscrC_SPARTAN}
 for name in "$@"; do experiment_files "$name" > /dev/null || exit 1; done
 [ -f data/training/youtube_sl25/index.debug.parquet ] \
   || { echo "manca l'indice di debug: lancia slurm/tools/setup.sh" >&2; exit 1; }
-mkdir -p out
+mkdir -p runs/debug/logs  # log del job (più run): runs/debug/logs; quelli dei run in <run>/logs
 COMMON=(--account="$ACCOUNT" --parsable)
 [ -z "${MAIL:-}" ] || COMMON+=(--mail-type=END,FAIL --mail-user="$MAIL")
 args=("${COMMON[@]}" --qos=boost_qos_dbg --time=00:30:00 --nodes="$#"
-  --job-name=sw-debug --output=out/sw-debug-%j.log)
+  --job-name=sw-debug --output=runs/debug/logs/debug-%j.log)
 first=$(STOP_MARGIN_MIN=6 sbatch "${args[@]}" slurm/launch_experiment debug "$@")
 second=$(STOP_MARGIN_MIN=6 sbatch "${args[@]}" --dependency="afterany:$first" \
   slurm/launch_experiment debug "$@")
-echo "debug di $*: job $first, poi $second (riprende); esiti in runs/debug/<esp>-$RUN_STAMP"
+echo "debug di $*: job $first, poi $second (riprende); esiti e log in runs/debug/<esp>-$RUN_STAMP/logs"
 echo "per riprendere: RUN_STAMP=$RUN_STAMP slurm/batch/debug.sh $*"

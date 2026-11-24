@@ -172,7 +172,8 @@ condor_submit -name ettore -a 'run=openasl-trial' \
 The `.sub` files still set an absolute `initialdir`: change it to your checkout.
 
 **Slurm.** The `#SBATCH` headers (account, partition, resources) are placeholders; the jobs
-read their caches from `$SCRATCH` and write logs to `out/`.
+read their caches from `$SCRATCH` and write logs to `out/`; the experiments of `slurm/batch/*.sh`
+write theirs in the run folder, `runs/<run>/logs/` (`slurm/README.md`).
 
 ```bash
 mkdir -p out

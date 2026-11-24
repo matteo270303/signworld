@@ -92,8 +92,8 @@ def real_plan() -> tuple[int, dict[str, int]]:
 def debug() -> None:
     per_epoch, epochs = real_plan()
     print(f"run vero: {per_epoch} passi per epoca, epoche per stage {epochs}\n")
-    for run in sorted(p for p in (RUNS / "debug").iterdir() if p.is_dir()):
-        logs = sorted(Path("out").glob(f"sw-debug-{run.name}-*.log"))
+    for run in sorted(p for p in (RUNS / "debug").iterdir() if p.is_dir() and p.name != "logs"):
+        logs = sorted((run / "logs").glob("*.log"))
         oom = any(OOM.search(log.read_text(errors="ignore")) for log in logs)
         by_stage: dict[str, list[dict]] = defaultdict(list)
         for record in records(run):

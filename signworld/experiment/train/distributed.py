@@ -18,7 +18,10 @@ Launch with ``torchrun --standalone --nproc_per_node=<gpus>``; one process runs 
 process group and every collective is the identity.
 """
 
+import logging
 import os
+import sys
+import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta
@@ -143,6 +146,22 @@ class Distributed:
     def shutdown(self) -> None:
         if self.active and dist.is_initialized():
             dist.destroy_process_group()
+
+    def exit_on_error(self) -> None:
+        """Inside ``except``: with other ranks, print the error and end this process at once.
+
+        The other ranks may be waiting in a collective this one will never join, and a graceful
+        ``destroy_process_group`` waits with them until the NCCL timeout (job 64584821: a
+        loader error on one rank, four GPUs idle for 60 min). torchrun sees this rank exit and
+        stops the others within seconds. Alone, it returns and the caller re-raises.
+        """
+        if not self.active:
+            return
+        traceback.print_exc()
+        logging.shutdown()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
 
 
 SINGLE = Distributed()

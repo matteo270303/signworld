@@ -38,8 +38,10 @@ def run(
         typer.echo(describe(settings, config))
     try:
         state = start(settings, output, collective, allow_code_change=allow_code_change)
-    finally:
-        collective.shutdown()
+    except BaseException:
+        collective.exit_on_error()
+        raise
+    collective.shutdown()
     if collective.is_main and not state.finished:
         typer.echo(f"{output}: paused at step {state.step} before the walltime; launch it again")
     elif collective.is_main:
@@ -324,8 +326,10 @@ def benchmark(
     try:
         prepared = prepare(load_config(*config), output, collective)
         result = measure_efficiency(prepared.trainer, steps, peak_flops=peak_tflops * 1e12)
-    finally:
-        collective.shutdown()
+    except BaseException:
+        collective.exit_on_error()
+        raise
+    collective.shutdown()
     if collective.is_main:
         (output / "efficiency.json").write_text(json.dumps(result.as_dict(), indent=2) + "\n")
         typer.echo(f"{output}: {result.as_dict()}")

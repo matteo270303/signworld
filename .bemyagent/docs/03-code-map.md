@@ -30,7 +30,7 @@ Ingresso: `signworld.cli:app` (`signworld/cli/__init__.py`), sotto-app in `signw
 | `scripts/check_datasets.py` | audit di download, manifest, embedding, clip/pose, indice (`--deep`: ffprobe + pose) | `reports/dataset_check/<source>/*.txt` |
 | `scripts/complete_ytsl25.sh` | `download` / `refresh` / `check` di YouTube-SL-25 (F1→F4→F3b→F5) | ledger, manifest, embedding, clip, indice |
 | `scripts/run_train_*.sh` | indice (se manca o senza split `test`) + train + evaluate + report | `runs/<source>-<arm>/` |
-| `slurm/launch_<X>` + `launch_<X>_exe` (`experiment`, `train`, `multigpu_train`, `evaluate`, `analysis`, `fetch_media`) | una coppia per tipo di job: header `#SBATCH` + `srun -u` / ambiente + comando; `fetch_media` su `lrd_all_serial` (rete), `analysis` offline | job `sw-*`, `runs/<esp>/`, `out/*.log` |
+| `slurm/launch_<X>` + `launch_<X>_exe` (`experiment`, `train`, `multigpu_train`, `evaluate`, `analysis`, `fetch_media`) | una coppia per tipo di job: header `#SBATCH` + `srun -u` / ambiente + comando; `fetch_media` su `lrd_all_serial` (rete), `analysis` offline | job `sw-*`, `runs/<esp>/` (log in `runs/<esp>/logs/`), `out/*.log` per gli altri launch |
 | `slurm/batch/{debug,wave1,wave2,pilot}.sh`, `slurm/tools/setup.sh` | sottomettono N run con `sbatch` sulle coppie (catene `afterok`, debug a 2 segmenti); setup del login node; esperimenti in `slurm/experiments.sh` | job in coda, `runs/debug/<esp>-<RUN_STAMP>/` |
 | `slurm/launch_experiment`, `launch_experiment_exe` | un nodo da 4 GPU per esperimento; `SIGNWORLD_STOP_AT` = fine del job − margine | segmento del run, `gpu.csv`, `FAILED` se esce ≠ 0 |
 | `slurm/tools/make_debug_index.py`, `slurm/tools/run_report.py` | indice ridotto (2.048 clip di train) per `parameters/model/debug_cluster.yaml`; lettura di debug e stato | `index.debug.parquet`; verdetto OOM per esperimento |
@@ -40,6 +40,7 @@ Ingresso: `signworld.cli:app` (`signworld/cli/__init__.py`), sotto-app in `signw
 | `meta_rope.fuse_rope` (`models/worldsign/meta_rope.py`) | i `RoPEAttention` di Meta, chiamato da `compile_blocks` | rotazione della testa intera, forward Meta per registri/cls/mappa d'attenzione |
 | `apply_views` (`data/augmentation.py`) | frame uint8 + viste (batch, 6) | augmentation del batch intero sulla GPU, senza sync per clip |
 | `scripts/perf/{bench_encoder,bench_augment,trace_step}.py` | modello e config del run | A/B alternati della passata dell'encoder, dell'augmentation; kernel CUDA di un passo |
+| `Distributed.exit_on_error` (`distributed.py`) | eccezione in `train run`/`benchmark` con più rank | traceback + `os._exit(1)`, senza `destroy_process_group`: torchrun ferma gli altri rank |
 | `Trainer._stop_time_reached` (`trainer.py`) | `SIGNWORLD_STOP_AT` letto ai passi di log | salva `latest`, `fit()` ritorna non finito |
 
 ## Schemi dei dati

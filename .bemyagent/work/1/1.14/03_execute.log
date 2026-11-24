@@ -1,0 +1,2 @@
+riporto da backup/leonardo-1118 (024069c), solo distributed.py e cli/train.py → git apply -3: pulito → la riga written_language di `evaluate` è della centratura per lingua scritta (non riportata): rimessa a caption_language → ruff/mypy/pytest
+ruff format --check → ok; pytest tests/experiment/train/ → 58 passed 5 skipped → 04_verify

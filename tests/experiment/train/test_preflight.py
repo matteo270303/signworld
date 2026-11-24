@@ -13,8 +13,10 @@ from signworld.experiment.train.distributed import SINGLE
 from signworld.experiment.train.preflight import (
     CHECKS,
     PreflightError,
+    PreflightReport,
     Status,
     enforce,
+    overfit_verdict,
     p5_checksums,
     p16_batch,
     run_preflight,
@@ -119,3 +121,96 @@ def test_the_effective_batch_must_be_128(setup) -> None:  # type: ignore[no-unty
 
     assert p16_batch(full, SINGLE, per_gpu=128).status == Status.PASS
     assert p16_batch(full, SINGLE, per_gpu=64).status == Status.FAIL
+
+
+# Loss curves from the cluster: job 64009434 (rank 0, GPU mean not logged) and debug 64003252.
+CLUSTER_64009434 = [
+    4.7295,
+    6.3409,
+    3.5393,
+    2.9891,
+    3.1889,
+    2.5741,
+    2.3490,
+    2.1326,
+    2.0901,
+    2.2841,
+    2.0137,
+    2.2813,
+    1.9046,
+    2.3729,
+    1.8561,
+    2.0191,
+    1.8679,
+    2.4430,
+    2.6783,
+    2.4962,
+    2.7607,
+    2.3851,
+    2.2850,
+    2.3788,
+    2.3608,
+    2.3837,
+    2.3879,
+    2.1979,
+    1.8688,
+    1.7822,
+]
+DEBUG_64003252 = [
+    5.4736,
+    7.0204,
+    4.0831,
+    3.4142,
+    3.4628,
+    2.9534,
+    2.7312,
+    2.5119,
+    2.4424,
+    2.2919,
+    2.1384,
+    2.0434,
+    2.0154,
+    1.9499,
+    1.9153,
+    1.8616,
+    1.7764,
+    1.6563,
+    1.5578,
+    1.5276,
+    1.4422,
+    1.3484,
+    1.3765,
+    1.4348,
+    1.4328,
+    1.2883,
+    1.1669,
+    1.1478,
+    1.0740,
+    1.1050,
+]
+
+
+@pytest.mark.parametrize(
+    ("losses", "status"),
+    [
+        (DEBUG_64003252, Status.PASS),  # halves comfortably
+        (CLUSTER_64009434, Status.PASS),  # last 5 steps 2.12 of 4.73: 0.45
+        ([*CLUSTER_64009434[:-2], 2.54, 2.54], Status.WARN),  # rank 3's ending: falls, no half
+        ([4.0] * 30, Status.FAIL),  # a broken graph: the loss does not move
+        ([4.0, 3.9, 3.8, 3.7, 3.7, 3.7], Status.FAIL),  # 0.93: barely moves
+        ([4.0, *([float("nan")] * 5)], Status.FAIL),
+    ],
+)
+def test_the_overfit_verdict_fails_only_a_loss_that_does_not_fall(losses, status) -> None:  # type: ignore[no-untyped-def]
+    assert overfit_verdict(losses).status == status
+
+
+def test_a_warning_does_not_stop_the_run_a_failure_elsewhere_does(caplog) -> None:  # type: ignore[no-untyped-def]
+    report = PreflightReport([overfit_verdict([*CLUSTER_64009434[:-2], 2.54, 2.54])])
+    assert report.passed
+    with caplog.at_level(logging.WARNING, logger="signworld.experiment.train.preflight"):
+        enforce(report)
+    assert "P13 warn" in caplog.text
+
+    with pytest.raises(PreflightError, match="another GPU"):
+        enforce(PreflightReport([overfit_verdict(DEBUG_64003252)]), failed_elsewhere=True)

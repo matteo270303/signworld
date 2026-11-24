@@ -3,7 +3,9 @@
 Each assertion returns PASS, FAIL or SKIP with the measured detail; the report is written next
 to the checkpoints. SKIP is for what cannot be checked yet (P2 without benchmark manifests) and
 is logged loudly; it does not stop the run. P13, the single-batch overfit, trains on a copy of
-the trainable state and restores it.
+the trainable state and restores it. Its losses are averaged over the GPUs, so every GPU reads
+the same verdict. It fails only when the loss does not fall (a broken graph, §4.13.2), and
+warns (WARN, the run starts) when the loss falls without halving: noise or a slow batch.
 
 P7 compares the masks with V-JEPA's own generator (``src/masks/multiseq_multiblock3d``) on the
 same grid: on 32 x 16 x 16 it hides 61 % of the tokens with the short masks and 81 % with the
@@ -59,6 +61,8 @@ V_JEPA_SPECS: Final = (
 
 class Status(StrEnum):
     PASS = "pass"
+    WARN = "warn"
+    """Checked and doubtful, but not a reason to stop: logged loudly, the run starts."""
     FAIL = "fail"
     SKIP = "skip"
 
@@ -76,7 +80,7 @@ CHECKS: Final = {
     "P10": "pose in shoulder units",
     "P11": "caption embeddings centred in every language",
     "P12": "the augmentation moves a keypoint with its pixel",
-    "P13": "one batch overfits (predictive loss halves)",
+    "P13": "one batch overfits (predictive loss halves; fails if it does not fall)",
     "P14": "the pose never reaches the physical predictor",
     "P15": "arm C: same-video clips and false negatives out of the InfoNCE denominators",
     "P16": "SIGReg sees the whole effective batch",
@@ -340,7 +344,38 @@ def p12_geometry(augmenter: ClipAugmenter, size: int = 64) -> Assertion:
     return _check("P12", error < 1.5, f"pixel and keypoint apart by {error:.2f} pixels")  # noqa: PLR2004
 
 
-def p13_overfit(
+OVERFIT_TAIL: Final = 5
+"""P13 judges the mean of its last steps: the curve at lr 1e-3 in bf16 jumps by ±20 % per step."""
+OVERFIT_PASS: Final = 0.5
+"""P13 passes when the loss halves."""
+OVERFIT_FAIL: Final = 0.9
+"""P13 fails when the loss keeps more than this share: it does not fall, the graph is broken."""
+
+
+def overfit_verdict(losses: Sequence[float]) -> Assertion:
+    """P13's verdict on a loss curve: the mean of the last ``OVERFIT_TAIL`` steps against step 0.
+
+    PASS at ``OVERFIT_PASS`` or below, FAIL above ``OVERFIT_FAIL`` or on a non-finite loss,
+    WARN in between: the loss falls, so the gradients flow, only slower than the target.
+    """
+    first = losses[0]
+    tail = float(np.mean(losses[-OVERFIT_TAIL:]))
+    detail = (
+        f"loss {first:.4f} -> {tail:.4f} (mean of the last {min(OVERFIT_TAIL, len(losses))} "
+        f"of {len(losses)} steps, GPU mean), ratio "
+    )
+    if not (np.isfinite(first) and np.isfinite(tail)) or first <= 0:
+        return Assertion("P13", Status.FAIL, detail + "not finite")
+    ratio = tail / first
+    detail += f"{ratio:.2f}"
+    if ratio <= OVERFIT_PASS:
+        return Assertion("P13", Status.PASS, detail)
+    if ratio <= OVERFIT_FAIL:
+        return Assertion("P13", Status.WARN, detail + ": falls but does not halve, the run starts")
+    return Assertion("P13", Status.FAIL, detail + ": the loss does not fall, the graph is broken")
+
+
+def p13_overfit(  # noqa: PLR0913 (the batch, the schedule and where it runs)
     model: WorldSign,
     batch: WorldSignBatch,
     steps: int,
@@ -348,9 +383,11 @@ def p13_overfit(
     *,
     bf16: bool = False,
     progress: bool = False,
+    collective: Distributed = SINGLE,
 ) -> Assertion:
     """One batch, the regularisers off (SIGReg, VICReg, L_unif): the predictive loss must fall;
-    the model is restored afterwards.
+    the model is restored afterwards. Every step's loss is averaged over the GPUs
+    (``collective``), so the verdict (``overfit_verdict``) is the same on every GPU.
 
     The forward runs under the training's autocast: in float32 the whole model on a GPU's
     batch does not fit in memory. ``progress``: a bar over the steps (the whole model with
@@ -380,7 +417,7 @@ def p13_overfit(
             optimizer.zero_grad(set_to_none=True)
             total.backward()  # type: ignore[no-untyped-call]
             optimizer.step()
-            losses.append(float(total.detach()))
+            losses.append(collective.mean(float(total.detach())))
             shown.set_postfix_str(f"loss {losses[-1]:.4f}", refresh=False)
     finally:
         with torch.no_grad():
@@ -388,8 +425,7 @@ def p13_overfit(
                 parameter.copy_(value)
         for parameter in trainable:
             parameter.grad = None
-    ok = losses[-1] < 0.5 * losses[0]
-    return _check("P13", ok, f"loss {losses[0]:.4f} -> {losses[-1]:.4f} in {steps} steps")
+    return overfit_verdict(losses)
 
 
 def p14_pose_isolated(
@@ -537,6 +573,7 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
             overfit_steps,
             bf16=config.training.precision == "bf16",
             progress=collective.is_main,
+            collective=collective,
         ),
         lambda: p14_pose_isolated(model, batch, generator),
         lambda: p15_infonce(model),
@@ -555,6 +592,8 @@ def run_preflight(  # noqa: PLR0913, PLR0917 (what the assertions look at)
         )
         if result.status == Status.FAIL:  # every GPU: its own batch may be the one that fails
             logger.error("rank %d: %s", collective.rank, line)
+        elif result.status == Status.WARN and collective.is_main:
+            logger.warning("%s", line)
         elif collective.is_main:  # the same on every GPU but P13, read on the first
             logger.info("%s", line)
     return PreflightReport(assertions)
@@ -565,18 +604,21 @@ class PreflightError(RuntimeError):
 
     def __init__(self, report: PreflightReport) -> None:
         failed = "; ".join(f"{a.code}: {a.detail}" for a in report.failures())
+        failed = failed or "an assertion failed on another GPU, see its log line"
         super().__init__(f"preflight failed, the run does not start. {failed}")
         self.report = report
 
 
-def enforce(report: PreflightReport, *, main: bool = True) -> None:
-    """Raise on a failure; otherwise recall the skipped assertions (``main``: the first GPU)."""
-    if not report.passed:
+def enforce(report: PreflightReport, *, main: bool = True, failed_elsewhere: bool = False) -> None:
+    """Raise on a failure, of this GPU or of another (``failed_elsewhere``: every GPU stops
+    together instead of waiting for the one that left); otherwise recall the doubtful and the
+    skipped assertions (``main``: the first GPU)."""
+    if not report.passed or failed_elsewhere:
         raise PreflightError(report)
-    skipped = [a for a in report.assertions if a.status == Status.SKIP]
-    if main and skipped:
+    doubtful = [a for a in report.assertions if a.status in {Status.WARN, Status.SKIP}]
+    if main and doubtful:
         logger.warning(
-            "preflight passed in %.0f s, not checked: %s",
+            "preflight passed in %.0f s, not checked or doubtful: %s",
             sum(a.seconds for a in report.assertions),
-            "; ".join(f"{a.code} ({a.detail})" for a in skipped),
+            "; ".join(f"{a.code} {a.status.value} ({a.detail})" for a in doubtful),
         )

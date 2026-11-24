@@ -1,0 +1,5 @@
+lettura preflight.py (Status, p13_overfit, run_preflight, enforce), run.py, distributed.py (mean, any), provenance (config_hash: niente campi nuovi in config) → edit
+edit preflight.py (Status.WARN, overfit_verdict, p13 con collective.mean, log WARN, enforce failed_elsewhere), run.py (collective.any) → ruff: F541 corretto, PTH105 preesistente (riga 207, verificato con stash) → test
+test nuovi in test_preflight.py (verdetto su curve vere dei log, enforce) → pytest -m "not slow": 12 passed 1 skipped; mypy ok → test lento
+test lento P13 (SIGNWORLD_SLOW_TESTS=1): da FAIL preesistente a WARN su setup tiny, non modificato → 05, 06, 04_verify
+riporto su e78283e (24/11/2026) da backup/leonardo-1118 come 1.13: git apply -3 del solo codice → pulito (.gitignore: conflitto con .bemyagent/log/, tenute entrambe le righe) → verifica

@@ -199,7 +199,9 @@ def run(
     if collective.is_main:
         report.write(output / "preflight.json")
         (output / "config.json").write_text(config.model_dump_json(indent=2) + "\n")
-    enforce(report, main=collective.is_main)
+    # One verdict for every GPU: a failure on one stops them all now, not at the first
+    # collective of the training (job 64009434 waited there for the NCCL timeout).
+    enforce(report, main=collective.is_main, failed_elsewhere=collective.any(not report.passed))
     return trainer.fit()
 
 

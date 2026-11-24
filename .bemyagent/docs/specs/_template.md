@@ -1,6 +1,6 @@
 # [Feature]
 
-**Status**: idea | specced | in-progress | done | dropped
+**Status**: `todo` | `in-progress` | `done` | `blocked — [reason]` | `dropped`
 
 ## Description (one paragraph)
 

@@ -35,6 +35,11 @@
 - **Decisione**: `train run` vero (DDP, 4 GPU, stesso modello e batch per GPU) su `index.debug.parquet` (16 passi per epoca, una epoca per stage), due segmenti da 30 min su `boost_qos_dbg` (il secondo prova anche il resume), un nodo per esperimento.
 - **Compromesso**: i secondi per passo escludono validazioni e diagnostiche; la stima di durata è un minimo.
 
+#### Log delle conversazioni (2026-11-24)
+- **Problema**: il protocollo bemyagent aggiornato prevede `conversationLog` (i messaggi dell'utente, così come scritti, un file al giorno), ma non lo scrive l'agente; le trascrizioni native di Claude Code (`~/.claude/projects/…/*.jsonl`) stanno fuori dal repo, una per sessione e mescolate ai tool.
+- **Decisione**: hook `UserPromptSubmit` in `.claude/settings.json` → `.claude/hooks/log-prompt.sh` appende `## HH:MM · sessione <id>` + messaggio in `.bemyagent/log/YYYY-MM-DD.md`; cartella in `.gitignore`. Non blocca mai il prompt (esce sempre con 0); `conversationLog: ""` lo spegne.
+- **Trade-off**: copre solo le sessioni Claude Code da qui in avanti (scartato per ora il convertitore delle `.jsonl` passate); il log resta locale, non condiviso.
+
 ## Lezioni di ingegneria
 
 - **Indici dei benchmark**: `train index` legge `split_source` dalla configurazione: va lanciato con gli stessi overlay della run (`*_trial.yaml`), altrimenti csl_daily/phoenix14t ricevono split per canale e la valutazione su `test` è vuota.

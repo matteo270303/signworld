@@ -1,0 +1,20 @@
+# Upgrade BEMYAGENT — 2026-11-24 (sorgente: BEMYAGENT.md in root)
+
+## Applicati
+- docs/00-ai-rules.md sostituito con il blocco Step 2 (lettura intera, registrazione unica, precedenza rules > plan > memory, conversationLog, evidenza di assenza, Who verifies)
+- docs/specs/_template.md: Status → `todo` | `in-progress` | `done` | `blocked — [reason]` | `dropped`
+- settings.json: aggiunto "conversationLog": ".bemyagent/log" (valori esistenti preservati)
+- Hook UserPromptSubmit: .claude/settings.json + .claude/hooks/log-prompt.sh (provato: scrive il file del giorno, rc=0)
+- .gitignore: aggiunto .bemyagent/log/
+- docs/03-code-map.md: "Pagine / Route" (N/A) → "CLI" (nuova regola §3 sulle sezioni)
+- docs/05-decisions-and-issues.md: decisione "Log delle conversazioni"
+
+## Saltati (nessuna differenza o noop)
+- decisions/_template.md, drafts/_template.md, work/_template_think.md: identici salvo formattazione
+- Self-Registration: sentinella già in .claude/CLAUDE.md, unico file di regole → noop
+- 06-implementation-plan.md: stati già conformi
+- File estranei: nessuno
+
+## .bak conservati (file modificati)
+- docs/00-ai-rules.md.bak-20261124
+- docs/specs/_template.md.bak-20261124

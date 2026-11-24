@@ -30,3 +30,5 @@ third_party/
 /collaudo/
 .vscode/launch.json
 docs/paperDraft
+# Log delle conversazioni (hook UserPromptSubmit, .claude/hooks/log-prompt.sh)
+.bemyagent/log/

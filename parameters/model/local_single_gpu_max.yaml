@@ -1,0 +1,10 @@
+# Prova locale su UNA sola GPU (la 0, RTX PRO 6000 96 GB) al massimo batch che ci sta.
+# Stage 2 con backward unico costa ~2.0 GiB/clip + ~1.5 GiB fissi (docs/worldsign-gpu.md):
+# 40 clip -> ~82 GiB di picco, ~13 GiB di margine per validazione e diagnostiche (non misurate).
+# 44 sarebbe ~90 GiB: troppo stretto. SIGReg vede 40 clip invece di 128: run di prova, non
+# dell'articolo. Va per ultimo, al posto di local_single_gpu.yaml.
+training:
+  batch_size: 40
+  effective_batch: 40
+data:
+  workers: 16 # una sola GPU, 96 CPU: più decoder per tenere la GPU piena

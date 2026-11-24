@@ -86,6 +86,33 @@ def test_a_short_run_goes_through_every_stage_and_cools_down(tmp_path: Path) -> 
     assert resumed.finished and resumed.step == state.step
 
 
+@slow
+@needs_hub
+def test_past_the_stop_time_the_run_saves_latest_and_the_next_job_finishes_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model, config, train, validation, probe = _setup(tmp_path)
+    output = tmp_path / "run"
+    monkeypatch.setenv("SIGNWORLD_STOP_AT", "0")
+
+    paused = Trainer(
+        model, config, train, validation, output, probe_data=probe, train_subset_data=probe
+    ).fit()
+
+    assert not paused.finished and paused.step == config.training.log_every
+    stored = torch.load(
+        output / "checkpoints" / "latest.pt", map_location="cpu", weights_only=False
+    )
+    assert stored["state"]["step"] == paused.step
+
+    monkeypatch.delenv("SIGNWORLD_STOP_AT")
+    model, config, train, validation, probe = _setup(tmp_path)
+    resumed = Trainer(
+        model, config, train, validation, output, probe_data=probe, train_subset_data=probe
+    ).fit()
+    assert resumed.finished and resumed.cooldown_start is not None
+
+
 @needs_hub
 def test_a_checkpoint_reloads_to_the_same_loss(tmp_path: Path) -> None:
     model, _, train, _, _ = _setup(tmp_path)

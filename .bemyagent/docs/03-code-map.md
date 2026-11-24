@@ -11,9 +11,9 @@
 
 `tests/` rispecchia il pacchetto: `cli/`, `data/`, `experiment/`, `loss/`, `metrics/`, `models/`. Alcuni test richiedono il codice hub di V-JEPA in `checkpoints/hub/...` (`tests/worldsign.py`). Livello di copertura ?
 
-## Pagine / Route
+## CLI
 
-N/A — solo CLI. Ingresso: `signworld.cli:app` (`signworld/cli/__init__.py`), sotto-app in `signworld/cli/{acquisition,corpus,checks,experiment,train}.py`.
+Ingresso: `signworld.cli:app` (`signworld/cli/__init__.py`), sotto-app in `signworld/cli/{acquisition,corpus,checks,experiment,train}.py`.
 
 ## Funzioni chiave
 

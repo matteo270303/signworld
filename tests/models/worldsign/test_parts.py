@@ -58,6 +58,37 @@ def test_inject_replaces_named_linears_and_only_adapters_train() -> None:
     assert trainable == {id(p) for p in adapter_parameters(block)}
 
 
+@pytest.mark.parametrize("splits", [1, 3])
+def test_lora_merges_its_weight_only_where_no_adapter_needs_a_gradient(splits: int) -> None:
+    torch.manual_seed(0)
+    layer = LoRALinear(nn.Linear(32, 48), rank=4, alpha=8.0, splits=splits).double()
+    for up in layer.up:
+        up.data.normal_()
+    x = torch.randn(2, 5, 32, dtype=torch.float64, requires_grad=True)
+    down = torch.cat(list(layer.down), 0)
+    up = torch.block_diag(*layer.up)
+    expected = layer.base(x) + layer.scale * x @ (up @ down).T
+    calls: list[str] = []
+    layer.merged_weight = lambda *a: calls.append("merged") or LoRALinear.merged_weight(layer, *a)  # type: ignore[method-assign]
+
+    with torch.no_grad():  # the semantic pass: merged
+        torch.testing.assert_close(layer(x), expected.detach())
+    assert calls == ["merged"]
+
+    output = layer(x)  # adapters train (F): the low-rank path, so they get their gradient
+    assert calls == ["merged"]
+    torch.testing.assert_close(output, expected)
+    output.sum().backward()
+    assert all(p.grad is not None for p in layer.adapter_parameters())
+
+    expected_grad = x.grad.clone()
+    x.grad = None
+    layer.requires_grad_(False)  # adapters frozen (P, F0), the input still needs its gradient
+    layer(x).sum().backward()
+    assert calls == ["merged", "merged"]
+    torch.testing.assert_close(x.grad, expected_grad)
+
+
 # ----------------------------------------------------------------------------- masks
 
 

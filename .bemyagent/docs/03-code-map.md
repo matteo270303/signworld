@@ -36,6 +36,10 @@ N/A — solo CLI. Ingresso: `signworld.cli:app` (`signworld/cli/__init__.py`), s
 | `slurm/tools/make_debug_index.py`, `slurm/tools/run_report.py` | indice ridotto (2.048 clip di train) per `parameters/model/debug_cluster.yaml`; lettura di debug e stato | `index.debug.parquet`; verdetto OOM per esperimento |
 | `signworld/experiment/collaudo/profiling.py` (`signworld train profile`) | config del run; `--clips`, `--stages P,F0,F` | secondi per passo di ogni sezione (start-end con sync), fasi della clip, clip/s del loader, backend SDPA → `<output>/profile.json` |
 | `compile_blocks` (`models/worldsign/backbone.py`) | blocchi Meta dell'encoder o del predittore fisico; attivo con `encoder.compile_blocks` | `forward` di ogni blocco compilato (dimensioni dinamiche, thread allineati nel ricalcolo del checkpointing) |
+| `lora.MERGE_WITHOUT_GRADIENT` (`models/worldsign/lora.py`) | `LoRALinear` senza gradiente sugli adattatori | un solo prodotto con `W + s·B·A` (passata semantica; P/F0 anche contesto e predittore) |
+| `meta_rope.fuse_rope` (`models/worldsign/meta_rope.py`) | i `RoPEAttention` di Meta, chiamato da `compile_blocks` | rotazione della testa intera, forward Meta per registri/cls/mappa d'attenzione |
+| `apply_views` (`data/augmentation.py`) | frame uint8 + viste (batch, 6) | augmentation del batch intero sulla GPU, senza sync per clip |
+| `scripts/perf/{bench_encoder,bench_augment,trace_step}.py` | modello e config del run | A/B alternati della passata dell'encoder, dell'augmentation; kernel CUDA di un passo |
 | `Trainer._stop_time_reached` (`trainer.py`) | `SIGNWORLD_STOP_AT` letto ai passi di log | salva `latest`, `fit()` ritorna non finito |
 
 ## Schemi dei dati

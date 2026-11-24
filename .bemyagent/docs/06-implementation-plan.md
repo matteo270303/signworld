@@ -18,6 +18,7 @@
 | 1.8 | Profilo del passo per stage e sezione (`signworld train profile`): dove va il tempo di un'epoca (`work/1/1.8/`, draft `lentezza-stage-f.md`) | done — rimisurato a batch 40 in 1.9 |
 | 1.9 | `torch.compile` sui blocchi dell'encoder e del predittore fisico (`encoder.compile_blocks`), -22/-30/-33 % in P/F0/F (`work/1/1.9/`) | done — da provare sul cluster (H100, DDP) |
 | 1.10 | Lingua persa nel centring (`caption_statistics` dedup per riga): KeyError `en-xgJ5vofi3O8` nella run locale youtube_sl25-A-1gpu-b40 (`work/1/1.10/`) | done — da provare alla prossima run (cancellare `statistics.pt` vecchi) |
+| 1.11 | Passo più veloce su 1 GPU a metodo invariato: LoRA fusa senza gradiente, RoPE di Meta in una rotazione, augmentation del batch intero; P/F0/F −17/−18/−13 % a 8 clip (`work/1/1.11/`) | done — da rimisurare a b40 a GPU libera |
 
 ## Backlog (non pianificato)
 

@@ -60,6 +60,13 @@
   3. il ricalcolo gira nel thread di autograd, con un `num_threads` diverso: si allinea prima di ogni chiamata.
 
   `drop_cudnn_attention` ora usa `torch.nn.attention.sdpa_kernel` (stessi backend, cuDNN escluso): niente graph break. Per tornare all'eager basta `encoder.compile_blocks: false`. Ogni forma nuova costa ~5-30 s di compilazione nei primi passi.
+- Passo più veloce a metodo invariato (24/11/2026, task 1.11). Tre lavori ridondanti tolti dal grafo:
+  1. LoRA fusa (`W + s·B·A`, un prodotto invece di tre) quando nessun adattatore chiede gradiente: la LoRA senza gradiente costa quanto l'encoder senza LoRA;
+  2. RoPE di Meta in una rotazione della testa intera (stesse sin/cos, bit a bit in eager), dentro `compile_blocks`;
+  3. augmentation del batch intero senza `tolist()` per clip (3,5×).
+
+  A 8 clip su GPU condivisa: P −17 %, F0 −18 %, F −13 %, memoria uguale. Scartati: `max_autotune` (−3,5 % sulla passata, autotune per forma); cache delle feature in P (cambia il metodo). Aperte e a scelta dell'utente: FP8 sulle GEMM dell'encoder congelato. Le GPU 1-3 della macchina locale sono in modalità di calcolo "Prohibited": si misura solo sulla GPU 0. Dettagli: `docs/drafts/lentezza-stage-f.md`.
+- Fuori dal passo, run `-r3` (24/11/2026): la validazione ogni 4.000 passi dura ~540 s (0,27 s/clip contro 0,065 s/clip del training con backward: rifà il ramo fisico e una seconda passata semantica sul rumore), ~5 % del tempo in P. `latest` si salva solo con la validazione: il resume è ripartito da 24.020 dopo che il run era arrivato a 27.940 (~2,8 h di GPU perse). Da decidere: `latest` più frequente, validazione più leggera in P.
 - In bf16 i gradienti per tensore differiscono molto da fp32 (errore relativo mediano ~1,4, sia eager sia compilato, passo F su 2 clip, 23/11/2026). È preesistente e da capire (cancellazione nei LayerNorm dell'encoder?). Non dipende da `torch.compile`.
 - `tests/experiment/train/test_preflight.py::test_the_checksum_record_is_published_whole` fallisce anche sul codice di HEAD 2a5e9a5 (ordine della lista dei file; verificato il 23/11/2026, preesistente).
 - `test_the_single_batch_overfit_learns_and_restores_the_model` (lento) fallisce: P13 FAIL sul setup tiny, anche su HEAD 23a6edb (verificato il 09/11/2026, preesistente).

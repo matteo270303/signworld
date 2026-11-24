@@ -23,7 +23,7 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 from signworld.experiment.train.config import EncoderSettings
 from signworld.models.encoders.video_encoders import model_input
 
-from . import lora
+from . import lora, meta_rope
 
 
 class VideoBackbone(nn.Module):
@@ -157,6 +157,8 @@ def compile_blocks(blocks: nn.Module) -> None:
     replay the predictor's dropout masks of the forward exactly.
     """
     drop_cudnn_attention()
+    if meta_rope.ENABLED:  # one rotation per q or k instead of six slices
+        meta_rope.fuse_rope(blocks)
     torch._dynamo.config.recompile_limit = max(
         torch._dynamo.config.recompile_limit, RECOMPILE_LIMIT
     )

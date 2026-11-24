@@ -1,0 +1,14 @@
+nvidia-smi → GPU 0 100 %, 597/600 W, worker del loader ~5 % CPU; GPU 1-3 "Prohibited" (cudaErrorDevicesUnavailable) → tutto sulla GPU 0 condivisa, A/B alternati → leggere il codice caldo
+metrics.jsonl r3: passo stazionario 2,61 s, media reale 3,32 s/passo; resume da 27.940 a 24.020 (latest solo ogni 4.000 passi) e ~540 s per validazione (0,27 s/clip contro 0,065 in training) → leve fuori dal passo, da proporre
+lora.py: 3 prodotti per strato (base, x·Aᵀ, addmm_) anche senza gradiente → prototipo MERGE_WITHOUT_GRADIENT → bench_encoder
+bench_encoder 4 clip (passata semantica, mediane di 10 giri): eager 0,516, compilato 0,431, compilato+fusa 0,368, senza LoRA 0,365 s → la LoRA costa 0 senza gradiente → test e profilo del passo
+test_lora_merges_its_weight_only_where_no_adapter_needs_a_gradient (split 1 e 3) → pass
+train profile 8 clip, fusione off/on: P 1,143→1,057, F0 2,690→2,391, F 3,765→3,535 s → traccia dei kernel: RoPE ~8 %, augment 6,7 % di P
+apply_views: ciclo per clip, View.from_tensor(...).tolist() = 1 sync per clip → vettorizzata; bench_augment 20 clip: 257→74 ms, 75 byte su 251 M a ±1 → test bit a bit a taglia piccola
+meta_rope.fuse_rope: una rotazione della testa con tabelle di Meta → test bit a bit (fp32/bf16, con/senza maschera, testa da 64) → bench: fusa 0,368 → fusa+RoPE 0,339 s (−21 % sul compilato di oggi)
+max_autotune: 0,340 → 0,328 s (−3,5 %), autotune per forma → scartato
+pytest slow (models, data, experiment): 208 pass, 4 fail; i 4 falliscono identici con i sorgenti di HEAD (collaudo/, nomi di stage, due di preflight) → preesistenti
+ruff/mypy sui file toccati → puliti (block_diag in lora.py: preesistente)
+train profile 8 clip, tutto attivo: P 0,945, F0 2,207 s (−17/−18 %) → F in corso
+train profile 8 clip, tutto attivo: F 3,765 → 3,276 s (−13 %), 14,1 GiB, nessun CheckpointError → traccia dei kernel di F
+trace_step F 4 clip: flash 39 % (fwd 22, bwd 17; testa 32 nei predittori), GEMM 29 %, elementwise ~15 % → F vicino al limite dei kernel; torch 2.14+cu130 con sm_120 nativo (cutlass_80 = famiglia mma.sync, non fallback) → leve rimaste nel draft, chiusura

@@ -84,20 +84,39 @@ def apply_views(frames: Tensor, views: Tensor) -> Tensor:
 
     The same function as ``ClipAugmenter.frames``, run where the frames are (the GPU in
     training): the data loader draws the views and moves keypoints and boxes, which is cheap,
-    and leaves the frames, whose resampling costs ~0.4 s per clip on a CPU.
+    and leaves the frames, whose resampling costs ~0.4 s per clip on a CPU. The whole batch
+    is one resampling and one recolouring, the views read on the device: no clip-by-clip
+    loop, no wait for the GPU: 3.5x faster (``scripts/perf/bench_augment.py``). Equal bit for
+    bit on small clips (``tests/data/test_augmentation.py``); at 64 x 256² the per-frame mean
+    may sum in another order, and ~1 byte in 3 million lands one grey level away.
     """
-    return torch.stack(
-        [
-            ClipAugmenter.frames(clip, View.from_tensor(view))
-            for clip, view in zip(frames, views, strict=True)
-        ]
-    )
+    batch, steps = frames.shape[:2]
+    video = frames.flatten(0, 1).permute(0, 3, 1, 2).float() / 255.0
+    per_frame = views.to(video.device).repeat_interleave(steps, dim=0)  # (batch·T, 6)
+    # theta as ClipAugmenter.frames builds it: 1/scale in double precision, then float.
+    theta = torch.zeros(len(video), 2, 3, device=video.device)
+    theta[:, 0, 0] = theta[:, 1, 1] = (1.0 / per_frame[:, 0].double()).float()
+    theta[:, 0, 2] = 2.0 * per_frame[:, 1]
+    theta[:, 1, 2] = 2.0 * per_frame[:, 2]
+    grid = functional.affine_grid(theta, list(video.shape), False)
+    video = functional.grid_sample(video, grid, align_corners=False, padding_mode="zeros")
+    factor = per_frame[:, 3:, None, None, None]  # brightness, contrast, saturation
+    video = _colour_by(video, factor[:, 0], factor[:, 1], factor[:, 2])
+    video = (video.clamp(0, 1) * 255.0).round().to(torch.uint8).permute(0, 2, 3, 1)
+    return video.reshape(batch, steps, *video.shape[1:])
 
 
 def _colour(video: Tensor, view: View) -> Tensor:
     """Brightness, contrast and saturation, the same for every frame of the clip."""
-    video = video * view.brightness
+    return _colour_by(video, view.brightness, view.contrast, view.saturation)
+
+
+def _colour_by(
+    video: Tensor, brightness: Tensor | float, contrast: Tensor | float, saturation: Tensor | float
+) -> Tensor:
+    """``_colour`` with factors that are numbers or (frames, 1, 1, 1) tensors."""
+    video = video * brightness
     mean = video.mean(dim=(1, 2, 3), keepdim=True)
-    video = (video - mean) * view.contrast + mean
+    video = (video - mean) * contrast + mean
     grey = (0.299 * video[:, 0] + 0.587 * video[:, 1] + 0.114 * video[:, 2])[:, None]
-    return (video - grey) * view.saturation + grey
+    return (video - grey) * saturation + grey

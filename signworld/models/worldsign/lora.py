@@ -16,6 +16,11 @@ import torch
 from torch import Tensor, nn
 from torch.nn.utils import parametrize
 
+MERGE_WITHOUT_GRADIENT = True
+"""Run an adapted layer whose adapters need no gradient as one product with the merged weight
+``W + scale · B A`` instead of three (base, ``x A^T``, ``addmm_``): same function, a third of
+the memory traffic of the extra products (``scripts/perf/bench_encoder.py``)."""
+
 
 class LoRALinear(nn.Module):
     """A frozen ``nn.Linear`` plus ``splits`` independent low-rank adapters on its output."""
@@ -48,15 +53,22 @@ class LoRALinear(nn.Module):
         per-slice updates is one matmul, accumulated in place by ``addmm_`` with the scale.
         This is the same function as the per-adapter formula (the parameters are unchanged).
         """
-        output: Tensor = self.base(x)
-        dtype = output.dtype
         if len(self.down) == 1:
             down, up = self.down[0], self.up[0]
         else:
             down, up = torch.cat(list(self.down), 0), torch.block_diag(*self.up)
+        if MERGE_WITHOUT_GRADIENT and not (torch.is_grad_enabled() and down.requires_grad):
+            return nn.functional.linear(x, self.merged_weight(down, up), self.base.bias)
+        output: Tensor = self.base(x)
+        dtype = output.dtype
         hidden = (x @ down.to(dtype).T).reshape(-1, down.shape[0])
         output.view(-1, output.shape[-1]).addmm_(hidden, up.to(dtype).T, alpha=self.scale)
         return output
+
+    def merged_weight(self, down: Tensor, up: Tensor) -> Tensor:
+        """``W + scale · B A`` in the weight's own precision, outside autocast."""
+        with torch.autocast(down.device.type, enabled=False):
+            return torch.addmm(self.base.weight, up, down, alpha=self.scale)
 
     def adapter_parameters(self) -> list[nn.Parameter]:
         return [*self.down, *self.up]

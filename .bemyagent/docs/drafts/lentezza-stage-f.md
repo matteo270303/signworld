@@ -164,3 +164,40 @@ uv run --no-sync signworld train run $CFG -c tmp/rare_val.yaml --output tmp/prof
 - Ipotesi 2: forzare flash nel predittore o raggruppare le due passate di maschera. Il salto di F0 suggerisce
   2-3 s/step.
 - Ipotesi 3: alzare `validation_every` nelle trial: circa -2 s/step in F.
+
+---
+
+## Task 1.11 (24/11/2026): lavoro ridondante tolto dal passo, metodo invariato
+
+GPU 1-3 in modalità "Prohibited": tutto misurato sulla GPU 0, **condivisa con il run `-r3` al 100 %**. Contano i rapporti (A/B alternati), non i tempi assoluti.
+
+**Passata semantica (encoder intero senza grad, 4 clip, `scripts/perf/bench_encoder.py`):** eager 0,516 s → compilato (1.9) 0,431 → + LoRA fusa 0,368 → + RoPE fuso **0,339 (−21 %)**. Senza LoRA: 0,365, quindi ora la LoRA senza gradiente non costa nulla. `max_autotune` −3,5 %: scartato.
+
+**Passo intero (`train profile`, 8 clip):**
+
+| stage | 1.9 | 1.11 | Δ | picco |
+|---|---|---|---|---|
+| P | 1,143 | 0,945 | −17 % | 7,8 GiB |
+| F0 | 2,690 | 2,207 | −18 % | 11,7 GiB |
+| F | 3,765 | 3,276 | −13 % | 14,1 GiB |
+
+Se i rapporti reggono a b40 (sono **da rimisurare a GPU libera**): P 2,58 → ~2,14 s, F0 6,26 → ~5,1, F 8,37 → ~7,3. Il piano a 15 epoche passa da ~730 h a ~635 h (−4 giorni su una GPU).
+
+**Dove va ora un passo F** (traccia dei kernel, 4 clip, `scripts/perf/trace_step.py`): attention flash 39 % (forward 22 %, backward 17 %; testa da 32 nei predittori, poco efficiente), GEMM 29 %, elementwise (gelu, RoPE, LayerNorm) ~15 %. Sono kernel già al limite: dentro F non resta molto lavoro inutile da togliere.
+
+### Leve rimaste
+
+| leva | stima | cambia il metodo? |
+|---|---|---|
+| `latest` più frequente (oggi solo ogni 4.000 passi ≈ 2,9 h in P, 9 h in F); r3 ha perso 3.920 passi al resume | 0 per passo, fino a ore per interruzione | no |
+| validazione più leggera: oggi ~540 s ogni 4.000 passi (0,27 s/clip, 4× il training con backward), cioè ~5 % in P e ~1,6 % in F. In P rifà il ramo fisico non addestrato e una seconda passata semantica sul rumore | −3-5 % in P | solo le letture diagnostiche |
+| FP8 sulle GEMM del ViT congelato (passata semantica + base dei LoRA) | GEMM 2× → −10-15 % | sì: numerica delle feature |
+| compile del predittore semantico (eager, ~7 % di P) | −2-3 % in P | no |
+| LoRA con forward fuso anche in addestramento (autograd custom: un prodotto in forward e nel ricalcolo) | −3-5 % in F, stima | no, ma rischio con checkpoint + compile |
+| leve 1-3 sopra (epoche di F, token della passata semantica, checkpointing selettivo) | le più grandi | sì |
+
+### Multi-GPU (solo analisi, agente in sola lettura)
+
+DDP non è il collo di bottiglia: in F ~22 M parametri addestrabili, cioè 88 MB di allreduce fp32, < 0,1 % del passo e sovrapposto al backward. Le collective di SIGReg e SyncBN sono piccole, ma fanno da barriera a metà forward: lì emergono gli sbilanciamenti fra i rank (maschere diverse per rank → numero di token visibili diverso). Efficienza attesa 90-95 %: le ottimizzazioni single-GPU si trasferiscono quasi 1:1.
+
+Vincolo vero: 32 clip/GPU in F non entrano in A100 da 64 GB (`docs/worldsign-gpu.md`). Leve a basso sforzo: `static_graph=True` (0-2 %); `diagnostic_clips` diviso per il numero di GPU; un solo allreduce vettoriale in `_log_step`; ID dei video come tensore invece di `gather_objects` nel braccio C.
